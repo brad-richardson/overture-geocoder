@@ -115,30 +115,53 @@ def load_probes(cases_path: Path, run_path: Path) -> list[dict]:
     return probes
 
 
-def name_hits(probe: dict, names: list[str]) -> tuple[list[str], list[str]]:
-    """``(exact matches, containment-only matches)``.
+def name_hits(probe: dict, names: list[str]) -> dict[str, list[str]]:
+    """Matches split by strength AND by which accepted name they matched.
 
-    The two are NOT interchangeable and conflating them overstates the result.
-    Containment accepts an entity merely NAMED AFTER the target: `Discovery
+    Two independent distinctions, both load-bearing.
+
+    STRENGTH. Exact-normalized equality is confident; containment is not,
+    because it accepts an entity merely NAMED AFTER the target -- `Discovery
     Times Square` (a museum) matches the query `Times Square`, and `MoneyMax
-    Pawnshop - Marsiling MRT Station` matches `MARSILING MRT STATION`. Counting
-    those as evidence that the target is indexed turns "the landmark is missing"
-    into "the serving path is broken", which sends work to the wrong place.
+    Pawnshop - Marsiling MRT Station` matches `MARSILING MRT STATION`.
 
-    So exact-normalized equality is reported as the confident tier and
-    containment as the weak one, and any verdict resting only on containment is
-    flagged rather than trusted.
+    WHICH NAME. A case carries `expected_name` plus optional `alt_names`, and a
+    match on an alt name does NOT mean the QUERIED string is indexed. Four Hong
+    Kong cases were counted IN_HEAD on this basis: each is queried in Chinese
+    while its `alt_names` carries the English name Overture actually holds, and
+    the source has an English `names.primary` with a null `names.common`, so no
+    Chinese string exists to index at all. Under the string the user typed those
+    entities are ABSENT, and reporting them as indexed sent work to the wrong
+    place.
     """
-    accepted = [n for n in (probe["expected_name"], *probe["alt_names"]) if n]
-    exact, loose = [], []
+    queried = [n for n in (probe["expected_name"],) if n]
+    alternates = [n for n in probe["alt_names"] if n]
+    found = {"exact": [], "loose": [], "alt_exact": [], "alt_loose": []}
     for name in names:
         if not name:
             continue
-        if any(normalize_name(name) == normalize_name(a) for a in accepted):
-            exact.append(name)
-        elif any(_names_contain(name, a) for a in accepted):
-            loose.append(name)
-    return exact, loose
+        if any(normalize_name(name) == normalize_name(a) for a in queried):
+            found["exact"].append(name)
+        elif any(_names_contain(name, a) for a in queried):
+            found["loose"].append(name)
+        elif any(normalize_name(name) == normalize_name(a) for a in alternates):
+            found["alt_exact"].append(name)
+        elif any(_names_contain(name, a) for a in alternates):
+            found["alt_loose"].append(name)
+    return found
+
+
+def classify(found: dict[str, list[str]]) -> tuple[bool, str]:
+    """``(matched at all, strength label)`` for one field's matches."""
+    if found["exact"]:
+        return True, "EXACT"
+    if found["loose"]:
+        return True, "CONTAINMENT_ONLY"
+    if found["alt_exact"]:
+        return True, "ALT_NAME_ONLY"
+    if found["alt_loose"]:
+        return True, "ALT_NAME_CONTAINMENT"
+    return False, "NONE"
 
 
 def main(argv=None) -> int:
@@ -207,18 +230,19 @@ def main(argv=None) -> int:
     for probe in probes:
         corpus_names = corpus.get(probe["case_id"], [])
         head_pairs = head.get(probe["case_id"], [])
-        corpus_exact, corpus_loose = name_hits(probe, corpus_names)
-        head_exact, head_loose = name_hits(probe, [n for n, _ in head_pairs])
-        corpus_matched = corpus_exact + corpus_loose
-        head_matched = head_exact + head_loose
-        if head_matched:
-            verdict = "IN_HEAD"
-        elif corpus_matched:
-            verdict = "NOT_ADMITTED"
+        corpus_found = name_hits(probe, corpus_names)
+        head_found = name_hits(probe, [n for n, _ in head_pairs])
+        head_hit, head_strength = classify(head_found)
+        corpus_hit, corpus_strength = classify(corpus_found)
+        if head_hit:
+            verdict, strength = "IN_HEAD", head_strength
+        elif corpus_hit:
+            verdict, strength = "NOT_ADMITTED", corpus_strength
         else:
-            verdict = "ABSENT"
-        strength = ("EXACT" if (head_exact if head_matched else corpus_exact)
-                    else ("CONTAINMENT_ONLY" if verdict != "ABSENT" else "NONE"))
+            verdict, strength = "ABSENT", "NONE"
+        matched = head_found if head_hit else corpus_found
+        names_matched = (matched["exact"] + matched["loose"]
+                         + matched["alt_exact"] + matched["alt_loose"])
         verdicts.append({
             **{k: probe[k] for k in
                ("case_id", "query", "expected_name", "expected_feature_type",
@@ -226,11 +250,10 @@ def main(argv=None) -> int:
             "verdict": verdict,
             "match_strength": strength,
             "corpus_rows_near": len(corpus_names),
-            "corpus_name_matches": corpus_matched[:3],
             "head_rows_near": len(head_pairs),
-            "head_name_matches": head_matched[:3],
+            "matched_names": names_matched[:3],
             "head_tokens": sorted({t for n, t in head_pairs
-                                   if n in set(head_matched)})[:8],
+                                   if n in set(names_matched)})[:8],
         })
 
     # Locality cases are answered by the DIVISION lane, not the Places head.
@@ -248,21 +271,34 @@ def main(argv=None) -> int:
     for verdict in misses:
         counts[verdict["verdict"]] = counts.get(verdict["verdict"], 0) + 1
 
-    print("\n=== MISSES by verdict (exact-name / containment-only) ===")
+    print("\n=== MISSES by verdict and match strength ===")
     for name in ("ABSENT", "NOT_ADMITTED", "IN_HEAD"):
         subset = [v for v in misses if v["verdict"] == name]
-        strong = sum(1 for v in subset if v["match_strength"] == "EXACT")
         share = 100 * len(subset) / len(misses) if misses else 0
-        detail = "" if name == "ABSENT" else f"   {strong} exact, {len(subset) - strong} containment-only"
-        print(f"  {name:<14} {len(subset):>4}  ({share:.1f}%){detail}")
-    weak = [v for v in misses
-            if v["verdict"] != "ABSENT" and v["match_strength"] != "EXACT"]
-    if weak:
-        print(f"\n  {len(weak)} verdicts rest on containment alone and may be an "
-              "entity merely NAMED AFTER the target:")
-        for v in weak[:6]:
-            found = (v["head_name_matches"] or v["corpus_name_matches"])[:1]
-            print(f"    {v['query'][:34]:<34} -> {found}")
+        line = f"  {name:<14} {len(subset):>4}  ({share:.1f}%)"
+        if name != "ABSENT":
+            by: dict[str, int] = {}
+            for v in subset:
+                by[v["match_strength"]] = by.get(v["match_strength"], 0) + 1
+            line += "   " + ", ".join(
+                f"{key.lower()} {count}" for key, count in sorted(by.items()))
+        print(line)
+
+    # Only EXACT on the QUERIED name is confident. Everything else is a claim
+    # needing eyes, and conflating them is how the first run overstated the
+    # Worker-fixable class by roughly 4x.
+    for label, keys in (
+        ("containment only -- may be an entity NAMED AFTER the target",
+         {"CONTAINMENT_ONLY"}),
+        ("an ALT name, not the queried string -- the queried name may be absent",
+         {"ALT_NAME_ONLY", "ALT_NAME_CONTAINMENT"}),
+    ):
+        weak = [v for v in misses
+                if v["verdict"] != "ABSENT" and v["match_strength"] in keys]
+        if weak:
+            print(f"\n  {len(weak)} verdicts rest on {label}:")
+            for v in weak[:6]:
+                print(f"    {v['query'][:32]:<32} -> {v['matched_names'][:1]}")
 
     # Calibration: the same test run against cases the system DID solve. A test
     # that cannot find known-present entities is measuring its own blind spot,
