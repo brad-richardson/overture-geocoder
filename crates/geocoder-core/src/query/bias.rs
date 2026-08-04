@@ -117,6 +117,7 @@ mod tests {
             country: country.map(String::from),
             region: None,
             population: None,
+            search_name: None,
         }
     }
 

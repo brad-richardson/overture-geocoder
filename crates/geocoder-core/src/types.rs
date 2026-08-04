@@ -129,6 +129,14 @@ pub struct GeocoderResult {
     /// Population (if available).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub population: Option<i64>,
+    /// The row's searchable names (`;`-separated primary + alternates/
+    /// exonyms), carried through from [`DivisionRow::search_name`] so callers
+    /// can tell *which* name matched. `None` on legacy shards.
+    ///
+    /// Never serialized: this is an internal matching aid, not part of the
+    /// public result shape.
+    #[serde(skip)]
+    pub search_name: Option<String>,
 }
 
 /// Raw division row from the database.
@@ -179,6 +187,7 @@ impl DivisionRow {
             country: self.country,
             region: self.region,
             population: self.population,
+            search_name: self.search_name,
         }
     }
 }

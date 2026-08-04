@@ -100,6 +100,15 @@ pub(crate) const ENTITY_PHRASE_ADMISSION: &str = "prominence-primary-name-v1";
 /// three-token query, its two-token prefix). Routed lookup retains its
 /// independent four-token cap.
 pub(crate) const HEAD_QUERY_TOKEN_CAP: usize = 3;
+/// Widest query the additive prefix-head fallback attempts. A tail longer than
+/// three dropped tokens is not a POI name with a category or locality suffix,
+/// which is the class this fallback exists for.
+pub(crate) const PREFIX_HEAD_FALLBACK_TOKEN_CAP: usize = 6;
+/// Verified survivors returned by the prefix-head fallback. The prefix probe is
+/// already bounded by the head producer caps (at most three ordinary postings of
+/// ten plus two phrase postings of ten = fifty pre-verification candidates);
+/// this caps what a single fallback contributes to assembly.
+const PREFIX_HEAD_FALLBACK_RESULT_CAP: usize = HEAD_RESULT_CAP;
 const ENTITY_PHRASE_GROUP_CAP: usize = 2;
 const HEAD_CANDIDATE_CAP: usize = 256;
 const MAX_ROUTING_CELLS: usize = 65_536;
@@ -1275,19 +1284,8 @@ fn merge_bounded_candidates(
             if !saturated[token_index] {
                 return false;
             }
-            let tokens = display_tokens.get_or_insert_with(|| {
-                [
-                    &candidate.record.primary_name,
-                    &candidate.record.brand_name,
-                    &candidate.record.category,
-                    &candidate.record.locality,
-                    &candidate.record.region,
-                    &candidate.record.country,
-                ]
-                .into_iter()
-                .flat_map(|value| crate::places_pages::query_terms(value))
-                .collect::<HashSet<_>>()
-            });
+            let tokens =
+                display_tokens.get_or_insert_with(|| record_display_tokens(&candidate.record));
             tokens.contains(token)
         });
         if matches {
@@ -1309,6 +1307,65 @@ fn merge_bounded_candidates(
             .then_with(|| left.source_row_index.cmp(&right.source_row_index))
     });
     Ok(results.into_iter().map(|(record, _)| record).collect())
+}
+
+/// Every normalized word a record's stored display/projection fields carry.
+///
+/// This is the evidence the saturated-posting relaxation in
+/// `merge_bounded_candidates` uses to prove a query token from a record that was
+/// evicted from a full producer posting. It is the same proof the prefix-head
+/// fallback needs for the tokens it dropped, so the two share one definition.
+fn record_display_tokens(record: &PlacesV1Record) -> HashSet<String> {
+    [
+        &record.primary_name,
+        &record.brand_name,
+        &record.category,
+        &record.locality,
+        &record.region,
+        &record.country,
+    ]
+    .into_iter()
+    .flat_map(|value| crate::places_pages::query_terms(value))
+    .collect()
+}
+
+/// Split a no-proximity query too wide for the global head into the three-token
+/// prefix the head can actually probe and the tail that probe drops.
+///
+/// `None` for anything the head lane already serves (<= 3 tokens) and for
+/// anything wider than `PREFIX_HEAD_FALLBACK_TOKEN_CAP`.
+pub(crate) fn prefix_head_fallback_split(tokens: &[String]) -> Option<(&[String], &[String])> {
+    if !(HEAD_QUERY_TOKEN_CAP + 1..=PREFIX_HEAD_FALLBACK_TOKEN_CAP).contains(&tokens.len()) {
+        return None;
+    }
+    Some(tokens.split_at(HEAD_QUERY_TOKEN_CAP))
+}
+
+/// Fail-closed verification for the prefix-head fallback.
+///
+/// A three-token prefix probe answers a question nobody asked: it proves only
+/// that the record matches `X Y Z`, not that it matches `X Y Z W`. Keep a
+/// candidate only when EVERY dropped token is proven by the record's own stored
+/// display fields — the same proof the saturated-posting relaxation accepts, and
+/// the same tokenizer on both sides. Nothing else may admit a record here; an
+/// empty tail is a caller error and yields nothing rather than an unverified
+/// prefix search.
+pub(crate) fn retain_records_proving_dropped_tokens(
+    records: Vec<PlacesV1Record>,
+    dropped: &[String],
+) -> Vec<PlacesV1Record> {
+    if dropped.is_empty() {
+        return Vec::new();
+    }
+    let mut verified: Vec<PlacesV1Record> = records
+        .into_iter()
+        .filter(|record| {
+            let display = record_display_tokens(record);
+            dropped.iter().all(|token| display.contains(token))
+        })
+        .collect();
+    verified.truncate(PREFIX_HEAD_FALLBACK_RESULT_CAP);
+    verified
 }
 
 /// Merge routed `(cell, token)` postings, each capped at 256 records.
@@ -1718,12 +1775,12 @@ mod tests {
         compose_entity_phrase_candidates, construction_cell, decode_routed_range_payload,
         entity_phrase_key, entity_phrase_token_groups, head_shard_id, head_shard_lookup,
         index_hash, lookup_head_shard, merge_head_candidates, merge_routed_candidates,
-        parse_routed_range_header, parse_routed_range_index, query_key, ranged_index_candidates,
-        record_projection, routed_fetch_plan, routed_lookup, routed_token_hash,
-        validate_entity_phrase_records, validate_routed_range_payload_extent, HeadRoutingManifest,
-        PlacesRouting, PlacesV1Artifact, PlacesV1Mode, PlacesV1RangeIndex, PlacesV1Record,
-        PlacesV1Version, ENTITY_PHRASE_ADMISSION, MAX_ARTIFACT_ENTRY_BYTES,
-        PLACES_HEAD_MANIFEST_SCHEMA, PLACES_ROUTING_SCHEMA,
+        parse_routed_range_header, parse_routed_range_index, prefix_head_fallback_split, query_key,
+        ranged_index_candidates, record_projection, retain_records_proving_dropped_tokens,
+        routed_fetch_plan, routed_lookup, routed_token_hash, validate_entity_phrase_records,
+        validate_routed_range_payload_extent, HeadRoutingManifest, PlacesRouting, PlacesV1Artifact,
+        PlacesV1Mode, PlacesV1RangeIndex, PlacesV1Record, PlacesV1Version, ENTITY_PHRASE_ADMISSION,
+        MAX_ARTIFACT_ENTRY_BYTES, PLACES_HEAD_MANIFEST_SCHEMA, PLACES_ROUTING_SCHEMA,
     };
     use serde_json::{json, Value};
     use sha2::{Digest, Sha256};
@@ -2682,6 +2739,103 @@ mod tests {
                 .unwrap();
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].id, format_uuid_of(999));
+    }
+
+    #[test]
+    fn prefix_head_fallback_split_covers_exactly_four_to_six_tokens() {
+        let tokens = |value: &str| value.split(' ').map(str::to_string).collect::<Vec<_>>();
+        // Widths the ordinary head lane already serves stay untouched, so the
+        // fallback can never contribute to a query that produced a result.
+        assert!(prefix_head_fallback_split(&[]).is_none());
+        assert!(prefix_head_fallback_split(&tokens("yishun mrt station")).is_none());
+        assert!(prefix_head_fallback_split(&tokens("a b c d e f g")).is_none());
+
+        let station = tokens("geylang bahru mrt station");
+        let (head, dropped) = prefix_head_fallback_split(&station).expect("four tokens split");
+        assert_eq!(head, ["geylang", "bahru", "mrt"]);
+        assert_eq!(dropped, ["station"]);
+        assert_eq!(head.len(), super::HEAD_QUERY_TOKEN_CAP);
+
+        let six = tokens("a b c d e f");
+        let (head, dropped) = prefix_head_fallback_split(&six).expect("six tokens split");
+        assert_eq!(head.len(), 3);
+        assert_eq!(dropped, ["d", "e", "f"]);
+    }
+
+    #[test]
+    fn prefix_head_fallback_admits_only_records_proving_every_dropped_token() {
+        let named = |name: &str, id: u128| {
+            let mut record = entry_record("mrt", 255, id);
+            record.primary_name = name.to_string();
+            record
+        };
+        let dropped = vec!["station".to_string()];
+
+        // The prefix probe retrieved the station; its stored primary name
+        // proves the token the probe dropped.
+        let kept = retain_records_proving_dropped_tokens(
+            vec![named("Geylang Bahru MRT Station", 1)],
+            &dropped,
+        );
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].id, format_uuid_of(1));
+
+        // Same prefix, no proof of the tail: a three-token prefix match is not
+        // an answer to the four-token query.
+        assert!(retain_records_proving_dropped_tokens(
+            vec![named("Geylang Bahru MRT Exit A", 2)],
+            &dropped,
+        )
+        .is_empty());
+
+        // Every dropped token must be proven, not merely one of them. The
+        // record's context fields carry "Town", so "station" alone decides it.
+        let two_dropped = vec!["town".to_string(), "station".to_string()];
+        assert!(retain_records_proving_dropped_tokens(
+            vec![named("Geylang Bahru MRT Exit A", 3)],
+            &two_dropped,
+        )
+        .is_empty());
+        assert_eq!(
+            retain_records_proving_dropped_tokens(
+                vec![named("Geylang Bahru MRT Station", 4)],
+                &two_dropped,
+            )
+            .len(),
+            1
+        );
+
+        // A dropped token may be proven by any stored display field, not just
+        // the primary name: category "restaurant", locality "Town", country
+        // "XX" are all part of the record's own evidence.
+        assert_eq!(
+            retain_records_proving_dropped_tokens(
+                vec![named("Geylang Bahru MRT", 5)],
+                &["restaurant".to_string()],
+            )
+            .len(),
+            1
+        );
+
+        // Fail closed: with no dropped tail this would be an unverified prefix
+        // search, so it returns nothing at all.
+        assert!(
+            retain_records_proving_dropped_tokens(vec![named("Geylang Bahru MRT", 6)], &[])
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn prefix_head_fallback_output_is_bounded_by_the_head_result_cap() {
+        let verified: Vec<_> = (1..=50)
+            .map(|id| {
+                let mut record = entry_record("mrt", 255, id);
+                record.primary_name = "Geylang Bahru MRT Station".to_string();
+                record
+            })
+            .collect();
+        let kept = retain_records_proving_dropped_tokens(verified, &["station".to_string()]);
+        assert_eq!(kept.len(), super::PREFIX_HEAD_FALLBACK_RESULT_CAP);
     }
 
     #[test]

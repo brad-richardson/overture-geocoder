@@ -75,6 +75,7 @@ mod tests {
             country: None,
             region: None,
             population: None,
+            search_name: None,
         }
     }
 
