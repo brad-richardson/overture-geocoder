@@ -268,3 +268,51 @@ of three or more characters can only match a record whose normalized run is
 exactly the query, and can never reach a longer name. No case in this set is
 explained by it alone, but it will bite other CJK queries. Fix side is Worker;
 the read-cost of adding bigram clauses is not determined.
+
+---
+
+# Post-deploy: the compound-category fix helps ONE case, not six
+
+Measured against production after deploy (`geocoder_build 2026-08-03.0`,
+`overture_release 2026-06-17.0`).
+
+`GEYLANG BAHRU MRT STATION` now resolves. Debug metadata confirms the intended
+path fired end to end:
+
+```
+places_prefix_head_fallback: {probe_query: "geylang bahru mrt",
+                              verification: "display_fields",
+                              verified_tokens: ["station"]}
+```
+
+The other five stations in the class still return empty, and the reason is that
+**Overture's category assignment for them is inconsistent**:
+
+| entity | category | proves "station"? |
+|---|---|---|
+| Geylang Bahru MRT | `train_station` | yes — fixed |
+| Upper Thomson MRT | `transportation` | no |
+| Marine Parade MRT | `tours` | no |
+| Bukit Panjang | `structure_and_geography` | no |
+| Labrador Park | `park` | no |
+
+The fix relaxes the dropped-token proof to accept a COMPONENT of a compound
+token, so it only reaches a record whose category literally contains the
+dropped word. `transportation` does not contain `station` as a component (it is
+a substring, and substrings are deliberately not proof), and `tours` and `park`
+carry no relevant evidence at all.
+
+So the earlier claim that this accounted for six cases was wrong: it accounts
+for **one**. The remaining five have no evidence anywhere in the record that
+proves the queried tail, and closing them would need either a category-synonym
+map (which `tours` and `park` defeat anyway) or abandoning the
+prove-every-dropped-token rule, which is a deliberate fail-closed contract. On
+the current source data they are better classified with the source-quality
+cases than with serving defects.
+
+Revised Worker-fixable count on the everyday set: **1**, not 6 and not 23.
+
+One incidental finding worth keeping: the first post-deploy probe returned EMPTY
+for a query that in fact worked. Adding `debug=1` changed the URL and returned
+the correct answer. That was a stale EDGE-CACHED response, so any post-deploy
+verification must cache-bust or it will measure the previous build.
