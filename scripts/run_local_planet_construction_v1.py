@@ -85,6 +85,23 @@ def human(seconds: float) -> str:
     return f"{seconds / 60:.1f}m"
 
 
+def store_for(work: Path, phase: str) -> Path:
+    """This phase's LOCAL store directory -- one per phase, never shared.
+
+    A hosted phase runs on a fresh runner with an empty store and hydrates only
+    the keys its markers name, and several guards are written against exactly
+    that shape. In particular the head phase's disk check measures the whole
+    store root as its "hydrated candidate cache". Share one directory across
+    phases and head is charged for map's and reduce's output too: on this
+    planet run that was 110.5 GB (serve 39 + map 38 + reduce 28) against an
+    18.25 GB cap, so head failed on disk it never touched. That is a harness
+    bug, not a pipeline bug, and per-phase roots are the fix.
+    """
+    root = work / f"store-{phase}"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
 def map_one(task_index: int, work: Path, inventory: Path, contract: Path,
             store_root: Path, staging: Path, markers: Path,
             evidence_spec: Path) -> dict:
@@ -178,7 +195,6 @@ def main(argv=None) -> int:
     markers = work / "markers"
     markers.mkdir(exist_ok=True)
     staging = work / "staging"
-    store = work / "store"
 
     mirror = os.environ.get("OVERTURE_SOURCE_MIRROR")
     print(f"release      {args.release}")
@@ -226,8 +242,9 @@ def main(argv=None) -> int:
     total_records = 0
     with concurrent.futures.ProcessPoolExecutor(args.map_workers) as pool:
         futures = {
-            pool.submit(map_one, index, work, args.inventory, contract, store,
-                        staging, markers, args.evidence_spec): index
+            pool.submit(map_one, index, work, args.inventory, contract,
+                        store_for(work, "map"), staging, markers,
+                        args.evidence_spec): index
             for index in pending
         }
         for future in concurrent.futures.as_completed(futures):
@@ -252,7 +269,8 @@ def main(argv=None) -> int:
     started = time.time()
     print("\n=== plan-reduce ===", flush=True)
     plan = work / "plan.json"
-    plan_argv = ["plan-reduce", "--contract", contract, "--store-root", store,
+    plan_argv = ["plan-reduce", "--contract", contract,
+                 "--store-root", store_for(work, "plan"),
                  "--staging-root", staging, "--family", "places",
                  "--markers-dir", markers, "--scratch-dir", work / "plan-scratch",
                  "--output", plan, "--matrix-out", work / "reduce-matrix.json",
@@ -279,7 +297,8 @@ def main(argv=None) -> int:
 
     def reduce_one(batch):
         index = batch["batch_index"]
-        hosted("run-reduce", "--contract", contract, "--store-root", store,
+        hosted("run-reduce", "--contract", contract,
+               "--store-root", store_for(work, "reduce"),
                "--staging-root", staging, "--family", "places", "--plan", plan,
                "--markers-dir", markers, "--batch-index", index,
                "--encoder-binary", ENCODER, "--verifier-binary", VERIFIER,
@@ -305,7 +324,8 @@ def main(argv=None) -> int:
     started = time.time()
     print(f"\n=== run-head (2^{args.shard_bits} shards) ===", flush=True)
     head = work / "head.json"
-    hosted("run-head", "--contract", contract, "--store-root", store,
+    hosted("run-head", "--contract", contract,
+           "--store-root", store_for(work, "head"),
            "--staging-root", staging,
            "--staging-report", work / "head-staging.json",
            "--family", "places", "--markers-dir", markers,
