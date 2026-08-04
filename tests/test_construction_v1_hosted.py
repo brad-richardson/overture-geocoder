@@ -1812,3 +1812,139 @@ def test_export_reductions_rejects_a_pre_item6_marker(tmp_path, monkeypatch):
     )
     with pytest.raises(SystemExit, match="predating item"):
         module.cmd_export_reductions(args)
+
+
+def _export_args(tmp_path, partitions, **overrides):
+    import argparse
+
+    defaults = dict(
+        contract=tmp_path / "contract.json", family="places",
+        partitions=partitions, output_dir=tmp_path / "out",
+        store_root=str(tmp_path / "store"), staging_root=None,
+        staging_bucket=None, staging_endpoint_url=None, staging_report=None,
+    )
+    defaults.update(overrides)
+    return argparse.Namespace(**defaults)
+
+
+def _reduction(index):
+    return {"schema": "s", "partition": {"id": f"p{index:04d}"}}
+
+
+class _CountingStore:
+    """Records how many marker reads are in flight at once."""
+
+    def __init__(self, missing=(), delay=0.0):
+        import threading
+
+        self.missing = set(missing)
+        self.delay = delay
+        self.lock = threading.Lock()
+        self.in_flight = 0
+        self.peak_in_flight = 0
+        self.reads = []
+
+    def read_json(self, key):
+        import time
+
+        index = int(key.rsplit("/", 2)[-2])
+        with self.lock:
+            self.in_flight += 1
+            self.peak_in_flight = max(self.peak_in_flight, self.in_flight)
+            self.reads.append(index)
+        try:
+            if self.delay:
+                time.sleep(self.delay)
+            if index in self.missing:
+                return None
+            return {"partition_index": index, "reduction": _reduction(index)}
+        finally:
+            with self.lock:
+                self.in_flight -= 1
+
+
+def _patch_store(module, monkeypatch, store):
+    monkeypatch.setattr(module, "_store", lambda *_a, **_k: store)
+    monkeypatch.setattr(module, "read_json", lambda _p: {"request_sha256": "a" * 64})
+
+
+def test_export_reductions_emits_progress_with_count_elapsed_and_eta(
+    tmp_path, monkeypatch, capsys
+):
+    """~4,096 serial HEAD+GETs used to emit nothing for ~2 h. GitHub 404'd the
+    live log for that runner, which made the step a black box and cost ~10
+    manual polling check-ins during the v4 promotion."""
+    module = HOSTED
+    store = _CountingStore()
+    _patch_store(module, monkeypatch, store)
+
+    total = module.EXPORT_PROGRESS_EVERY * 2
+    assert module.cmd_export_reductions(_export_args(tmp_path, total)) == 0
+
+    lines = [
+        json.loads(line)["export_reductions_progress"]
+        for line in capsys.readouterr().out.splitlines()
+        if "export_reductions_progress" in line
+    ]
+    assert [line["completed"] for line in lines] == [
+        module.EXPORT_PROGRESS_EVERY,
+        total,
+    ]
+    for line in lines:
+        assert line["total"] == total
+        assert line["family"] == "places"
+        assert line["elapsed_seconds"] >= 0
+        assert line["eta_seconds"] is None or line["eta_seconds"] >= 0
+        assert line["concurrency"] == module.EXPORT_CONCURRENCY
+    assert lines[-1]["eta_seconds"] == 0.0
+
+
+def test_export_reductions_fans_out_within_its_bound(tmp_path, monkeypatch):
+    module = HOSTED
+    store = _CountingStore(delay=0.01)
+    _patch_store(module, monkeypatch, store)
+
+    args = _export_args(tmp_path, 64, concurrency=8)
+    assert module.cmd_export_reductions(args) == 0
+    assert store.peak_in_flight > 1, "the fan-out never ran concurrently"
+    assert store.peak_in_flight <= 8, "the fan-out exceeded its bound"
+    assert sorted(store.reads) == list(range(64))
+
+
+def test_export_reductions_concurrency_one_is_the_serial_loop(tmp_path, monkeypatch):
+    module = HOSTED
+    store = _CountingStore(delay=0.001)
+    _patch_store(module, monkeypatch, store)
+
+    args = _export_args(tmp_path, 16, concurrency=1)
+    assert module.cmd_export_reductions(args) == 0
+    assert store.peak_in_flight == 1
+    assert store.reads == list(range(16))
+
+
+def test_export_reductions_writes_every_reduction_under_fan_out(
+    tmp_path, monkeypatch
+):
+    module = HOSTED
+    _patch_store(module, monkeypatch, _CountingStore())
+
+    args = _export_args(tmp_path, 32)
+    assert module.cmd_export_reductions(args) == 0
+    for index in range(32):
+        written = json.loads((tmp_path / "out" / f"{index:04d}.json").read_text())
+        assert written == _reduction(index)
+
+
+def test_export_reductions_reports_missing_partitions_in_index_order(
+    tmp_path, monkeypatch
+):
+    """Concurrency must not make the failure message depend on response order."""
+    module = HOSTED
+    _patch_store(module, monkeypatch, _CountingStore(missing=(31, 2, 17)))
+
+    args = _export_args(tmp_path, 64)
+    with pytest.raises(SystemExit) as caught:
+        module.cmd_export_reductions(args)
+    message = str(caught.value)
+    assert "3 of 64" in message
+    assert "[2, 17, 31]" in message

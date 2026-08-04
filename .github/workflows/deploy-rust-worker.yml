@@ -36,8 +36,9 @@ jobs:
           node-version: "24"
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
+          toolchain: stable
           targets: wasm32-unknown-unknown
 
       # The wasm32 build was recompiled from scratch on every deploy. Cargo's
@@ -74,13 +75,20 @@ jobs:
           key: worker-build-${{ runner.os }}-${{ env.WORKER_BUILD_VERSION }}
 
       - name: Install worker-build
+        # Pinned because an unpinned `cargo install` broke a preview build
+        # once already (#243). The pin is WORKER_BUILD_VERSION = 0.8.5, which
+        # is what the 2026-08-04 production deploy actually installed and
+        # built successfully against `worker = "0.7"` -- verified from that
+        # run's log. Do not "restore" a '^0.7' pin on the theory that
+        # worker-build 0.8 requires worker >=0.8: that would move the
+        # production deploy off the only combination proven to work here.
         if: steps.cache-worker-build.outputs.cache-hit != 'true'
         run: cargo install worker-build --locked --version "${WORKER_BUILD_VERSION}"
 
       - name: Build and Deploy Worker
         working-directory: crates/geocoder-worker
         run: |
-          npm install wrangler
+          npm install wrangler@4.118.0
           npx wrangler deploy
 
       - name: Post-deploy verification

@@ -377,7 +377,7 @@ jobs:
 
       - name: Upload the Places measurement for the scale report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: slice-family-places-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: warn
@@ -567,7 +567,7 @@ jobs:
 
       - name: Upload the Address measurement for the scale report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: slice-family-addresses-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: warn
@@ -638,7 +638,7 @@ jobs:
 
       - name: Upload the verified slice manifest
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: slice-verify-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: warn
@@ -668,7 +668,7 @@ jobs:
           python-version: "3.11"
 
       - name: Download the per-family measurements
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           pattern: slice-family-*-${{ github.run_id }}-${{ github.run_attempt }}
           path: /tmp/measurements
@@ -695,7 +695,7 @@ jobs:
 
       - name: Upload the retained scale report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: slice-scale-report-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: warn

@@ -14,6 +14,26 @@ import pytest
 requests_stub = types.ModuleType("requests")
 requests_stub.Session = lambda: None
 requests_stub.RequestException = Exception
+
+
+class _StubRequestException(Exception):
+    pass
+
+
+# The definite-transient classes the harness retries. Modelled here so the
+# retry's exception arm is exercised hermetically; the harness resolves them by
+# name precisely so this stub is sufficient.
+class _StubTimeout(_StubRequestException):
+    pass
+
+
+class _StubConnectionError(_StubRequestException):
+    pass
+
+
+requests_stub.RequestException = _StubRequestException
+requests_stub.Timeout = _StubTimeout
+requests_stub.ConnectionError = _StubConnectionError
 sys.modules.setdefault("requests", requests_stub)
 
 
@@ -21,6 +41,10 @@ SCRIPT = Path(__file__).parent.parent / "scripts" / "benchmark_v2_forward.py"
 spec = importlib.util.spec_from_file_location("benchmark_v2_forward", SCRIPT)
 bench = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bench)
+# Whichever test module imported first wins `sys.modules["requests"]`, and the
+# other stubs in this suite carry no exception classes. Bind this module's own
+# global so the transient-retry tests are hermetic under any collection order.
+bench.requests = requests_stub
 
 
 def place_record(feature_id, name, country="MC", category="restaurant",
@@ -1174,3 +1198,172 @@ def test_sample_loader_reads_synthetic_positions_pack(tmp_path):
 def test_r2_sampling_is_an_explicit_stub():
     with pytest.raises(NotImplementedError):
         bench.load_r2_records("staging/global-v2/whatever")
+
+
+# ---------------------------------------------------------------------------
+# Bounded retry for DEFINITE transient failures (5xx, GET timeout)
+
+
+class RaisingSession(FakeSession):
+    """A FakeSession whose entries may be exception instances to raise."""
+
+    def get(self, url, params, timeout, headers=None):
+        response = super().get(url, params, timeout, headers)
+        if isinstance(response, BaseException):
+            raise response
+        return response
+
+
+def retry_runner(responses, transient_retries=bench.TRANSIENT_RETRIES):
+    sleeps = []
+    runner = bench.Runner(
+        "https://example.test", interval=0, timeout=1,
+        sleep_fn=sleeps.append, monotonic_fn=lambda: 0.0,
+        transient_retries=transient_retries,
+    )
+    runner.session = RaisingSession(responses)
+    return runner, sleeps
+
+
+GOOD_BODY = {"features": [feature("AA-BB", 7.42, 43.73)]}
+
+
+def test_a_definite_500_is_retried_and_the_retry_is_counted():
+    runner, sleeps = retry_runner(
+        [FakeResponse(500, None), FakeResponse(200, GOOD_BODY)]
+    )
+    result = runner.execute(PLACE_CASE)
+    assert result["rank"] == 1
+    assert result["status"] == 200
+    assert result["error"] is None
+    # Counted and reported: a run that needed a retry is not the same run.
+    assert result["transient_retries"] == 1
+    assert result["transient_retry_reasons"] == ["http 500"]
+    assert len(runner.session.calls) == 2
+    assert sleeps == [0.5]
+
+
+def test_a_get_timeout_is_retried_because_the_request_is_idempotent():
+    # `bench.requests`, not the stub: under a full-suite run the real requests
+    # package may already be imported, and the harness resolves its transient
+    # classes from whichever module it actually sees.
+    timeout = bench.requests.Timeout("read timed out")
+    runner, sleeps = retry_runner([timeout, FakeResponse(200, GOOD_BODY)])
+    result = runner.execute(PLACE_CASE)
+    assert result["found_at_1"] is True
+    assert result["transient_retries"] == 1
+    assert result["transient_retry_reasons"] == [type(timeout).__name__]
+    assert result["error"] is None
+
+
+def test_the_retry_budget_is_bounded_and_the_failure_still_surfaces():
+    runner, sleeps = retry_runner([FakeResponse(503, {"error": "oops"})])
+    result = runner.execute(PLACE_CASE)
+    assert len(runner.session.calls) == bench.TRANSIENT_RETRIES + 1
+    assert result["transient_retries"] == bench.TRANSIENT_RETRIES
+    assert result["error"] == "http 503"
+    assert result["found_at_10"] is False
+    assert sleeps == [0.5, 1.0]
+
+
+def test_a_404_is_never_retried():
+    """Attempt 5's 55x404 was a routing fact, not a blip."""
+    runner, _ = retry_runner([FakeResponse(404, None)])
+    result = runner.execute(PLACE_CASE)
+    assert len(runner.session.calls) == 1
+    assert result["transient_retries"] == 0
+    assert result["error"] == "http 404"
+
+
+def test_an_empty_but_valid_200_is_never_retried():
+    """Retries must not be able to mask a quality signal."""
+    runner, _ = retry_runner([FakeResponse(200, {"features": []})])
+    result = runner.execute(PLACE_CASE)
+    assert len(runner.session.calls) == 1
+    assert result["transient_retries"] == 0
+    assert result["found_at_10"] is False
+    assert result["error"] is None
+
+
+def test_an_invalid_shape_is_never_retried():
+    runner, _ = retry_runner([FakeResponse(200, {"nonsense": True})])
+    result = runner.execute(PLACE_CASE)
+    assert len(runner.session.calls) == 1
+    assert result["transient_retries"] == 0
+    assert result["error"] == "invalid response shape"
+
+
+def test_the_release_unavailable_503_still_aborts_immediately():
+    runner, _ = retry_runner(
+        [FakeResponse(503, {"error": "release_unavailable", "message": "no v2"})]
+    )
+    with pytest.raises(bench.ReleaseUnavailableError):
+        runner.execute(PLACE_CASE)
+    assert len(runner.session.calls) == 1
+
+
+def test_a_non_transient_request_exception_is_not_retried():
+    runner, _ = retry_runner([bench.requests.RequestException("bad url")])
+    result = runner.execute(PLACE_CASE)
+    assert len(runner.session.calls) == 1
+    assert result["transient_retries"] == 0
+    assert "bad url" in result["error"]
+
+
+def test_zero_budget_restores_the_previous_behaviour():
+    runner, _ = retry_runner([FakeResponse(500, None)], transient_retries=0)
+    result = runner.execute(PLACE_CASE)
+    assert len(runner.session.calls) == 1
+    assert result["error"] == "http 500"
+
+
+def test_a_stale_status_never_leaks_onto_a_later_attempts_error():
+    runner, _ = retry_runner(
+        [FakeResponse(500, None), bench.requests.Timeout("then a timeout")],
+        transient_retries=1,
+    )
+    result = runner.execute(PLACE_CASE)
+    assert result["status"] is None
+    assert "then a timeout" in result["error"]
+
+
+def test_rate_limit_and_transient_budgets_are_independent():
+    runner, sleeps = retry_runner(
+        [
+            FakeResponse(429, {}, {"Retry-After": "2"}),
+            FakeResponse(500, None),
+            FakeResponse(200, GOOD_BODY),
+        ]
+    )
+    result = runner.execute(PLACE_CASE)
+    assert result["rank"] == 1
+    assert result["transient_retries"] == 1
+    assert 2.0 in sleeps
+
+
+def test_aggregate_reports_retries_next_to_the_metrics_they_could_improve():
+    rows = [
+        {"kind": "place", "capability": "supported", "status": 200, "error": None,
+         "rank": 1, "found_at_1": True, "found_at_10": True, "ms": 5.0,
+         "type_at_1": None, "type_present": None, "expected_feature_type": None,
+         "top1_distance_km": None, "matched_distance_km": None,
+         "transient_retries": 2},
+        {"kind": "place", "capability": "supported", "status": 200, "error": None,
+         "rank": 2, "found_at_1": False, "found_at_10": True, "ms": 5.0,
+         "type_at_1": None, "type_present": None, "expected_feature_type": None,
+         "top1_distance_km": None, "matched_distance_km": None,
+         "transient_retries": 0},
+    ]
+    aggregate = bench._aggregate(rows)
+    assert aggregate["transient_retries"] == 2
+    assert aggregate["cases_with_transient_retry"] == 1
+
+
+def test_backoff_matches_the_r2_store_shape_and_is_capped():
+    assert bench.transient_backoff_seconds(1) == 0.5
+    assert bench.transient_backoff_seconds(2) == 1.0
+    assert bench.transient_backoff_seconds(3) == 2.0
+    assert (
+        bench.transient_backoff_seconds(20)
+        == bench.TRANSIENT_RETRY_CEILING_SECONDS
+    )

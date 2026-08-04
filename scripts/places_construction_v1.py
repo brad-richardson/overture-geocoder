@@ -178,9 +178,14 @@ MAP_DUCKDB_TEMP_SHARE = 2
 
 
 def map_duckdb_temp_limit(max_scratch_bytes: int) -> str:
+    return f"{map_duckdb_temp_limit_bytes(max_scratch_bytes)}B"
+
+
+def map_duckdb_temp_limit_bytes(max_scratch_bytes: int) -> int:
+    """The map stage's cap as an integer, for comparison against a measured peak."""
     if max_scratch_bytes <= 0:
         raise ValueError("Places map DuckDB temp cap needs a positive scratch budget")
-    return f"{max(1, int(max_scratch_bytes) // MAP_DUCKDB_TEMP_SHARE)}B"
+    return max(1, int(max_scratch_bytes) // MAP_DUCKDB_TEMP_SHARE)
 
 
 # The combiner deletes rows outside the top-N of each (partition_cell, token)
@@ -1195,6 +1200,10 @@ def map_task(
                 wall_seconds=limits.wall_seconds,
             ),
             connection,
+            stage="places.map.construction",
+            duckdb_temp_cap_bytes=map_duckdb_temp_limit_bytes(
+                limits.max_scratch_bytes
+            ),
         ) as watchdog:
             # Write the single pack-tagged copy the map contract requires ONCE, as
             # an on-disk parquet rather than a second in-database table. A zstd
@@ -1709,6 +1718,8 @@ def _reduce_watchdog(
             wall_seconds=limits.wall_seconds if wall_seconds is None else wall_seconds,
         ),
         connection,
+        stage="places.reduce",
+        duckdb_temp_cap_bytes=A.duckdb_temp_limit_bytes(limits.max_scratch_bytes),
     )
 
 
@@ -2933,6 +2944,12 @@ def build_sharded_global_head_from_markers(
                 wall_seconds=limits.wall_seconds,
             ),
             connection,
+            # This is the stage that died at 79% with the half-share cap full,
+            # and the one stage whose spill peak had never been measured -- the
+            # watchdog's evidence here was discarded, so only the configured cap
+            # was ever emitted.
+            stage="places.head.tree_merge",
+            duckdb_temp_cap_bytes=A.duckdb_temp_limit_bytes(limits.max_scratch_bytes),
         ):
             merged = _tree_merge_head_candidates(
                 connection,

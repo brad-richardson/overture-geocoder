@@ -69,9 +69,9 @@ MINIMUM_MODULES = 10
 REFERENCE = re.compile(r"scripts/([a-z0-9_]+)\.py")
 
 
-def discover(root: Path = ROOT) -> list[str]:
+def discover(root: Path = ROOT, extra_workflows: tuple[str, ...] = ()) -> list[str]:
     names: set[str] = set(EXTRA_MODULES)
-    for relative in WORKFLOWS:
+    for relative in (*WORKFLOWS, *extra_workflows):
         path = root / relative
         if not path.exists():
             # Hard error, not a skip: a renamed or deleted workflow silently
@@ -98,9 +98,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--list", action="store_true", help="Print the derived module set and exit."
     )
+    parser.add_argument(
+        "--workflow",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help=(
+            "Additional workflow to derive entrypoint modules from, on top of "
+            "the fixed hosted set. Used by the cold-start smoke to cover the "
+            "rarely-run workflows (preview, promote, reverse, release) whose "
+            "first execution is always inside a measurement window. Widens the "
+            "checked set only -- it can never shrink it."
+        ),
+    )
     args = parser.parse_args(argv)
 
-    modules = discover()
+    modules = discover(extra_workflows=tuple(args.workflow))
     if args.list:
         print("\n".join(modules))
         return 0

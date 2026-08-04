@@ -66,31 +66,35 @@ jobs:
           python-version: "3.11.14"
 
       - name: Install hash-pinned hosted dependencies
+        id: setup_python
         run: >-
           python -m pip install --only-binary=:all: --require-hashes
           -r .github/requirements-hosted-rowgroup.txt
           -r .github/requirements-preview-v2.txt
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "24"
 
       - name: Set up Rust for the preview Worker
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
+          toolchain: stable
           targets: wasm32-unknown-unknown
 
       - name: Install preview Worker build dependencies
+        id: setup_worker_toolchain
         run: |
           sudo apt-get update
           sudo apt-get install -y llvm clang
           # worker-build 0.8 requires worker >=0.8; this Worker intentionally
           # remains on worker 0.7, so keep the compatible build toolchain.
           cargo install worker-build --version '^0.7' --locked
-          npm install --global wrangler
+          npm install --global wrangler@4.118.0
 
       - name: Fetch and bind the live release plus candidate Places slice
+        id: bind_release
         run: |
           set -euo pipefail
           mkdir -p preview/input preview/output
@@ -146,6 +150,7 @@ jobs:
             --report preview/output/overlay-report.json
 
       - name: Publish the isolated release and create-only preview catalog
+        id: publish_preview
         run: |
           set -euo pipefail
           python -u scripts/v2_release_manifest.py publish-release \
@@ -161,6 +166,7 @@ jobs:
             --execute | tee preview/output/promote-catalog.json
 
       - name: Configure and deploy the isolated preview Worker
+        id: deploy_preview
         working-directory: crates/geocoder-worker
         run: |
           set -euo pipefail
@@ -184,6 +190,7 @@ jobs:
           echo "Preview Worker: $PREVIEW_URL"
 
       - name: Wait for the preview build and run direct phrase gates
+        id: warmup
         run: |
           set -euo pipefail
           request_forward () {
@@ -210,6 +217,7 @@ jobs:
           jq -e '.features | length > 0' preview/output/empire-state-building.json >/dev/null
 
       - name: Run the frozen 55-case semantic benchmark
+        id: gold_benchmark
         run: |
           python -u scripts/benchmark_v2_forward.py run \
             --cases benchmarks/v2-forward-gold-cases-v1.json \
@@ -222,6 +230,7 @@ jobs:
             --output preview/output/gold-preview.json
 
       - name: Run the frozen 200-case everyday-POI benchmark
+        id: everyday_benchmark
         run: |
           python -u scripts/benchmark_v2_forward.py run \
             --cases benchmarks/everyday-poi-tripwire-cases-v1.json \
@@ -234,6 +243,7 @@ jobs:
             --output preview/output/everyday-poi-preview.json
 
       - name: Enforce paired acceptance and the two phrase recoveries
+        id: acceptance
         run: |
           python -u scripts/validate_v2_preview_results.py \
             --expected-build "$GEOCODER_BUILD" \
@@ -251,7 +261,84 @@ jobs:
             echo "- Gold r@10: $(jq -r '.gold.baseline.recall_at_10' preview/output/acceptance.json) -> $(jq -r '.gold.preview.recall_at_10' preview/output/acceptance.json)"
             echo "- Everyday r@1: $(jq -r '.everyday_poi.baseline.recall_at_1' preview/output/acceptance.json) -> $(jq -r '.everyday_poi.preview.recall_at_1' preview/output/acceptance.json)"
             echo "- Everyday r@10: $(jq -r '.everyday_poi.baseline.recall_at_10' preview/output/acceptance.json) -> $(jq -r '.everyday_poi.preview.recall_at_10' preview/output/acceptance.json)"
+            # An accepted run that needed transient retries is still an accept,
+            # but the flakiness must be visible rather than absorbed.
+            echo "- Transient retries used: gold $(jq -r '.gold.retries.transient_retries_used' preview/output/acceptance.json), everyday $(jq -r '.everyday_poi.retries.transient_retries_used' preview/output/acceptance.json)"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # Six v4 preview attempts failed for THREE materially different reasons
+      # and every one surfaced as "preview failed": setup (attempts 1-2), a real
+      # quality regression (3-4, correctly caught), and transient infrastructure
+      # (5-6). Deciding whether to retry meant an operator reading logs each
+      # time. This step names the class so that decision is mechanical.
+      #
+      # The acceptance document is AUTHORITATIVE when it exists: the validator
+      # classifies its own rejection from the evidence. Step outcomes are the
+      # fallback for a failure that happened before the validator ran.
+      - name: Classify the failure
+        if: failure()
+        run: |
+          set -uo pipefail
+          CLASS=""
+          REASON=""
+          ADVICE=""
+          if [ -f preview/output/acceptance.json ]; then
+            CLASS=$(jq -r '.failure_class // empty' preview/output/acceptance.json)
+            REASON=$(jq -r '.reason // empty' preview/output/acceptance.json)
+            ADVICE=$(jq -r '.retry_advice // empty' preview/output/acceptance.json)
+          fi
+          if [ -z "$CLASS" ]; then
+            # `case WORD in PATTERN)` with the literal outcome as the WORD: the
+            # patterns are the step outcomes, so the first step whose outcome is
+            # `failure` selects the branch. GitHub's vocabulary is
+            # success/failure/cancelled/skipped -- not "failed".
+            case "failure" in
+              "${{ steps.setup_python.outcome }}"|\
+              "${{ steps.setup_worker_toolchain.outcome }}")
+                CLASS="setup"
+                REASON="a dependency install failed on a cold runner"
+                ADVICE="Pin the dependency and let cold-start-smoke.yml prove it before the next attempt."
+                ;;
+              "${{ steps.bind_release.outcome }}"|\
+              "${{ steps.publish_preview.outcome }}")
+                CLASS="setup"
+                REASON="binding or publishing the isolated preview failed"
+                ADVICE="Fix the inputs; a retry as-is will fail the same way."
+                ;;
+              "${{ steps.deploy_preview.outcome }}"|"${{ steps.warmup.outcome }}")
+                CLASS="operational-transient"
+                REASON="the preview Worker never became healthy within the warmup budget"
+                ADVICE="Retry the same inputs unchanged."
+                ;;
+              "${{ steps.gold_benchmark.outcome }}"|\
+              "${{ steps.everyday_benchmark.outcome }}")
+                CLASS="operational-transient"
+                REASON="a benchmark run aborted before producing a result set"
+                ADVICE="Retry the same inputs unchanged."
+                ;;
+              *)
+                CLASS="unclassified"
+                REASON="the run failed outside the classified steps"
+                ADVICE="Read the job log; then teach this step the new class."
+                ;;
+            esac
+          fi
+          {
+            echo "## v2 candidate preview FAILED"
+            echo
+            echo "- Failure class: **${CLASS}**"
+            echo "- Candidate slice: \`${SLICE_VERSION}\`"
+            echo "- Preview build: \`${GEOCODER_BUILD}\`"
+            [ -n "$REASON" ] && echo "- Reason: ${REASON}"
+            [ -n "$ADVICE" ] && echo "- Retry decision: ${ADVICE}"
+            if [ -f preview/output/acceptance.json ]; then
+              echo
+              echo '```json'
+              jq -c '.detail // {}' preview/output/acceptance.json
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice::preview failure class: ${CLASS}"
 
       - name: Upload preview evidence
         if: always()

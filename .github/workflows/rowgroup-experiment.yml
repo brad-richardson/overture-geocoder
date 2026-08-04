@@ -39,7 +39,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install duckdb boto3
+        run: pip install duckdb==1.5.1 boto3==1.43.56
 
       - name: Run experiment
         run: |
