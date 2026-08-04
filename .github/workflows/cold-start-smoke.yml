@@ -1,0 +1,197 @@
+name: Cold-start smoke
+
+# Executes ONLY the setup/dependency-install steps of the rarely-run
+# workflows. Nothing here touches R2, deploys anything, or needs a secret.
+#
+# Why it exists: the v4 session burned two preview attempts on FIRST-EXECUTION
+# failures, both of which were invisible until a measurement window was already
+# open. An unpinned `cargo install worker-build` pulled 0.8.x, which refuses
+# `worker = "0.7"` (#243), and a hosted runner had no Python `requests` for the
+# benchmark step (#245). Neither is a code defect -- both are cold-start
+# environment defects in workflows that run once every few weeks.
+#
+# This job pays ~5 minutes on workflow/dependency changes so that class of
+# failure surfaces in CI instead of mid-measurement.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekly, so environment drift (a yanked version, a runner image change)
+    # surfaces between waves rather than at the start of the next planet run.
+    - cron: "17 6 * * 1"
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+      - ".github/requirements-*.txt"
+      - "crates/geocoder-worker/**"
+      - "scripts/**"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+      - ".github/requirements-*.txt"
+      - "crates/geocoder-worker/**"
+      - "scripts/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cold-start-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  hosted-python-setup:
+    name: Rarely-run workflow Python setup
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      # Same exact interpreter the preview workflow pins, not "3.11".
+      - name: Set up exact Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11.14"
+
+      # Byte-for-byte the install line from preview-v2-candidate.yml. If a
+      # pinned hash rots or a wheel disappears for this interpreter, it fails
+      # here rather than after a preview Worker is already deployed.
+      - name: Install hash-pinned hosted dependencies
+        run: >-
+          python -m pip install --only-binary=:all: --require-hashes
+          -r .github/requirements-hosted-rowgroup.txt
+          -r .github/requirements-preview-v2.txt
+
+      # #245 exactly: the benchmark step died because `requests` was absent.
+      # An explicit import list makes the failure name the missing package
+      # instead of surfacing as a traceback inside a benchmark run.
+      - name: Verify the third-party imports the rare workflows depend on
+        run: |
+          python - <<'PY'
+          import importlib
+          import sys
+
+          required = [
+              "boto3",
+              "botocore",
+              "duckdb",
+              "numpy",
+              "psutil",
+              "pyarrow",
+              "requests",
+              "urllib3",
+          ]
+          missing = []
+          for name in required:
+              try:
+                  module = importlib.import_module(name)
+              except Exception as error:
+                  missing.append(f"{name}: {type(error).__name__}: {error}")
+                  print(f"FAIL {name}")
+              else:
+                  print(f"ok   {name} {getattr(module, '__version__', '')}")
+          if missing:
+              print("\n" + "\n".join(missing), file=sys.stderr)
+              raise SystemExit(
+                  f"{len(missing)} pinned dependency/dependencies are not "
+                  "importable on a cold runner. A rarely-run workflow would die "
+                  "on this mid-measurement."
+              )
+          PY
+
+      # Top-level import of every scripts/*.py entrypoint the rarely-run
+      # workflows invoke, under only the pinned dependency set.
+      - name: Import every rarely-run workflow entrypoint
+        run: >-
+          python scripts/check_hosted_imports.py
+          --workflow .github/workflows/preview-v2-candidate.yml
+          --workflow .github/workflows/promote-v2-release.yml
+          --workflow .github/workflows/reverse-v2.yml
+          --workflow .github/workflows/release-slice-families.yml
+
+      # Argparse construction is where a rare workflow's exact flag set is
+      # proved to exist. `--help` exits 0 and touches no network or credential.
+      - name: Prove the rare-path CLIs parse arguments
+        run: |
+          set -euo pipefail
+          for script in \
+            scripts/benchmark_v2_forward.py \
+            scripts/validate_v2_preview_results.py \
+            scripts/prepare_v2_preview_overlay.py \
+            scripts/promote_construction_slice.py \
+            scripts/v2_release_manifest.py \
+            scripts/construction_v1_hosted.py \
+            scripts/reverse_r2_v1.py
+          do
+            echo "== $script --help"
+            python "$script" --help >/dev/null
+          done
+
+  worker-build-toolchain:
+    name: Preview Worker build toolchain
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+
+      - name: Set up Rust for the preview Worker
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+
+      # Byte-for-byte the install block from preview-v2-candidate.yml.
+      - name: Install preview Worker build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm clang
+          cargo install worker-build --version '^0.7' --locked
+          npm install --global wrangler@4.118.0
+
+      # Installing the right version is necessary but not sufficient: #243
+      # failed at BUILD time, not install time. Assert the version, then run the
+      # build the preview config actually runs.
+      - name: Assert the pinned toolchain versions
+        run: |
+          set -euo pipefail
+          # `cargo install --list` is the version source that is guaranteed to
+          # exist; worker-build itself has no stable --version contract.
+          worker_build_version=$(cargo install --list | grep -E '^worker-build ')
+          echo "worker-build: ${worker_build_version}"
+          case "$worker_build_version" in
+            *v0.7.*) ;;
+            *)
+              echo "::error::worker-build resolved to ${worker_build_version};"\
+                   "this Worker is on worker 0.7 and 0.8 refuses it (#243)"
+              exit 1
+              ;;
+          esac
+          wrangler_version=$(wrangler --version | tr -d '\r')
+          echo "wrangler: ${wrangler_version}"
+          case "$wrangler_version" in
+            *4.118.0*) ;;
+            *)
+              echo "::error::wrangler resolved to ${wrangler_version}, not the pinned 4.118.0"
+              exit 1
+              ;;
+          esac
+
+      # The actual wasm32 build the preview config invokes
+      # (`[build] command = "worker-build --release"`). This is the step #243
+      # broke; the version assertion above alone would not have caught a future
+      # incompatibility that is not expressed in the version string.
+      - name: Build the Worker with the pinned toolchain
+        working-directory: crates/geocoder-worker
+        run: worker-build --release

@@ -33,8 +33,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
+          toolchain: stable
           components: rustfmt, clippy
       - name: Run fmt
         working-directory: crates
@@ -58,7 +59,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install --only-binary=:all: --require-hashes \
             -r .github/requirements-hosted-rowgroup.txt
-          pip install pytest pyyaml h3==4.3.1 shapely==2.1.2 psutil==7.2.2
+          pip install pytest==9.1.1 pyyaml==6.0.3 h3==4.3.1 shapely==2.1.2 psutil==7.2.2
       - name: Run pipeline tests
         run: pytest tests/ -v
 
@@ -121,4 +122,4 @@ jobs:
 
       - name: Build package
         working-directory: clients/python
-        run: pip install build && python -m build
+        run: pip install build==1.5.0 && python -m build

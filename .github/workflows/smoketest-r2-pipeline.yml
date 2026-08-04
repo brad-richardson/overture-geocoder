@@ -61,7 +61,7 @@ jobs:
           node-version: '24'
 
       - name: Install wrangler
-        run: npm install -g wrangler
+        run: npm install -g wrangler@4.118.0
 
       # A prior interrupted run may leave objects under the fixed family
       # prefix. Start from a clean slate so verification tests this run.

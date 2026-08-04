@@ -72,13 +72,14 @@ jobs:
           -r .github/requirements-preview-v2.txt
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "24"
 
       - name: Set up Rust for the preview Worker
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
+          toolchain: stable
           targets: wasm32-unknown-unknown
 
       - name: Install preview Worker build dependencies
@@ -88,7 +89,7 @@ jobs:
           # worker-build 0.8 requires worker >=0.8; this Worker intentionally
           # remains on worker 0.7, so keep the compatible build toolchain.
           cargo install worker-build --version '^0.7' --locked
-          npm install --global wrangler
+          npm install --global wrangler@4.118.0
 
       - name: Fetch and bind the live release plus candidate Places slice
         run: |

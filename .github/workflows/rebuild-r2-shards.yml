@@ -269,7 +269,7 @@ jobs:
 
       - name: Install wrangler
         run: |
-          npm install -g wrangler
+          npm install -g wrangler@4.118.0
           echo "Wrangler version: $(wrangler --version)"
 
       - name: Download divisions data
@@ -663,7 +663,7 @@ jobs:
           node-version: '24'
 
       - name: Install wrangler
-        run: npm install -g wrangler
+        run: npm install -g wrangler@4.118.0
 
       - name: Verify R2 credentials
         run: |
@@ -720,7 +720,7 @@ jobs:
           node-version: '24'
 
       - name: Install wrangler
-        run: npm install -g wrangler
+        run: npm install -g wrangler@4.118.0
 
       - name: Report runner capacity
         run: |
@@ -759,7 +759,7 @@ jobs:
           node-version: '24'
 
       - name: Install wrangler
-        run: npm install -g wrangler
+        run: npm install -g wrangler@4.118.0
 
       - name: Verify and finalize release staging
         run: |
@@ -790,7 +790,7 @@ jobs:
           node-version: '24'
 
       - name: Install wrangler
-        run: npm install -g wrangler
+        run: npm install -g wrangler@4.118.0
 
       - name: Build global ID locator dictionary
         run: |
@@ -816,7 +816,7 @@ jobs:
             prefix_end: "fff"
     steps:
       - name: Free disk space
-        uses: jlumbroso/free-disk-space@main
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # main @ 2026-08-04
         with:
           tool-cache: false
 
@@ -836,7 +836,7 @@ jobs:
           node-version: '24'
 
       - name: Install wrangler
-        run: npm install -g wrangler
+        run: npm install -g wrangler@4.118.0
 
       - name: Monitor resources
         run: |
@@ -879,7 +879,7 @@ jobs:
           node-version: '24'
 
       - name: Install wrangler
-        run: npm install -g wrangler
+        run: npm install -g wrangler@4.118.0
 
       - name: Build ID metadata
         run: |

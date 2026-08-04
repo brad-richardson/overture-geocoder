@@ -101,7 +101,7 @@ jobs:
           node-version: '24'
 
       - name: Install wrangler
-        run: npm install -g wrangler
+        run: npm install -g wrangler@4.118.0
 
       - name: Patch failed prefixes
         if: inputs.prefixes != ''
@@ -169,7 +169,7 @@ jobs:
             prefix_end: "fff"
     steps:
       - name: Free disk space
-        uses: jlumbroso/free-disk-space@main
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # main @ 2026-08-04
         with:
           tool-cache: false
 
@@ -189,7 +189,7 @@ jobs:
           node-version: '24'
 
       - name: Install wrangler
-        run: npm install -g wrangler
+        run: npm install -g wrangler@4.118.0
 
       - name: Monitor resources
         run: |
@@ -239,7 +239,7 @@ jobs:
           node-version: '24'
 
       - name: Install wrangler
-        run: npm install -g wrangler
+        run: npm install -g wrangler@4.118.0
 
       - name: Build ID metadata
         run: |

@@ -34,8 +34,9 @@ jobs:
           node-version: "24"
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
+          toolchain: stable
           targets: wasm32-unknown-unknown
 
       - name: Install LLVM and Clang
@@ -44,12 +45,16 @@ jobs:
           sudo apt-get install -y llvm clang
 
       - name: Install worker-build
-        run: cargo install worker-build
+        # worker-build 0.8 requires worker >=0.8; this Worker intentionally
+        # remains on worker 0.7, so keep the compatible build toolchain. An
+        # unpinned `cargo install` here pulled 0.8.x and broke the preview
+        # build once already (#243) -- this is the production deploy path.
+        run: cargo install worker-build --version '^0.7' --locked
 
       - name: Build and Deploy Worker
         working-directory: crates/geocoder-worker
         run: |
-          npm install wrangler
+          npm install wrangler@4.118.0
           npx wrangler deploy
 
       - name: Post-deploy verification
