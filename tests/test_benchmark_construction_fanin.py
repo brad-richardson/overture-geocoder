@@ -8,6 +8,7 @@ acceptance gate fails closed.
 
 from __future__ import annotations
 
+import copy
 import importlib.util
 import json
 import sys
@@ -242,10 +243,36 @@ def _equivalence_markers():
     ]
 
 
+@pytest.fixture(scope="module")
+def _generated_equivalence_markers():
+    """Generate the synthetic equivalence markers exactly once per module.
+
+    Generation is deterministic (fixed per-index seeds) and costs ~4.6 s, but
+    every consumer used to re-run it: five `row_cap` parametrisations plus
+    `test_genesis_plan_direct_invariants`, i.e. ~28 s of byte-identical work.
+    """
+    return _equivalence_markers()
+
+
+@pytest.fixture
+def equivalence_markers(_generated_equivalence_markers):
+    """Hand each test its own deep copy of the shared markers.
+
+    The copy costs ~0.26 s against ~4.6 s to regenerate. It is deliberately not
+    skipped: the markers are plain nested dicts, so copying preserves exactly
+    today's semantics -- every test still mutates only its own object graph and
+    no test can observe another's writes -- without anyone having to prove that
+    the reference planner, the real planner and the streaming planner all treat
+    their input as read-only.
+    """
+    return copy.deepcopy(_generated_equivalence_markers)
+
+
+@pytest.mark.slow  # 2-7s per case: plans the same markers at five row caps.
 @pytest.mark.parametrize("row_cap", [400, 1_000, 4_000, 25_000, 250_000])
-def test_streaming_genesis_plan_is_byte_identical(tmp_path, row_cap):
+def test_streaming_genesis_plan_is_byte_identical(tmp_path, row_cap, equivalence_markers):
     ADDRESS = FANIN.ADDRESS
-    markers = _equivalence_markers()
+    markers = equivalence_markers
 
     reference = _reference_genesis_plan(markers, row_cap=row_cap)
     in_memory = ADDRESS.genesis_plan(markers, row_cap=row_cap)
@@ -280,7 +307,8 @@ def test_streaming_genesis_plan_matches_on_empty_and_single():
     ) == ADDRESS.canonical_json(_reference_genesis_plan(single, row_cap=800))
 
 
-def test_genesis_plan_direct_invariants():
+@pytest.mark.slow  # ~4s: full plan invariants over the large marker set.
+def test_genesis_plan_direct_invariants(equivalence_markers):
     """Prove the plan properties directly, not only via the reference oracle.
 
     Deterministic bytes, exact binding reconciliation (count + both digest lanes),
@@ -289,7 +317,7 @@ def test_genesis_plan_direct_invariants():
     """
     ADDRESS = FANIN.ADDRESS
     row_cap = 1_000
-    markers = _equivalence_markers()
+    markers = equivalence_markers
 
     first = ADDRESS.genesis_plan(markers, row_cap=row_cap)
     second = ADDRESS.genesis_plan(markers, row_cap=row_cap)
@@ -388,6 +416,7 @@ def test_benchmark_family_fails_closed_on_tiny_rss_cap(tmp_path):
     assert result["gate_reasons"]
 
 
+@pytest.mark.slow  # ~8s: runs the whole benchmark family plus its gate.
 def test_benchmark_family_passes_small_scale(tmp_path):
     gate = FANIN.Gate(
         wall_seconds=120, max_rss_bytes=2 * 1024**3, max_scratch_bytes=4 * 1024**3

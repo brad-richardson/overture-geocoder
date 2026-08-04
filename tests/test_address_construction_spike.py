@@ -69,6 +69,7 @@ def write_fixture(path: Path, rows: list[dict]) -> None:
     pq.write_table(table, path, row_group_size=4)
 
 
+@pytest.mark.slow  # ~7s: runs the address transform binary over a real slice.
 def test_independent_address_fixture(tmp_path):
     fixture = json.loads(FIXTURE.read_text())
     projected = tmp_path / "projected.parquet"

@@ -43,3 +43,11 @@ Repository = "https://github.com/brad-richardson/overture-geocoder"
 
 [tool.hatch.build.targets.wheel]
 packages = ["overture_geocoder"]
+
+# Anchor this package's own pytest rootdir. Without a [tool.pytest.ini_options]
+# table here, pytest's ini discovery walks up out of clients/python and adopts
+# the repository-root pytest.ini -- so the client suite would silently inherit
+# the pipeline suite's settings, including `-n auto`, even though the client's
+# dev extra does not install pytest-xdist. This table stops that walk.
+[tool.pytest.ini_options]
+testpaths = ["tests"]

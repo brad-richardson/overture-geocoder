@@ -2161,6 +2161,7 @@ def _bucket_space_splits(bits: int) -> list[list[tuple[int, int]]]:
     return splits
 
 
+@pytest.mark.slow  # ~15s: sweeps the full 65536-cell grid at three bit widths.
 def test_bucket_ranges_own_every_cell_exactly_once(construction_module):
     # The claim the whole bucket-range reducer rests on: for ANY partition of the
     # bucket space into ranges, every cell is emitted by exactly one range and the

@@ -11,6 +11,8 @@ on:
 env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  # Pinned so the deploy is reproducible and the build cache key is meaningful.
+  WORKER_BUILD_VERSION: "0.8.5"
 
 jobs:
   build-and-deploy:
@@ -38,13 +40,42 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
+      # The wasm32 build was recompiled from scratch on every deploy. Cargo's
+      # fingerprinting still decides what to rebuild, and the post-deploy smoke
+      # checks below verify the artifact that actually reached production, so a
+      # warm target directory cannot let a stale binary through unnoticed.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates
+          key: wasm32
+
       - name: Install LLVM and Clang
+        # ubuntu-latest ships clang and llvm preinstalled, so this was ~40s of
+        # apt work per deploy for tools that were already present. Install only
+        # when they are genuinely missing rather than dropping the step, so a
+        # future runner image that omits them still deploys.
         run: |
-          sudo apt-get update
-          sudo apt-get install -y llvm clang
+          if command -v clang >/dev/null && command -v llvm-ar >/dev/null; then
+            echo "clang $(clang --version | head -1) and llvm already present; skipping apt"
+          else
+            sudo apt-get update
+            sudo apt-get install -y llvm clang
+          fi
+
+      # worker-build was compiled from source on every deploy (~98s of CPU).
+      # Pin it so the cache key is meaningful -- and so a deploy is reproducible
+      # rather than silently picking up whatever version crates.io last
+      # published -- and only build on a cache miss.
+      - name: Cache worker-build
+        id: cache-worker-build
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/worker-build
+          key: worker-build-${{ runner.os }}-${{ env.WORKER_BUILD_VERSION }}
 
       - name: Install worker-build
-        run: cargo install worker-build
+        if: steps.cache-worker-build.outputs.cache-hit != 'true'
+        run: cargo install worker-build --locked --version "${WORKER_BUILD_VERSION}"
 
       - name: Build and Deploy Worker
         working-directory: crates/geocoder-worker

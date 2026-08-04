@@ -117,7 +117,12 @@ jobs:
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.11.14"
+          cache: pip
+          cache-dependency-path: .github/requirements-hosted-rowgroup.txt
       - name: Install ONLY the hash-pinned hosted dependencies
+        # Caching the wheels does not weaken this check: --require-hashes still
+        # verifies every artifact against the pinned hashes on each run, so a
+        # cache hit is byte-identical to a fresh download or it fails closed.
         run: "python -m pip install --only-binary=:all: --require-hashes -r .github/requirements-hosted-rowgroup.txt"
       - name: Import every hosted entrypoint module
         run: python scripts/check_hosted_imports.py
@@ -134,8 +139,22 @@ jobs:
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.11.14"
+          cache: pip
+          cache-dependency-path: .github/requirements-hosted-rowgroup.txt
       - name: Install the hash-pinned hosted dependencies
+        # See the note in hosted-imports: --require-hashes still verifies every
+        # wheel on every run, so a cache hit cannot smuggle in different bytes.
         run: "python -m pip install --only-binary=:all: --require-hashes -r .github/requirements-hosted-rowgroup.txt"
+
+      # This release build is identical to the one in the address-slice job, and
+      # both were compiled from scratch on separate runners on every run.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates
+          # shared-key, not key: it replaces rust-cache's per-job default so
+          # the slice and address-slice jobs read and write ONE cache entry
+          # instead of each keeping a private copy of the same build.
+          shared-key: slice-smoke-construction-release
 
       # Same command the hosted map/reduce/head jobs run. The harness looks for
       # the binaries at crates/target/release, so the release profile is required.
@@ -502,8 +521,19 @@ jobs:
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.11.14"
+          cache: pip
+          cache-dependency-path: .github/requirements-hosted-rowgroup.txt
       - name: Install the hash-pinned hosted dependencies
+        # See the note in hosted-imports: --require-hashes still verifies every
+        # wheel on every run, so a cache hit cannot smuggle in different bytes.
         run: "python -m pip install --only-binary=:all: --require-hashes -r .github/requirements-hosted-rowgroup.txt"
+
+      # Shares one cache entry with the slice job, which runs the identical
+      # release build -- see the matching step there.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates
+          shared-key: slice-smoke-construction-release
 
       # Same command the hosted map/reduce jobs run. The harness looks for the
       # binaries at crates/target/release, so the release profile is required.

@@ -465,6 +465,7 @@ def test_mean_record_size_matches_the_size_model(places_artifact, address_artifa
 # --------------------------------------------------------------------------- #
 # the dense-cell gate: 3x3 leaf blocks are exactly 3 payload runs
 # --------------------------------------------------------------------------- #
+@pytest.mark.slow  # ~8s: builds and encodes a dense synthetic cell end to end.
 def test_dense_cell_3x3_blocks_resolve_to_exactly_3_runs(binaries, tmp_path):
     """Increment 1's gate. A fully populated L=5 cell (Tokyo b2e3): with
     row-major payload order, EVERY one of the 900 possible 3x3 leaf blocks is
