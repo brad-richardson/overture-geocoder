@@ -220,6 +220,172 @@ def release_manifest(build: str = "2026-07-19.1") -> dict:
     )
 
 
+def external_reverse(family: str, version: str, request: str, sha: str) -> dict:
+    claim_payload = gbm.canonical_json(
+        {
+            "schema": v2.SLICE_CLAIM_SCHEMA,
+            "version": version,
+            "family": family,
+            "request_sha256": request,
+            "overture_release": RELEASE,
+        }
+    )
+    return {
+        "source": {
+            "kind": v2.EXTERNAL_OPERATION_KIND,
+            "version": version,
+            "request_sha256": request,
+            "slice_claim": {
+                "object_key": f"{version}/claims/{family}.json",
+                "bytes": len(claim_payload),
+                "sha256": hashlib.sha256(claim_payload).hexdigest(),
+            },
+        },
+        "entrypoint": {
+            "object_key": f"{version}/families/{family}/reverse-catalog.rcat",
+            "bytes": v2.REVERSE_ROOT_BYTES,
+            "sha256": sha,
+        },
+    }
+
+
+def test_overlay_replaces_candidate_and_preserves_all_retained_operations():
+    legacy = legacy_release()
+    places = family_manifest("places")
+    addresses = family_manifest("addresses")
+    base_source = family_source_manifest("places", "addresses")
+    address_reverse = external_reverse(
+        "addresses", "slice-2026-07-18.0", "b" * 64, "8" * 64
+    )
+    base_places_reverse = external_reverse(
+        "places", "slice-2026-07-17.0", "a" * 64, "7" * 64
+    )
+    base = v2.build_release_manifest(
+        geocoder_build="2026-07-19.1",
+        overture_release=RELEASE,
+        legacy_release=legacy,
+        legacy_manifest_sha256=payload_sha(legacy),
+        family_manifests={
+            "places": (places, payload_sha(places)),
+            "addresses": (addresses, payload_sha(addresses)),
+        },
+        family_source_manifests={
+            "places": (base_source, payload_sha(base_source)),
+            "addresses": (base_source, payload_sha(base_source)),
+        },
+        family_operations={
+            "places": ["forward", "reverse"],
+            "addresses": ["reverse", "structured_forward"],
+        },
+        family_entrypoints={
+            "places": {
+                "forward": "families/places/catalog.pcat",
+                "reverse": base_places_reverse["entrypoint"]["object_key"],
+            },
+            "addresses": {
+                "structured_forward": "families/addresses/address-collection.json",
+                "reverse": address_reverse["entrypoint"]["object_key"],
+            },
+        },
+        family_external_operations={
+            "places": {"reverse": base_places_reverse},
+            "addresses": {"reverse": address_reverse},
+        },
+        generated_at="2026-07-19T12:00:00+00:00",
+    )
+    candidate = gbm.build_family_manifest(
+        "places",
+        lineage={
+            "overture_release": RELEASE,
+            "build_id": "d" * 64,
+            "producer_commit": "deadbeef",
+            "producer_script": "scripts/places_construction_v1.py",
+            "producer_version": "construction-v1",
+        },
+        versions={
+            "format": "PLRV0003+PLHD0003",
+            "tokenizer": "nfkd-lower-stripmark-cjk-bigram-v4",
+            "normalization": None,
+        },
+        region={
+            "name": "global",
+            "bbox": [-180.0, -90.0, 180.0, 90.0],
+            "bbox_scope": "exact",
+        },
+        artifacts=[
+            {
+                "object_key": "families/places/routing.json",
+                "bytes": 123,
+                "sha256": "c" * 64,
+            }
+        ],
+        generated_at="2026-07-20T00:00:00+00:00",
+    )
+    candidate_source = family_source_manifest(
+        "places", version="slice-2026-07-20.0"
+    )
+    candidate_source["families"]["places"] = {
+        "manifest": "./families/places/family-manifest.json",
+        "manifest_digest": candidate["manifest_digest"],
+        "region": candidate["region"],
+        "artifact_count": 1,
+        "total_bytes": 123,
+        "objects": [
+            {
+                "href": "./families/places/routing.json",
+                "size_bytes": 123,
+                "sha256": "c" * 64,
+            }
+        ],
+        "promotion_eligible": False,
+    }
+    candidate_source["verified_version_objects"] = [
+        {"href": "./families/places/family-manifest.json"},
+        {
+            "href": "./families/places/routing.json",
+            "size_bytes": 123,
+            "sha256": "c" * 64,
+        },
+    ]
+    places_reverse = external_reverse(
+        "places", "slice-2026-07-21.0", "d" * 64, "9" * 64
+    )
+    base_sources = {
+        "legacy_release": legacy,
+        "legacy_manifest_sha256": payload_sha(legacy),
+        "family_manifests": {
+            "places": (places, payload_sha(places)),
+            "addresses": (addresses, payload_sha(addresses)),
+        },
+        "family_source_manifests": {
+            "places": (base_source, payload_sha(base_source)),
+            "addresses": (base_source, payload_sha(base_source)),
+        },
+    }
+
+    result = v2.build_overlay_release_manifest(
+        base_release=base,
+        geocoder_build="2026-07-22.0",
+        base_sources=base_sources,
+        candidate_family="places",
+        candidate_manifest=candidate,
+        candidate_manifest_sha256=payload_sha(candidate),
+        candidate_source_manifest=candidate_source,
+        candidate_source_sha256=payload_sha(candidate_source),
+        candidate_external_operations={"reverse": places_reverse},
+    )
+
+    assert result["families"]["addresses"] == base["families"]["addresses"]
+    assert result["families"]["places"]["source"]["version"] == (
+        "slice-2026-07-20.0"
+    )
+    assert result["families"]["places"]["operations"] == ["forward", "reverse"]
+    assert result["families"]["places"]["operation_sources"]["reverse"] == (
+        places_reverse["source"]
+    )
+    assert result["operations"] == base["operations"]
+
+
 def catalog_sources() -> dict:
     legacy = legacy_release()
     places = family_manifest("places")

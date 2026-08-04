@@ -42,6 +42,7 @@ bytes and replacing them; that backend exists for rehearsal, not production.
 from __future__ import annotations
 
 import argparse
+import copy
 import contextlib
 import hashlib
 import io
@@ -706,6 +707,141 @@ def build_release_manifest(
     }
     manifest["release_digest"] = gbm.digest(manifest)
     return validate_release_manifest(manifest)
+
+
+def build_overlay_release_manifest(
+    *,
+    base_release: Any,
+    geocoder_build: str,
+    base_sources: dict[str, Any],
+    candidate_family: str,
+    candidate_manifest: Any,
+    candidate_manifest_sha256: str,
+    candidate_source_manifest: Any,
+    candidate_source_sha256: str,
+    candidate_external_operations: dict[str, dict[str, Any]] | None = None,
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    """Replace one forward family while retaining every other live operation.
+
+    ``base_sources`` must come from :func:`_release_sources_from_store`, which
+    re-fetches and hash-verifies the complete live release graph. Retained
+    family references are rebuilt from those immutable inputs and then required
+    to equal the live references. The candidate may attach a separately
+    validated reverse publication obtained through
+    :func:`_load_external_reverse_operation`.
+    """
+
+    base = validate_release_manifest(base_release)
+    if candidate_family not in base["families"]:
+        raise ValueError("candidate family is absent from the base release")
+    if set(base_sources) != {
+        "legacy_release",
+        "legacy_manifest_sha256",
+        "family_manifests",
+        "family_source_manifests",
+    }:
+        raise ValueError("base release sources are incomplete")
+    verify_release_sources(base, **base_sources)
+
+    family_manifests = dict(base_sources["family_manifests"])
+    family_source_manifests = dict(base_sources["family_source_manifests"])
+    family_manifests[candidate_family] = (
+        candidate_manifest,
+        candidate_manifest_sha256,
+    )
+    family_source_manifests[candidate_family] = (
+        candidate_source_manifest,
+        candidate_source_sha256,
+    )
+
+    candidate = gbm.validate_family_manifest(candidate_manifest)
+    if candidate["family"] != candidate_family:
+        raise ValueError("candidate manifest declares another family")
+    if candidate["lineage"]["overture_release"] != base["overture_release"]:
+        raise ValueError("candidate Overture release differs from the base release")
+    candidate_source = _validate_family_source(
+        candidate_family,
+        candidate_source_manifest,
+        candidate_source_sha256,
+        candidate,
+        base["overture_release"],
+    )
+    if candidate_source["version"] == base["families"][candidate_family]["source"][
+        "version"
+    ]:
+        raise ValueError("candidate family must come from a different slice")
+    contract = WORKER_CONSTRUCTION_CONTRACTS.get(
+        (candidate_family, candidate["versions"]["format"])
+    )
+    if contract is None or "forward" not in contract["operations"]:
+        raise ValueError("candidate family format has no admitted forward operation")
+
+    operations: dict[str, list[str]] = {}
+    entrypoints: dict[str, dict[str, str]] = {}
+    external_operations: dict[str, dict[str, dict[str, Any]]] = {}
+    for family, reference in sorted(base["families"].items()):
+        if family == candidate_family:
+            family_operations = list(contract["operations"])
+            family_entrypoints = {
+                operation: f"families/{family}/{contract['entrypoint']}"
+                for operation in contract["operations"]
+            }
+            supplied_external = copy.deepcopy(candidate_external_operations or {})
+            if supplied_external:
+                if set(supplied_external) != {"reverse"}:
+                    raise ValueError("candidate external operation must be reverse")
+                family_operations.append("reverse")
+                family_entrypoints["reverse"] = supplied_external["reverse"][
+                    "entrypoint"
+                ]["object_key"]
+                external_operations[family] = supplied_external
+            operations[family] = sorted(family_operations)
+            entrypoints[family] = family_entrypoints
+            continue
+
+        operations[family] = list(reference["operations"])
+        entrypoints[family] = {}
+        reference_external = reference.get("operation_sources", {})
+        for operation, identity in sorted(reference["entrypoints"].items()):
+            if operation in reference_external:
+                entrypoints[family][operation] = identity["object_key"]
+                external_operations.setdefault(family, {})[operation] = {
+                    "source": copy.deepcopy(reference_external[operation]),
+                    "entrypoint": copy.deepcopy(identity),
+                }
+                continue
+            prefix = f"{reference['source']['version']}/"
+            if not identity["object_key"].startswith(prefix):
+                raise ValueError(
+                    f"retained {family} {operation} entrypoint escapes its source"
+                )
+            entrypoints[family][operation] = identity["object_key"][len(prefix) :]
+
+    result = build_release_manifest(
+        geocoder_build=geocoder_build,
+        overture_release=base["overture_release"],
+        legacy_release=base_sources["legacy_release"],
+        legacy_manifest_sha256=base_sources["legacy_manifest_sha256"],
+        family_manifests=family_manifests,
+        family_source_manifests=family_source_manifests,
+        family_operations=operations,
+        family_entrypoints=entrypoints,
+        family_external_operations=external_operations,
+        generated_at=generated_at or f"{geocoder_build[:10]}T00:00:00+00:00",
+    )
+    for family, reference in base["families"].items():
+        if family != candidate_family and result["families"][family] != reference:
+            raise ValueError(f"retained {family} reference changed during overlay")
+    verify_release_sources(
+        result,
+        **{
+            **base_sources,
+            "family_manifests": family_manifests,
+            "family_source_manifests": family_source_manifests,
+        },
+    )
+    return result
 
 
 def validate_release_manifest(manifest: Any) -> dict[str, Any]:
@@ -1795,6 +1931,145 @@ def cmd_assemble(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_assemble_overlay(args: argparse.Namespace) -> None:
+    """Assemble a production release by replacing one live forward family."""
+
+    build = _require_build(args.geocoder_build)
+    base_build = _require_build(args.base_build)
+    if version_sort_key(build) <= version_sort_key(base_build):
+        raise _fail("--geocoder-build must be newer than --base-build")
+    if not SHA256_RE.fullmatch(args.catalog_expect_sha256):
+        raise _fail("--catalog-expect-sha256 must be a lowercase SHA-256 digest")
+    if not SLICE_RE.fullmatch(args.slice_version):
+        raise _fail("--slice-version must use slice-YYYY-MM-DD.N")
+    candidate_family = args.candidate_family
+    store = open_control_store(args.store, "--store")
+
+    catalog_payload, catalog_sha = _fetch(
+        store, args.catalog_key, "base v2 catalog"
+    )
+    if catalog_sha != args.catalog_expect_sha256:
+        raise _fail(
+            f"catalog {args.catalog_key} is sha256 {catalog_sha}, not the stated "
+            "overlay expectation"
+        )
+    try:
+        catalog = validate_catalog(
+            json.loads(catalog_payload), catalog_key=args.catalog_key
+        )
+    except (ValueError, json.JSONDecodeError) as error:
+        raise _fail(f"base v2 catalog is invalid: {error}") from error
+    if catalog["latest"] != base_build:
+        raise _fail(
+            f"base catalog latest is {catalog['latest']!r}, not {base_build!r}"
+        )
+    base_key, base_release, base_release_sha = _load_release_from_store(
+        store, args.catalog_key, base_build
+    )
+    base_entry = catalog["releases"][0]
+    if (
+        base_entry["manifest_key"] != base_key
+        or base_entry["manifest_sha256"] != base_release_sha
+        or base_entry["release_digest"] != base_release["release_digest"]
+    ):
+        raise _fail("base release differs from the catalog-pinned identity")
+    base_sources = _release_sources_from_store(store, base_release)
+    verify_release_sources(base_release, **base_sources)
+
+    source_key = f"{args.slice_version}/slice-manifest.json"
+    candidate_source, _, candidate_source_sha = _fetch_document(
+        store, source_key, "candidate slice source manifest"
+    )
+    if candidate_source.get("slice_version") != args.slice_version:
+        raise _fail("candidate slice manifest declares another version")
+    manifest_key = (
+        f"{args.slice_version}/families/{candidate_family}/family-manifest.json"
+    )
+    candidate_manifest, _, candidate_manifest_sha = _fetch_document(
+        store, manifest_key, f"candidate {candidate_family} family manifest"
+    )
+    validated_candidate = gbm.validate_family_manifest(candidate_manifest)
+    contract = WORKER_CONSTRUCTION_CONTRACTS.get(
+        (candidate_family, validated_candidate["versions"]["format"])
+    )
+    if contract is None or "forward" not in contract["operations"]:
+        raise _fail("candidate family format has no admitted forward operation")
+    relative_entrypoint = f"families/{candidate_family}/{contract['entrypoint']}"
+    recorded = next(
+        (
+            artifact
+            for artifact in validated_candidate["artifacts"]
+            if artifact["object_key"] == relative_entrypoint
+        ),
+        None,
+    )
+    if recorded is None:
+        raise _fail("candidate family manifest omits its forward entrypoint")
+    entrypoint_payload, entrypoint_sha = _fetch(
+        store,
+        f"{args.slice_version}/{relative_entrypoint}",
+        f"candidate {candidate_family} forward entrypoint",
+    )
+    if (
+        len(entrypoint_payload) != recorded["bytes"]
+        or entrypoint_sha != recorded["sha256"]
+        or not entrypoint_payload
+        or len(entrypoint_payload) > contract["entrypoint_cap"]
+    ):
+        raise _fail("candidate forward entrypoint differs from its manifest contract")
+
+    import promote_construction_slice as promotion
+
+    publication_tree = (
+        promotion.LocalTree(store.root)
+        if isinstance(store, LocalControlStore)
+        else promotion.R2Tree(store.store)
+    )
+    external_reverse = _load_external_reverse_operation(
+        family=candidate_family,
+        path=args.reverse_publication,
+        overture_release=base_release["overture_release"],
+        expected_request_sha256=validated_candidate["lineage"]["build_id"],
+        publication_tree=publication_tree,
+        promotion=promotion,
+    )
+    release = build_overlay_release_manifest(
+        base_release=base_release,
+        geocoder_build=build,
+        base_sources=base_sources,
+        candidate_family=candidate_family,
+        candidate_manifest=candidate_manifest,
+        candidate_manifest_sha256=candidate_manifest_sha,
+        candidate_source_manifest=candidate_source,
+        candidate_source_sha256=candidate_source_sha,
+        candidate_external_operations={"reverse": external_reverse},
+        generated_at=args.generated_at,
+    )
+    payload = gbm.canonical_json(release)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_bytes(payload)
+    print(
+        json.dumps(
+            {
+                "assembled": str(args.output),
+                "base_build": base_build,
+                "geocoder_build": build,
+                "candidate_family": candidate_family,
+                "candidate_slice": args.slice_version,
+                "preserved_operations": base_release["operations"],
+                "operations": release["operations"],
+                "release_digest": release["release_digest"],
+                "sha256": _sha256_bytes(payload),
+                "bytes": len(payload),
+                "manifest_key": release_manifest_key_for_catalog(
+                    args.catalog_key, build
+                ),
+            },
+            sort_keys=True,
+        )
+    )
+
+
 def cmd_publish_release(args: argparse.Namespace) -> None:
     payload = Path(args.release).read_bytes()
     try:
@@ -2181,6 +2456,35 @@ def main(argv: list[str] | None = None) -> None:
     assemble.add_argument("--catalog-key", default=PRODUCTION_CATALOG_KEY)
     assemble.add_argument("--output", type=Path, required=True)
 
+    assemble_overlay = commands.add_parser(
+        "assemble-overlay",
+        help="replace one live forward family while preserving other operations",
+    )
+    assemble_overlay.add_argument(
+        "--store", required=True, help="local:<absolute-root> or r2:<bucket>"
+    )
+    assemble_overlay.add_argument("--geocoder-build", required=True)
+    assemble_overlay.add_argument("--base-build", required=True)
+    assemble_overlay.add_argument("--catalog-expect-sha256", required=True)
+    assemble_overlay.add_argument(
+        "--slice-version", required=True, help="candidate slice-YYYY-MM-DD.N prefix"
+    )
+    assemble_overlay.add_argument(
+        "--candidate-family", choices=sorted(gbm.FAMILIES), required=True
+    )
+    assemble_overlay.add_argument(
+        "--reverse-publication",
+        type=Path,
+        required=True,
+        help="request-matched direct reverse publication for the candidate family",
+    )
+    assemble_overlay.add_argument(
+        "--generated-at",
+        help="defaults to the build date at midnight UTC",
+    )
+    assemble_overlay.add_argument("--catalog-key", default=PRODUCTION_CATALOG_KEY)
+    assemble_overlay.add_argument("--output", type=Path, required=True)
+
     publish = commands.add_parser(
         "publish-release",
         help="create-only upload of v2/releases/{build}/release.json",
@@ -2217,6 +2521,8 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     if args.command == "assemble":
         cmd_assemble(args)
+    elif args.command == "assemble-overlay":
+        cmd_assemble_overlay(args)
     elif args.command == "publish-release":
         cmd_publish_release(args)
     elif args.command == "promote":

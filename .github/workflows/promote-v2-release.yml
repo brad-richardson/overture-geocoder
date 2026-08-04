@@ -45,6 +45,12 @@ name: Promote v2 Release
 #                    publish-release (create-only v2/releases/{build}/
 #                    release.json). The release sha256 is printed prominently;
 #                    the operator needs it for later recovery expectations.
+#   publish-overlay-release
+#                    Replace one live forward family from a promoted candidate
+#                    slice while re-proving and retaining every other live
+#                    operation. A request-matched external reverse publication
+#                    is mandatory for the replacement family; the exact current
+#                    catalog SHA and base build bind what is preserved.
 #   promote-catalog  v2_release_manifest.py promote: If-Match compare-and-swap
 #                    of v2/catalog.json against exactly one stated expectation
 #                    (`catalog_expectation` = "absent" or the current catalog
@@ -64,7 +70,7 @@ on:
         description: Which promotion rung to run. Run `probe` green before the later rungs.
         required: true
         type: choice
-        options: [probe, promote-slice, publish-release, promote-catalog]
+        options: [probe, promote-slice, publish-release, publish-overlay-release, promote-catalog]
       mode:
         description: dry-run prints every planned write and writes nothing; execute performs them. The probe stage always executes its self-cleaning one-object proofs.
         required: true
@@ -78,6 +84,11 @@ on:
         type: string
       geocoder_build:
         description: v2 geocoder build (YYYY-MM-DD.N). Used by publish-release and promote-catalog.
+        required: false
+        default: ""
+        type: string
+      base_geocoder_build:
+        description: Current production build replaced by publish-overlay-release.
         required: false
         default: ""
         type: string
@@ -150,6 +161,7 @@ jobs:
           MODE: ${{ inputs.mode }}
           SLICE_VERSION: ${{ inputs.slice_version }}
           GEOCODER_BUILD: ${{ inputs.geocoder_build }}
+          BASE_GEOCODER_BUILD: ${{ inputs.base_geocoder_build }}
           OVERTURE_RELEASE: ${{ inputs.overture_release }}
           LEGACY_CORE: ${{ inputs.legacy_core }}
           PLACES_SOURCE: ${{ inputs.places_source }}
@@ -226,6 +238,26 @@ jobs:
                 fi
               done
               stage_summary PUBLISH-RELEASE "$GEOCODER_BUILD"
+              ;;
+            publish-overlay-release)
+              require_slice_version
+              require_build geocoder_build "$GEOCODER_BUILD"
+              require_build base_geocoder_build "$BASE_GEOCODER_BUILD"
+              require_source places_source "$PLACES_SOURCE"
+              if ! printf '%s' "$PLACES_SOURCE" \
+                | grep -Eq '^[0-9a-f]{64}:[0-9]+:[0-9]+$'; then
+                echo "::error::publish-overlay-release needs places_source with :<reverse-run-id>"
+                exit 1
+              fi
+              if [ -n "$ADDRESSES_SOURCE" ]; then
+                echo "::error::publish-overlay-release retains Addresses from production; addresses_source must be empty"
+                exit 1
+              fi
+              if ! printf '%s' "$CATALOG_EXPECTATION" | grep -Eq '^[0-9a-f]{64}$'; then
+                echo "::error::publish-overlay-release needs the current catalog sha256"
+                exit 1
+              fi
+              stage_summary PUBLISH-OVERLAY-RELEASE "$GEOCODER_BUILD"
               ;;
             promote-catalog)
               require_build geocoder_build "$GEOCODER_BUILD"
@@ -966,6 +998,149 @@ jobs:
           path: |
             release.json
             assemble.json
+
+  # --- Stage: publish-overlay-release ------------------------------------------
+  publish-overlay-release:
+    name: Publish an operation-preserving replacement-family release
+    needs: gate
+    if: inputs.stage == 'publish-overlay-release' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+      AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+      R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+      MODE: ${{ inputs.mode }}
+      SLICE_VERSION: ${{ inputs.slice_version }}
+      GEOCODER_BUILD: ${{ inputs.geocoder_build }}
+      BASE_GEOCODER_BUILD: ${{ inputs.base_geocoder_build }}
+      PLACES_SOURCE: ${{ inputs.places_source }}
+      CATALOG_EXPECTATION: ${{ inputs.catalog_expectation }}
+    steps:
+      - name: Check out main without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up exact Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11.14"
+
+      - name: Install hash-pinned hosted dependencies
+        run: >-
+          python -m pip install --only-binary=:all: --require-hashes
+          -r .github/requirements-hosted-rowgroup.txt
+
+      - name: Authenticate the candidate construction and reverse runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p control reverse out
+          REQUEST_SHA256="${PLACES_SOURCE%%:*}"
+          RUN_AND_REVERSE="${PLACES_SOURCE#*:}"
+          CONSTRUCTION_RUN="${RUN_AND_REVERSE%%:*}"
+          REVERSE_RUN="${RUN_AND_REVERSE#*:}"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CONSTRUCTION_RUN}" \
+            > construction-run.json
+          jq -e '
+            .name == "Construction v1 planet build"
+            and .event == "workflow_dispatch"
+            and .head_branch == "main"
+            and .status == "completed"
+            and .conclusion == "success"
+          ' construction-run.json >/dev/null || {
+            echo "::error::candidate construction run is not a successful main dispatch"
+            exit 1
+          }
+          gh run download "$CONSTRUCTION_RUN" --repo "$GITHUB_REPOSITORY" \
+            --name cv1-control --dir control
+          test "$(jq -er '.request_sha256' control/contract.json)" \
+            = "$REQUEST_SHA256" || {
+              echo "::error::candidate construction contract differs from its source"
+              exit 1
+            }
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${REVERSE_RUN}" \
+            > reverse-run.json
+          jq -e '
+            .name == "Build v2 reverse indexes"
+            and .event == "workflow_dispatch"
+            and .head_branch == "main"
+            and .status == "completed"
+            and .conclusion == "success"
+          ' reverse-run.json >/dev/null || {
+            echo "::error::candidate reverse run is not a successful main dispatch"
+            exit 1
+          }
+          gh run download "$REVERSE_RUN" --repo "$GITHUB_REPOSITORY" \
+            --name reverse-v2-places-catalog --dir reverse
+          jq -e --arg request "$REQUEST_SHA256" '
+            .schema == "overture-reverse-catalog-publication-v1"
+            and .family == "places"
+            and .request_sha256 == $request
+            and .records > 0
+            and .cells > 0
+          ' reverse/reverse-catalog.json >/dev/null || {
+            echo "::error::Places reverse publication differs from its source"
+            exit 1
+          }
+
+      - name: Assemble the overlay and prove every preserved operation
+        run: |
+          set -euo pipefail
+          python -u scripts/v2_release_manifest.py assemble-overlay \
+            --store "r2:${R2_BUCKET}" \
+            --geocoder-build "$GEOCODER_BUILD" \
+            --base-build "$BASE_GEOCODER_BUILD" \
+            --catalog-expect-sha256 "$CATALOG_EXPECTATION" \
+            --slice-version "$SLICE_VERSION" \
+            --candidate-family places \
+            --reverse-publication reverse/reverse-catalog.json \
+            --output out/release.json | tee out/assemble.json
+          test "$(jq -cS '.operations' out/release.json)" \
+            = "$(jq -cS '.preserved_operations' out/assemble.json)" || {
+              echo "::error::overlay changed the live operation set"
+              exit 1
+            }
+          {
+            echo "## v2 operation-preserving overlay: ${GEOCODER_BUILD}"
+            echo
+            echo "- Base build: \`${BASE_GEOCODER_BUILD}\`"
+            echo "- Candidate Places slice: \`${SLICE_VERSION}\`"
+            echo "- Release sha256: \`$(sha256sum out/release.json | awk '{print $1}')\`"
+            echo "- Operations: \`$(jq -cS '.operations' out/release.json)\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Announce the create-only release publication
+        run: |
+          python -u scripts/v2_release_manifest.py publish-release \
+            --store "r2:${R2_BUCKET}" \
+            --release out/release.json
+
+      - name: Publish the release document
+        if: inputs.mode == 'execute'
+        run: |
+          python -u scripts/v2_release_manifest.py publish-release \
+            --store "r2:${R2_BUCKET}" \
+            --release out/release.json \
+            --execute
+
+      - name: Upload the assembled overlay evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: v2-overlay-release-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 90
+          path: |
+            out/
+            reverse/reverse-catalog.json
 
   # --- Stage: promote-catalog ----------------------------------------------------
   promote-catalog:
