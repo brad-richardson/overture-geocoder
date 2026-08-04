@@ -1,0 +1,5377 @@
+{
+ "schema": "benchmark-v2-forward-results-v1",
+ "meta": {
+  "timestamp": "2026-08-04T14:30:41+00:00",
+  "base_url": "https://geocoder.bradr.dev",
+  "git_sha": "88b7819",
+  "data_version": "2026-08-03.0",
+  "interval_s": 0.35,
+  "primary_provider": "overture",
+  "benchmark_mode": "exact_id_self_recall",
+  "providers": {
+   "overture": {
+    "base_url": "https://geocoder.bradr.dev",
+    "interval_s": 0.35,
+    "capabilities": {
+     "places_free_text": true,
+     "address_structured": true
+    },
+    "scoring_mode": "exact_gers_id",
+    "data_version": "2026-08-03.0"
+   }
+  },
+  "name_match": "exact",
+  "case_counts": {
+   "place": 55
+  },
+  "transient_retries_allowed": 2,
+  "transient_retries_used": 0,
+  "cases_with_transient_retry": 0
+ },
+ "summary": {
+  "overall": {
+   "requested": 55,
+   "unsupported": 0,
+   "unscorable": 0,
+   "n": 55,
+   "errors": 0,
+   "found_at_1": 31,
+   "found_at_5": 37,
+   "found_at_10": 40,
+   "recall_at_1": 0.564,
+   "recall_at_5": 0.673,
+   "recall_at_10": 0.727,
+   "mrr": 0.618,
+   "type_scored": 55,
+   "type_at_1": 0.909,
+   "type_present": 0.927,
+   "type_starved": 4,
+   "median_top1_distance_km": 0.348,
+   "p50_ms": 239.8,
+   "p95_ms": 1507.1,
+   "transient_retries": 0,
+   "cases_with_transient_retry": 0
+  },
+  "self_recall": {
+   "requested": 55,
+   "unsupported": 0,
+   "unscorable": 0,
+   "n": 55,
+   "errors": 0,
+   "found_at_1": 31,
+   "found_at_5": 37,
+   "found_at_10": 40,
+   "recall_at_1": 0.564,
+   "recall_at_5": 0.673,
+   "recall_at_10": 0.727,
+   "mrr": 0.618,
+   "type_scored": 55,
+   "type_at_1": 0.909,
+   "type_present": 0.927,
+   "type_starved": 4,
+   "median_top1_distance_km": 0.348,
+   "p50_ms": 239.8,
+   "p95_ms": 1507.1,
+   "transient_retries": 0,
+   "cases_with_transient_retry": 0
+  },
+  "by_kind": {
+   "place": {
+    "requested": 55,
+    "unsupported": 0,
+    "unscorable": 0,
+    "n": 55,
+    "errors": 0,
+    "found_at_1": 31,
+    "found_at_5": 37,
+    "found_at_10": 40,
+    "recall_at_1": 0.564,
+    "recall_at_5": 0.673,
+    "recall_at_10": 0.727,
+    "mrr": 0.618,
+    "type_scored": 55,
+    "type_at_1": 0.909,
+    "type_present": 0.927,
+    "type_starved": 4,
+    "median_top1_distance_km": 0.348,
+    "p50_ms": 239.8,
+    "p95_ms": 1507.1,
+    "transient_retries": 0,
+    "cases_with_transient_retry": 0
+   }
+  },
+  "by_query_style": {
+   "place:brand_branch": {
+    "requested": 3,
+    "unsupported": 0,
+    "unscorable": 0,
+    "n": 3,
+    "errors": 0,
+    "found_at_1": 0,
+    "found_at_5": 0,
+    "found_at_10": 0,
+    "recall_at_1": 0.0,
+    "recall_at_5": 0.0,
+    "recall_at_10": 0.0,
+    "mrr": 0.0,
+    "type_scored": 3,
+    "type_at_1": 0.333,
+    "type_present": 0.333,
+    "type_starved": 2,
+    "median_top1_distance_km": 1.529,
+    "p50_ms": 1566.0,
+    "p95_ms": 3184.3,
+    "transient_retries": 0,
+    "cases_with_transient_retry": 0
+   },
+   "place:inverse_seam": {
+    "requested": 5,
+    "unsupported": 0,
+    "unscorable": 0,
+    "n": 5,
+    "errors": 0,
+    "found_at_1": 1,
+    "found_at_5": 1,
+    "found_at_10": 1,
+    "recall_at_1": 0.2,
+    "recall_at_5": 0.2,
+    "recall_at_10": 0.2,
+    "mrr": 0.2,
+    "type_scored": 5,
+    "type_at_1": 0.8,
+    "type_present": 0.8,
+    "type_starved": 1,
+    "median_top1_distance_km": 390.956,
+    "p50_ms": 287.7,
+    "p95_ms": 1396.6,
+    "transient_retries": 0,
+    "cases_with_transient_retry": 0
+   },
+   "place:name": {
+    "requested": 10,
+    "unsupported": 0,
+    "unscorable": 0,
+    "n": 10,
+    "errors": 0,
+    "found_at_1": 6,
+    "found_at_5": 8,
+    "found_at_10": 9,
+    "recall_at_1": 0.6,
+    "recall_at_5": 0.8,
+    "recall_at_10": 0.9,
+    "mrr": 0.71,
+    "type_scored": 10,
+    "type_at_1": 1.0,
+    "type_present": 1.0,
+    "type_starved": 0,
+    "median_top1_distance_km": 1.964,
+    "p50_ms": 189.8,
+    "p95_ms": 255.9,
+    "transient_retries": 0,
+    "cases_with_transient_retry": 0
+   },
+   "place:name_locality": {
+    "requested": 10,
+    "unsupported": 0,
+    "unscorable": 0,
+    "n": 10,
+    "errors": 0,
+    "found_at_1": 6,
+    "found_at_5": 8,
+    "found_at_10": 8,
+    "recall_at_1": 0.6,
+    "recall_at_5": 0.8,
+    "recall_at_10": 0.8,
+    "mrr": 0.683,
+    "type_scored": 10,
+    "type_at_1": 1.0,
+    "type_present": 1.0,
+    "type_starved": 0,
+    "median_top1_distance_km": 0.993,
+    "p50_ms": 484.9,
+    "p95_ms": 870.1,
+    "transient_retries": 0,
+    "cases_with_transient_retry": 0
+   },
+   "place:named_poi": {
+    "requested": 17,
+    "unsupported": 0,
+    "unscorable": 0,
+    "n": 17,
+    "errors": 0,
+    "found_at_1": 9,
+    "found_at_5": 10,
+    "found_at_10": 12,
+    "recall_at_1": 0.529,
+    "recall_at_5": 0.588,
+    "recall_at_10": 0.706,
+    "mrr": 0.564,
+    "type_scored": 17,
+    "type_at_1": 0.941,
+    "type_present": 0.941,
+    "type_starved": 1,
+    "median_top1_distance_km": 0.138,
+    "p50_ms": 299.4,
+    "p95_ms": 1507.1,
+    "transient_retries": 0,
+    "cases_with_transient_retry": 0
+   },
+   "place:seam": {
+    "requested": 10,
+    "unsupported": 0,
+    "unscorable": 0,
+    "n": 10,
+    "errors": 0,
+    "found_at_1": 9,
+    "found_at_5": 10,
+    "found_at_10": 10,
+    "recall_at_1": 0.9,
+    "recall_at_5": 1.0,
+    "recall_at_10": 1.0,
+    "mrr": 0.95,
+    "type_scored": 10,
+    "type_at_1": 0.9,
+    "type_present": 1.0,
+    "type_starved": 0,
+    "median_top1_distance_km": 0.374,
+    "p50_ms": 55.5,
+    "p95_ms": 279.8,
+    "transient_retries": 0,
+    "cases_with_transient_retry": 0
+   }
+  },
+  "by_stratum": {
+   "place:poi_family=civic_transit|scope=independent": {
+    "requested": 4,
+    "unsupported": 0,
+    "unscorable": 0,
+    "n": 4,
+    "errors": 0,
+    "found_at_1": 3,
+    "found_at_5": 3,
+    "found_at_10": 3,
+    "recall_at_1": 0.75,
+    "recall_at_5": 0.75,
+    "recall_at_10": 0.75,
+    "mrr": 0.75,
+    "type_scored": 4,
+    "type_at_1": 1.0,
+    "type_present": 1.0,
+    "type_starved": 0,
+    "median_top1_distance_km": 0.144,
+    "p50_ms": 387.9,
+    "p95_ms": 549.4,
+    "transient_retries": 0,
+    "cases_with_transient_retry": 0
+   },
+   "place:poi_family=food_drink|scope=brand_branch": {
+    "requested": 1,
+    "unsupported": 0,
+    "unscorable": 0,
+    "n": 1,
+    "errors": 0,
+    "found_at_1": 0,
+    "found_at_5": 0,
+    "found_at_10": 0,
+    "recall_at_1": 0.0,
+    "recall_at_5": 0.0,
+    "recall_at_10": 0.0,
+    "mrr": 0.0,
+    "type_scored": 1,
+    "type_at_1": 0.0,
+    "type_present": 0.0,
+    "type_starved": 1,
+    "median_top1_distance_km": null,
+    "p50_ms": 3184.3,
+    "p95_ms": 3184.3,
+    "transient_retries": 0,
+    "cases_with_transient_retry": 0
+   },
+   "place:poi_family=food_drink|scope=independent": {
+    "requested": 3,
+    "unsupported": 0,
+    "unscorable": 0,
+    "n": 3,
+    "errors": 0,
+    "found_at_1": 3,
+    "found_at_5": 3,
+    "found_at_10": 3,
+    "recall_at_1": 1.0,
+    "recall_at_5": 1.0,
+    "recall_at_10": 1.0,
+    "mrr": 1.0,
+    "type_scored": 3,
+    "type_at_1": 1.0,
+    "type_present": 1.0,
+    "type_starved": 0,
+    "median_top1_distance_km": 0.009,
+    "p50_ms": 462.5,
+    "p95_ms": 1136.5,
+    "transient_retries": 0,
+    "cases_with_transient_retry": 0
+   },
+   "place:poi_family=healthcare|scope=brand_branch": {
+    "requested": 1,
+    "unsupported": 0,
+    "unscorable": 0,
+    "n": 1,
+    "errors": 0,
+    "found_at_1": 0,
+    "found_at_5": 0,
+    "found_at_10": 0,
+    "recall_at_1": 0.0,
+    "recall_at_5": 0.0,
+    "recall_at_10": 0.0,
+    "mrr": 0.0,
+    "type_scored": 1,
+    "type_at_1": 1.0,
+    "type_present": 1.0,
+    "type_starved": 0,
+    "median_top1_distance_km": 12.578,
+    "p50_ms": 1507.1,
+    "p95_ms": 1507.1,
+    "transient_retries": 0,
+    "cases_with_transient_retry": 0
+   },
+   "place:poi_family=healthcare|scope=independent": {
+    "requested": 3,
+    "unsupported": 0,
+    "unscorable": 0,
+    "n": 3,
+    "errors": 0,
+    "found_at_1": 2,
+    "found_at_5": 2,
+    "found_at_10": 2,
+    "recall_at_1": 0.667,
+    "recall_at_5": 0.667,
+    "recall_at_10": 0.667,
+    "mrr": 0.667,
+    "type_scored": 3,
+    "type_at_1": 1.0,
+    "type_present": 1.0,
+    "type_starved": 0,
+    "median_top1_distance_km": 0.136,
+    "p50_ms": 223.6,
+    "p95_ms": 418.1,
+    "transient_retries": 0,
+    "cases_with_transient_retry": 0
+   },
+   "place:poi_family=lodging|scope=brand_branch": {
+    "requested": 1,
+    "unsupported": 0,
+    "unscorable": 0,
+    "n": 1,
+    "errors": 0,
+    "found_at_1": 0,
+    "found_at_5": 0,
+    "found_at_10": 0,
+    "recall_at_1": 0.0,
+    "recall_at_5": 0.0,
+    "recall_at_10": 0.0,
+    "mrr": 0.0,
+    "type_scored": 1,
+    "type_at_1": 0.0,
+    "type_present": 0.0,
+    "type_starved": 1,
+    "median_top1_distance_km": null,
+    "p50_ms": 272.8,
+    "p95_ms": 272.8,
+    "transient_retries": 0,
+    "cases_with_transient_retry": 0
+   },
+   "place:poi_family=lodging|scope=independent": {
+    "requested": 3,
+    "unsupported": 0,
+    "unscorable": 0,
+    "n": 3,
+    "errors": 0,
+    "found_at_1": 1,
+    "found_at_5": 1,
+    "found_at_10": 3,
+    "recall_at_1": 0.333,
+    "recall_at_5": 0.333,
+    "recall_at_10": 1.0,
+    "mrr": 0.417,
+    "type_scored": 3,
+    "type_at_1": 1.0,
+    "type_present": 1.0,
+    "type_starved": 0,
+    "median_top1_distance_km": 0.139,
+    "p50_ms": 239.8,
+    "p95_ms": 651.1,
+    "transient_retries": 0,
+    "cases_with_transient_retry": 0
+   },
+   "place:poi_family=retail|scope=brand_branch": {
+    "requested": 2,
+    "unsupported": 0,
+    "unscorable": 0,
+    "n": 2,
+    "errors": 0,
+    "found_at_1": 0,
+    "found_at_5": 0,
+    "found_at_10": 0,
+    "recall_at_1": 0.0,
+    "recall_at_5": 0.0,
+    "recall_at_10": 0.0,
+    "mrr": 0.0,
+    "type_scored": 2,
+    "type_at_1": 0.5,
+    "type_present": 0.5,
+    "type_starved": 1,
+    "median_top1_distance_km": 1.529,
+    "p50_ms": 987.8,
+    "p95_ms": 1566.0,
+    "transient_retries": 0,
+    "cases_with_transient_retry": 0
+   },
+   "place:poi_family=retail|scope=independent": {
+    "requested": 2,
+    "unsupported": 0,
+    "unscorable": 0,
+    "n": 2,
+    "errors": 0,
+    "found_at_1": 0,
+    "found_at_5": 1,
+    "found_at_10": 1,
+    "recall_at_1": 0.0,
+    "recall_at_5": 0.5,
+    "recall_at_10": 0.5,
+    "mrr": 0.167,
+    "type_scored": 2,
+    "type_at_1": 1.0,
+    "type_present": 1.0,
+    "type_starved": 0,
+    "median_top1_distance_km": 2.455,
+    "p50_ms": 85.0,
+    "p95_ms": 102.6,
+    "transient_retries": 0,
+    "cases_with_transient_retry": 0
+   }
+  }
+ },
+ "provider_summaries": {
+  "overture": {
+   "overall": {
+    "requested": 55,
+    "unsupported": 0,
+    "unscorable": 0,
+    "n": 55,
+    "errors": 0,
+    "found_at_1": 31,
+    "found_at_5": 37,
+    "found_at_10": 40,
+    "recall_at_1": 0.564,
+    "recall_at_5": 0.673,
+    "recall_at_10": 0.727,
+    "mrr": 0.618,
+    "type_scored": 55,
+    "type_at_1": 0.909,
+    "type_present": 0.927,
+    "type_starved": 4,
+    "median_top1_distance_km": 0.348,
+    "p50_ms": 239.8,
+    "p95_ms": 1507.1,
+    "transient_retries": 0,
+    "cases_with_transient_retry": 0
+   },
+   "self_recall": {
+    "requested": 55,
+    "unsupported": 0,
+    "unscorable": 0,
+    "n": 55,
+    "errors": 0,
+    "found_at_1": 31,
+    "found_at_5": 37,
+    "found_at_10": 40,
+    "recall_at_1": 0.564,
+    "recall_at_5": 0.673,
+    "recall_at_10": 0.727,
+    "mrr": 0.618,
+    "type_scored": 55,
+    "type_at_1": 0.909,
+    "type_present": 0.927,
+    "type_starved": 4,
+    "median_top1_distance_km": 0.348,
+    "p50_ms": 239.8,
+    "p95_ms": 1507.1,
+    "transient_retries": 0,
+    "cases_with_transient_retry": 0
+   },
+   "by_kind": {
+    "place": {
+     "requested": 55,
+     "unsupported": 0,
+     "unscorable": 0,
+     "n": 55,
+     "errors": 0,
+     "found_at_1": 31,
+     "found_at_5": 37,
+     "found_at_10": 40,
+     "recall_at_1": 0.564,
+     "recall_at_5": 0.673,
+     "recall_at_10": 0.727,
+     "mrr": 0.618,
+     "type_scored": 55,
+     "type_at_1": 0.909,
+     "type_present": 0.927,
+     "type_starved": 4,
+     "median_top1_distance_km": 0.348,
+     "p50_ms": 239.8,
+     "p95_ms": 1507.1,
+     "transient_retries": 0,
+     "cases_with_transient_retry": 0
+    }
+   },
+   "by_query_style": {
+    "place:brand_branch": {
+     "requested": 3,
+     "unsupported": 0,
+     "unscorable": 0,
+     "n": 3,
+     "errors": 0,
+     "found_at_1": 0,
+     "found_at_5": 0,
+     "found_at_10": 0,
+     "recall_at_1": 0.0,
+     "recall_at_5": 0.0,
+     "recall_at_10": 0.0,
+     "mrr": 0.0,
+     "type_scored": 3,
+     "type_at_1": 0.333,
+     "type_present": 0.333,
+     "type_starved": 2,
+     "median_top1_distance_km": 1.529,
+     "p50_ms": 1566.0,
+     "p95_ms": 3184.3,
+     "transient_retries": 0,
+     "cases_with_transient_retry": 0
+    },
+    "place:inverse_seam": {
+     "requested": 5,
+     "unsupported": 0,
+     "unscorable": 0,
+     "n": 5,
+     "errors": 0,
+     "found_at_1": 1,
+     "found_at_5": 1,
+     "found_at_10": 1,
+     "recall_at_1": 0.2,
+     "recall_at_5": 0.2,
+     "recall_at_10": 0.2,
+     "mrr": 0.2,
+     "type_scored": 5,
+     "type_at_1": 0.8,
+     "type_present": 0.8,
+     "type_starved": 1,
+     "median_top1_distance_km": 390.956,
+     "p50_ms": 287.7,
+     "p95_ms": 1396.6,
+     "transient_retries": 0,
+     "cases_with_transient_retry": 0
+    },
+    "place:name": {
+     "requested": 10,
+     "unsupported": 0,
+     "unscorable": 0,
+     "n": 10,
+     "errors": 0,
+     "found_at_1": 6,
+     "found_at_5": 8,
+     "found_at_10": 9,
+     "recall_at_1": 0.6,
+     "recall_at_5": 0.8,
+     "recall_at_10": 0.9,
+     "mrr": 0.71,
+     "type_scored": 10,
+     "type_at_1": 1.0,
+     "type_present": 1.0,
+     "type_starved": 0,
+     "median_top1_distance_km": 1.964,
+     "p50_ms": 189.8,
+     "p95_ms": 255.9,
+     "transient_retries": 0,
+     "cases_with_transient_retry": 0
+    },
+    "place:name_locality": {
+     "requested": 10,
+     "unsupported": 0,
+     "unscorable": 0,
+     "n": 10,
+     "errors": 0,
+     "found_at_1": 6,
+     "found_at_5": 8,
+     "found_at_10": 8,
+     "recall_at_1": 0.6,
+     "recall_at_5": 0.8,
+     "recall_at_10": 0.8,
+     "mrr": 0.683,
+     "type_scored": 10,
+     "type_at_1": 1.0,
+     "type_present": 1.0,
+     "type_starved": 0,
+     "median_top1_distance_km": 0.993,
+     "p50_ms": 484.9,
+     "p95_ms": 870.1,
+     "transient_retries": 0,
+     "cases_with_transient_retry": 0
+    },
+    "place:named_poi": {
+     "requested": 17,
+     "unsupported": 0,
+     "unscorable": 0,
+     "n": 17,
+     "errors": 0,
+     "found_at_1": 9,
+     "found_at_5": 10,
+     "found_at_10": 12,
+     "recall_at_1": 0.529,
+     "recall_at_5": 0.588,
+     "recall_at_10": 0.706,
+     "mrr": 0.564,
+     "type_scored": 17,
+     "type_at_1": 0.941,
+     "type_present": 0.941,
+     "type_starved": 1,
+     "median_top1_distance_km": 0.138,
+     "p50_ms": 299.4,
+     "p95_ms": 1507.1,
+     "transient_retries": 0,
+     "cases_with_transient_retry": 0
+    },
+    "place:seam": {
+     "requested": 10,
+     "unsupported": 0,
+     "unscorable": 0,
+     "n": 10,
+     "errors": 0,
+     "found_at_1": 9,
+     "found_at_5": 10,
+     "found_at_10": 10,
+     "recall_at_1": 0.9,
+     "recall_at_5": 1.0,
+     "recall_at_10": 1.0,
+     "mrr": 0.95,
+     "type_scored": 10,
+     "type_at_1": 0.9,
+     "type_present": 1.0,
+     "type_starved": 0,
+     "median_top1_distance_km": 0.374,
+     "p50_ms": 55.5,
+     "p95_ms": 279.8,
+     "transient_retries": 0,
+     "cases_with_transient_retry": 0
+    }
+   },
+   "by_stratum": {
+    "place:poi_family=civic_transit|scope=independent": {
+     "requested": 4,
+     "unsupported": 0,
+     "unscorable": 0,
+     "n": 4,
+     "errors": 0,
+     "found_at_1": 3,
+     "found_at_5": 3,
+     "found_at_10": 3,
+     "recall_at_1": 0.75,
+     "recall_at_5": 0.75,
+     "recall_at_10": 0.75,
+     "mrr": 0.75,
+     "type_scored": 4,
+     "type_at_1": 1.0,
+     "type_present": 1.0,
+     "type_starved": 0,
+     "median_top1_distance_km": 0.144,
+     "p50_ms": 387.9,
+     "p95_ms": 549.4,
+     "transient_retries": 0,
+     "cases_with_transient_retry": 0
+    },
+    "place:poi_family=food_drink|scope=brand_branch": {
+     "requested": 1,
+     "unsupported": 0,
+     "unscorable": 0,
+     "n": 1,
+     "errors": 0,
+     "found_at_1": 0,
+     "found_at_5": 0,
+     "found_at_10": 0,
+     "recall_at_1": 0.0,
+     "recall_at_5": 0.0,
+     "recall_at_10": 0.0,
+     "mrr": 0.0,
+     "type_scored": 1,
+     "type_at_1": 0.0,
+     "type_present": 0.0,
+     "type_starved": 1,
+     "median_top1_distance_km": null,
+     "p50_ms": 3184.3,
+     "p95_ms": 3184.3,
+     "transient_retries": 0,
+     "cases_with_transient_retry": 0
+    },
+    "place:poi_family=food_drink|scope=independent": {
+     "requested": 3,
+     "unsupported": 0,
+     "unscorable": 0,
+     "n": 3,
+     "errors": 0,
+     "found_at_1": 3,
+     "found_at_5": 3,
+     "found_at_10": 3,
+     "recall_at_1": 1.0,
+     "recall_at_5": 1.0,
+     "recall_at_10": 1.0,
+     "mrr": 1.0,
+     "type_scored": 3,
+     "type_at_1": 1.0,
+     "type_present": 1.0,
+     "type_starved": 0,
+     "median_top1_distance_km": 0.009,
+     "p50_ms": 462.5,
+     "p95_ms": 1136.5,
+     "transient_retries": 0,
+     "cases_with_transient_retry": 0
+    },
+    "place:poi_family=healthcare|scope=brand_branch": {
+     "requested": 1,
+     "unsupported": 0,
+     "unscorable": 0,
+     "n": 1,
+     "errors": 0,
+     "found_at_1": 0,
+     "found_at_5": 0,
+     "found_at_10": 0,
+     "recall_at_1": 0.0,
+     "recall_at_5": 0.0,
+     "recall_at_10": 0.0,
+     "mrr": 0.0,
+     "type_scored": 1,
+     "type_at_1": 1.0,
+     "type_present": 1.0,
+     "type_starved": 0,
+     "median_top1_distance_km": 12.578,
+     "p50_ms": 1507.1,
+     "p95_ms": 1507.1,
+     "transient_retries": 0,
+     "cases_with_transient_retry": 0
+    },
+    "place:poi_family=healthcare|scope=independent": {
+     "requested": 3,
+     "unsupported": 0,
+     "unscorable": 0,
+     "n": 3,
+     "errors": 0,
+     "found_at_1": 2,
+     "found_at_5": 2,
+     "found_at_10": 2,
+     "recall_at_1": 0.667,
+     "recall_at_5": 0.667,
+     "recall_at_10": 0.667,
+     "mrr": 0.667,
+     "type_scored": 3,
+     "type_at_1": 1.0,
+     "type_present": 1.0,
+     "type_starved": 0,
+     "median_top1_distance_km": 0.136,
+     "p50_ms": 223.6,
+     "p95_ms": 418.1,
+     "transient_retries": 0,
+     "cases_with_transient_retry": 0
+    },
+    "place:poi_family=lodging|scope=brand_branch": {
+     "requested": 1,
+     "unsupported": 0,
+     "unscorable": 0,
+     "n": 1,
+     "errors": 0,
+     "found_at_1": 0,
+     "found_at_5": 0,
+     "found_at_10": 0,
+     "recall_at_1": 0.0,
+     "recall_at_5": 0.0,
+     "recall_at_10": 0.0,
+     "mrr": 0.0,
+     "type_scored": 1,
+     "type_at_1": 0.0,
+     "type_present": 0.0,
+     "type_starved": 1,
+     "median_top1_distance_km": null,
+     "p50_ms": 272.8,
+     "p95_ms": 272.8,
+     "transient_retries": 0,
+     "cases_with_transient_retry": 0
+    },
+    "place:poi_family=lodging|scope=independent": {
+     "requested": 3,
+     "unsupported": 0,
+     "unscorable": 0,
+     "n": 3,
+     "errors": 0,
+     "found_at_1": 1,
+     "found_at_5": 1,
+     "found_at_10": 3,
+     "recall_at_1": 0.333,
+     "recall_at_5": 0.333,
+     "recall_at_10": 1.0,
+     "mrr": 0.417,
+     "type_scored": 3,
+     "type_at_1": 1.0,
+     "type_present": 1.0,
+     "type_starved": 0,
+     "median_top1_distance_km": 0.139,
+     "p50_ms": 239.8,
+     "p95_ms": 651.1,
+     "transient_retries": 0,
+     "cases_with_transient_retry": 0
+    },
+    "place:poi_family=retail|scope=brand_branch": {
+     "requested": 2,
+     "unsupported": 0,
+     "unscorable": 0,
+     "n": 2,
+     "errors": 0,
+     "found_at_1": 0,
+     "found_at_5": 0,
+     "found_at_10": 0,
+     "recall_at_1": 0.0,
+     "recall_at_5": 0.0,
+     "recall_at_10": 0.0,
+     "mrr": 0.0,
+     "type_scored": 2,
+     "type_at_1": 0.5,
+     "type_present": 0.5,
+     "type_starved": 1,
+     "median_top1_distance_km": 1.529,
+     "p50_ms": 987.8,
+     "p95_ms": 1566.0,
+     "transient_retries": 0,
+     "cases_with_transient_retry": 0
+    },
+    "place:poi_family=retail|scope=independent": {
+     "requested": 2,
+     "unsupported": 0,
+     "unscorable": 0,
+     "n": 2,
+     "errors": 0,
+     "found_at_1": 0,
+     "found_at_5": 1,
+     "found_at_10": 1,
+     "recall_at_1": 0.0,
+     "recall_at_5": 0.5,
+     "recall_at_10": 0.5,
+     "mrr": 0.167,
+     "type_scored": 2,
+     "type_at_1": 1.0,
+     "type_present": 1.0,
+     "type_starved": 0,
+     "median_top1_distance_km": 2.455,
+     "p50_ms": 85.0,
+     "p95_ms": 102.6,
+     "transient_retries": 0,
+     "cases_with_transient_retry": 0
+    }
+   }
+  }
+ },
+ "results": [
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:seam:seattle",
+   "kind": "place",
+   "query": "Seattle",
+   "query_style": "seam",
+   "status": 200,
+   "ms": 93.3,
+   "error": null,
+   "rank": 1,
+   "found_at_1": true,
+   "found_at_10": true,
+   "matched_distance_km": 0.304,
+   "top1_distance_km": 0.304,
+   "expected_feature_type": "locality",
+   "top1_feature_type": "locality",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "f195dba2-33a7-4585-ba9e-79fd7417b950",
+     "name": "Seattle, WA",
+     "feature_type": "locality",
+     "lat": 47.603832,
+     "lon": -122.330062,
+     "distance_km": 0.304
+    },
+    {
+     "id": "ecc7b66b-2ecc-4aad-9bd2-51e1d169ef05",
+     "name": "Seattle Fishermen's Memorial",
+     "feature_type": "poi",
+     "lat": 47.655781,
+     "lon": -122.380638,
+     "distance_km": 6.605
+    },
+    {
+     "id": "033769e3-49a0-4af4-bc59-aa2538b032b9",
+     "name": "Seattle-Tacoma International Airport (SEA) - North Satellite Terminal",
+     "feature_type": "poi",
+     "lat": 47.44846,
+     "lon": -122.302406,
+     "distance_km": 17.681
+    },
+    {
+     "id": "48d5e649-bfd7-4c1e-877d-0b177ce309eb",
+     "name": "Seattle-Tacoma International Airport",
+     "feature_type": "poi",
+     "lat": 47.448891,
+     "lon": -122.309448,
+     "distance_km": 17.574
+    },
+    {
+     "id": "2dfd66ad-bf20-4718-8c2a-56676d53e4bb",
+     "name": "Chief Seattle Statue",
+     "feature_type": "poi",
+     "lat": 47.618382,
+     "lon": -122.34742,
+     "distance_km": 1.776
+    },
+    {
+     "id": "e5260c30-4a11-4f80-ac37-2578ba418df7",
+     "name": "Space Needle, Seattle Washington State US",
+     "feature_type": "poi",
+     "lat": 47.616402,
+     "lon": -122.34903,
+     "distance_km": 1.702
+    },
+    {
+     "id": "6a9f84db-b205-4e3f-b5ab-8dbf707facae",
+     "name": "Garden of Remembrance",
+     "feature_type": "poi",
+     "lat": 47.608032,
+     "lon": -122.336998,
+     "distance_km": 0.42
+    },
+    {
+     "id": "b9d6e4a4-057c-4cc1-a640-6a6cdd52c8ef",
+     "name": "Dorothy Parker's House",
+     "feature_type": "poi",
+     "lat": 40.785225,
+     "lon": -73.981514,
+     "distance_km": 3863.58
+    },
+    {
+     "id": "870fb39c-fff8-4ad8-99af-7b8f7b7f0d85",
+     "name": "The Seattle Space Needle",
+     "feature_type": "poi",
+     "lat": 47.620586,
+     "lon": -122.34938,
+     "distance_km": 2.058
+    },
+    {
+     "id": "b7090e50-7dda-43ba-919f-d401daa98c89",
+     "name": "Birthplace of Seattle",
+     "feature_type": "poi",
+     "lat": 47.579517,
+     "lon": -122.408852,
+     "distance_km": 6.475
+    }
+   ]
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:seam:paris",
+   "kind": "place",
+   "query": "Paris",
+   "query_style": "seam",
+   "status": 200,
+   "ms": 279.8,
+   "error": null,
+   "rank": 1,
+   "found_at_1": true,
+   "found_at_10": true,
+   "matched_distance_km": 0.444,
+   "top1_distance_km": 0.444,
+   "expected_feature_type": "locality",
+   "top1_feature_type": "locality",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "8ac4f7a7-3596-4267-89a6-9ae3d1c6a634",
+     "name": "Paris, FR-IDF",
+     "feature_type": "locality",
+     "lat": 48.853495,
+     "lon": 2.348391,
+     "distance_km": 0.444
+    },
+    {
+     "id": "1331c064-e204-4a8d-b77e-26b97327af28",
+     "name": "Paris, TX",
+     "feature_type": "locality",
+     "lat": 33.661796,
+     "lon": -95.555513,
+     "distance_km": 7783.271
+    },
+    {
+     "id": "880f15ef-2f48-4504-9d13-e7de2ce08a64",
+     "name": "Paris, FR-IDF",
+     "feature_type": "county",
+     "lat": 48.85889,
+     "lon": 2.320041,
+     "distance_km": 2.366
+    },
+    {
+     "id": "8fa68a2a-8a54-4a2c-a722-423db347d889",
+     "name": "Paris Balloon",
+     "feature_type": "poi",
+     "lat": 36.111626,
+     "lon": -115.172607,
+     "distance_km": 8736.478
+    },
+    {
+     "id": "2100ccaa-cf05-4981-81eb-f3b707a15ce6",
+     "name": "Paris, FR-IDF",
+     "feature_type": "localadmin",
+     "lat": 48.85889,
+     "lon": 2.320041,
+     "distance_km": 2.366
+    },
+    {
+     "id": "59118569-841e-40e0-8b44-6edfc461142b",
+     "name": "Paris-l'Hôpital, FR-BFC",
+     "feature_type": "locality",
+     "lat": 46.915028,
+     "lon": 4.633023,
+     "distance_km": 274.811
+    },
+    {
+     "id": "fbdf1b63-d703-4f07-9203-d19ad857e003",
+     "name": "Arc de Triomphe at Paris Las Vegas",
+     "feature_type": "poi",
+     "lat": 36.111652,
+     "lon": -115.171638,
+     "distance_km": 8736.424
+    },
+    {
+     "id": "38cd848c-e2b5-4961-822e-cc6f74a5aadc",
+     "name": "Le Cimetière de Montparnasse Paris",
+     "feature_type": "poi",
+     "lat": 48.840427,
+     "lon": 2.325359,
+     "distance_km": 2.663
+    },
+    {
+     "id": "ce0b662c-472b-4297-9eeb-63856d467e2d",
+     "name": "Porte de Paris",
+     "feature_type": "poi",
+     "lat": 50.629642,
+     "lon": 3.068764,
+     "distance_km": 203.763
+    },
+    {
+     "id": "915e394f-aed6-4daa-b483-82f6f76b4bea",
+     "name": "Arco do Triunfo, Paris, França",
+     "feature_type": "poi",
+     "lat": 48.858593,
+     "lon": 2.36837,
+     "distance_km": 1.204
+    }
+   ]
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:seam:berlin",
+   "kind": "place",
+   "query": "Berlin",
+   "query_style": "seam",
+   "status": 200,
+   "ms": 49.7,
+   "error": null,
+   "rank": 1,
+   "found_at_1": true,
+   "found_at_10": true,
+   "matched_distance_km": 0.728,
+   "top1_distance_km": 0.728,
+   "expected_feature_type": "locality",
+   "top1_feature_type": "locality",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "9187e609-5a2f-4535-85ec-e2b88399eea3",
+     "name": "Berlin, DE-BE",
+     "feature_type": "locality",
+     "lat": 52.517389,
+     "lon": 13.395131,
+     "distance_km": 0.728
+    },
+    {
+     "id": "59f212f3-4e73-45d4-aca6-a8c5cb0c2bfd",
+     "name": "Berlin, DE-BE",
+     "feature_type": "region",
+     "lat": 52.517389,
+     "lon": 13.395131,
+     "distance_km": 0.728
+    },
+    {
+     "id": "5f4ab391-4e34-43fa-9fbf-d9cc7ead740f",
+     "name": "Berlin, CT",
+     "feature_type": "locality",
+     "lat": 41.621488,
+     "lon": -72.745652,
+     "distance_km": 6238.929
+    },
+    {
+     "id": "16e09897-a972-462e-8db7-2c600a3a6b52",
+     "name": "Kitchener, CA-ON",
+     "feature_type": "locality",
+     "lat": 43.451291,
+     "lon": -80.492782,
+     "distance_km": 6555.301
+    },
+    {
+     "id": "3c36317b-8ead-42c9-9946-cf5240b30288",
+     "name": "Berlin Wall Monument",
+     "feature_type": "poi",
+     "lat": 41.966106,
+     "lon": -87.688568,
+     "distance_km": 7079.381
+    },
+    {
+     "id": "1db2bcab-1f05-42d3-b0f7-c5ac64a828d9",
+     "name": "Berlin Brandenburger Tor",
+     "feature_type": "poi",
+     "lat": 53.495571,
+     "lon": 10.01168,
+     "distance_km": 251.586
+    },
+    {
+     "id": "6eb9d906-f040-44d2-92c0-bec41c8146a8",
+     "name": "Berlin Wall",
+     "feature_type": "poi",
+     "lat": 40.711639,
+     "lon": -74.016403,
+     "distance_km": 6385.725
+    },
+    {
+     "id": "1e77cb46-6d42-441b-b4d5-dba22c42ca2a",
+     "name": "Bernau, DE-BB",
+     "feature_type": "locality",
+     "lat": 52.678725,
+     "lon": 13.588111,
+     "distance_km": 21.551
+    },
+    {
+     "id": "54935d74-4fde-4ce9-b0b7-0d1d3ad2234f",
+     "name": "New Berlin, WI",
+     "feature_type": "locality",
+     "lat": 42.976218,
+     "lon": -88.108497,
+     "distance_km": 7018.717
+    },
+    {
+     "id": "bc81d4b3-9022-4dda-8186-207c9b72f944",
+     "name": "Forum Willy Brandt Berlin",
+     "feature_type": "poi",
+     "lat": 52.515366,
+     "lon": 13.386364,
+     "distance_km": 1.362
+    }
+   ]
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:seam:monaco",
+   "kind": "place",
+   "query": "Monaco",
+   "query_style": "seam",
+   "status": 200,
+   "ms": 61.2,
+   "error": null,
+   "rank": 1,
+   "found_at_1": true,
+   "found_at_10": true,
+   "matched_distance_km": 0.717,
+   "top1_distance_km": 0.717,
+   "expected_feature_type": "locality",
+   "top1_feature_type": "country",
+   "type_at_1": false,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "8c379db3-e741-4766-95c9-ee2a7d92d984",
+     "name": "Monaco, MC",
+     "feature_type": "country",
+     "lat": 43.732349,
+     "lon": 7.427683,
+     "distance_km": 0.717
+    },
+    {
+     "id": "0ce8ff8d-833e-41e1-8d30-f95ea95f1423",
+     "name": "Monaco, MC",
+     "feature_type": "locality",
+     "lat": 43.731016,
+     "lon": 7.420959,
+     "distance_km": 0.872
+    },
+    {
+     "id": "0448061a-a127-41a6-9a6f-3b41cf684b25",
+     "name": "Monaco, MC",
+     "feature_type": "region",
+     "lat": 43.738449,
+     "lon": 7.424224,
+     "distance_km": 0.031
+    },
+    {
+     "id": "5b40e11c-8246-4661-8535-48eef3f80947",
+     "name": "Monaco Franze & Helmut Dietl Monument",
+     "feature_type": "poi",
+     "lat": 48.163437,
+     "lon": 11.58745,
+     "distance_km": 587.743
+    },
+    {
+     "id": "3bc51db7-a777-4e03-a370-5c0139a171ab",
+     "name": "Monaco Street Parkway",
+     "feature_type": "poi",
+     "lat": 39.732918,
+     "lon": -104.91259,
+     "distance_km": 8524.014
+    },
+    {
+     "id": "efea5bfa-f041-43fd-bc98-c11f88b2a274",
+     "name": "Monaco Monuments",
+     "feature_type": "poi",
+     "lat": 44.063446,
+     "lon": -79.427048,
+     "distance_km": 6602.859
+    },
+    {
+     "id": "0288a0f0-14d6-4b1f-a228-719f330bb241",
+     "name": "Monumento a Juan Manuel Fangio (Argentino) en Monaco",
+     "feature_type": "poi",
+     "lat": 43.732456,
+     "lon": 7.422719,
+     "distance_km": 0.678
+    },
+    {
+     "id": "fe3aeae8-20ed-4915-9a88-b84b923364b7",
+     "name": "Abbaye du Lys",
+     "feature_type": "poi",
+     "lat": 48.518215,
+     "lon": 2.631968,
+     "distance_km": 646.927
+    },
+    {
+     "id": "175aa456-556b-4f66-be84-3e83708955df",
+     "name": "Tour de Monaco",
+     "feature_type": "poi",
+     "lat": 44.843906,
+     "lon": 2.660269,
+     "distance_km": 398.564
+    },
+    {
+     "id": "c92b7778-1606-4e3e-af58-9726a07cc360",
+     "name": "Enny Monaco Lecce",
+     "feature_type": "poi",
+     "lat": 40.353989,
+     "lon": 18.172634,
+     "distance_km": 963.051
+    }
+   ]
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:seam:chicago",
+   "kind": "place",
+   "query": "Chicago",
+   "query_style": "seam",
+   "status": 200,
+   "ms": 47.2,
+   "error": null,
+   "rank": 1,
+   "found_at_1": true,
+   "found_at_10": true,
+   "matched_distance_km": 0.527,
+   "top1_distance_km": 0.527,
+   "expected_feature_type": "locality",
+   "top1_feature_type": "locality",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "3fa91fac-20c0-47b6-89e5-07d0682ce031",
+     "name": "Chicago, IL",
+     "feature_type": "locality",
+     "lat": 41.875562,
+     "lon": -87.624421,
+     "distance_km": 0.527
+    },
+    {
+     "id": "34af91ca-3586-43d6-a636-6c54c08383b9",
+     "name": "Decatur, AL",
+     "feature_type": "locality",
+     "lat": 34.60602,
+     "lon": -86.983817,
+     "distance_km": 810.576
+    },
+    {
+     "id": "b9bf1137-af0d-4b4d-9234-e1df74edf892",
+     "name": "Deming, NM",
+     "feature_type": "locality",
+     "lat": 32.262742,
+     "lon": -107.758198,
+     "distance_km": 2073.641
+    },
+    {
+     "id": "a1392dd6-4a1a-48c2-a50e-01d21e81aced",
+     "name": "Chicago Heights, IL",
+     "feature_type": "locality",
+     "lat": 41.506283,
+     "lon": -87.635708,
+     "distance_km": 41.347
+    },
+    {
+     "id": "e15bb8c3-13a3-46b5-9923-a6953e7d2788",
+     "name": "Chicago Ridge, IL",
+     "feature_type": "locality",
+     "lat": 41.701422,
+     "lon": -87.77922,
+     "distance_km": 23.225
+    },
+    {
+     "id": "5ad9f86c-e0a5-4e0d-b59b-bbff060b04f4",
+     "name": "Chicago Firefighter and Paramedic Memorial",
+     "feature_type": "poi",
+     "lat": 41.850716,
+     "lon": -87.609795,
+     "distance_km": 3.466
+    },
+    {
+     "id": "9663c5da-a282-4ca8-8421-fd9351bbb94f",
+     "name": "Chicago 360",
+     "feature_type": "poi",
+     "lat": 41.898743,
+     "lon": -87.623039,
+     "distance_km": 2.363
+    },
+    {
+     "id": "e9dbad00-ac2a-45dd-b517-1f9ee179d395",
+     "name": "North Chicago, IL",
+     "feature_type": "locality",
+     "lat": 42.327724,
+     "lon": -87.839419,
+     "distance_km": 52.902
+    },
+    {
+     "id": "4eaf6501-10b8-4d4d-b6f5-f8872e3121b5",
+     "name": "East Chicago, IN",
+     "feature_type": "locality",
+     "lat": 41.639786,
+     "lon": -87.454847,
+     "distance_km": 30.213
+    },
+    {
+     "id": "b657e0aa-0e84-4e66-933d-f1b89871e170",
+     "name": "West Chicago, IL",
+     "feature_type": "locality",
+     "lat": 41.884751,
+     "lon": -88.203961,
+     "distance_km": 47.539
+    }
+   ]
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:seam:melbourne",
+   "kind": "place",
+   "query": "Melbourne",
+   "query_style": "seam",
+   "status": 200,
+   "ms": 36.6,
+   "error": null,
+   "rank": 1,
+   "found_at_1": true,
+   "found_at_10": true,
+   "matched_distance_km": 0.072,
+   "top1_distance_km": 0.072,
+   "expected_feature_type": "locality",
+   "top1_feature_type": "locality",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "7000476d-2044-4faf-9bed-d25a4f3da214",
+     "name": "Melbourne, AU-VIC",
+     "feature_type": "locality",
+     "lat": -37.814245,
+     "lon": 144.963173,
+     "distance_km": 0.072
+    },
+    {
+     "id": "64a5e327-8213-40ae-a77b-12d5d1c809f8",
+     "name": "Melbourne, FL",
+     "feature_type": "locality",
+     "lat": 28.078503,
+     "lon": -80.607791,
+     "distance_km": 15672.05
+    },
+    {
+     "id": "19e44c0e-0cfa-41ea-b2bc-1de8971151a3",
+     "name": "Melbourne Central Clock",
+     "feature_type": "poi",
+     "lat": -37.810394,
+     "lon": 144.96286,
+     "distance_km": 0.357
+    },
+    {
+     "id": "df00f4ae-3dd6-4b19-aa60-558cff534cd7",
+     "name": "Melbourne Helipad",
+     "feature_type": "poi",
+     "lat": -37.973518,
+     "lon": 145.093201,
+     "distance_km": 21.131
+    },
+    {
+     "id": "6ced5fd5-3a0b-40a9-8747-00e260ac9166",
+     "name": "Melbourne Jet Base",
+     "feature_type": "poi",
+     "lat": -37.689804,
+     "lon": 144.853088,
+     "distance_km": 16.824
+    },
+    {
+     "id": "f94f94b1-c18f-464c-8c46-5633bb9e1fdf",
+     "name": "Melbourne Orlando International Airport Terminal",
+     "feature_type": "poi",
+     "lat": 28.097286,
+     "lon": -80.630165,
+     "distance_km": 15671.014
+    },
+    {
+     "id": "84036b90-e29d-4b90-860b-cf157769ed93",
+     "name": "Melbourne Jet Center",
+     "feature_type": "poi",
+     "lat": 28.108242,
+     "lon": -80.648293,
+     "distance_km": 15669.964
+    },
+    {
+     "id": "4f012ff5-b97d-46a9-a3b5-f7c7c8fbf06d",
+     "name": "Melbourne Airport",
+     "feature_type": "poi",
+     "lat": -37.665813,
+     "lon": 144.821976,
+     "distance_km": 20.592
+    },
+    {
+     "id": "c82821d3-3a70-4857-b259-81517e76d12a",
+     "name": "West Melbourne, FL",
+     "feature_type": "locality",
+     "lat": 28.073626,
+     "lon": -80.671839,
+     "distance_km": 15666.182
+    },
+    {
+     "id": "8a9c1831-5ce0-420d-8784-e18059b15f68",
+     "name": "Port Melbourne Lookout",
+     "feature_type": "poi",
+     "lat": -37.842907,
+     "lon": 144.933212,
+     "distance_km": 4.185
+    }
+   ]
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:seam:toronto",
+   "kind": "place",
+   "query": "Toronto",
+   "query_style": "seam",
+   "status": 200,
+   "ms": 159.4,
+   "error": null,
+   "rank": 1,
+   "found_at_1": true,
+   "found_at_10": true,
+   "matched_distance_km": 0.067,
+   "top1_distance_km": 0.067,
+   "expected_feature_type": "locality",
+   "top1_feature_type": "locality",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "21381221-fa00-4111-bb1c-bb7020d75dfd",
+     "name": "Toronto, CA-ON",
+     "feature_type": "locality",
+     "lat": 43.653482,
+     "lon": -79.383935,
+     "distance_km": 0.067
+    },
+    {
+     "id": "9fc3a6b4-bdda-43dc-a217-1e23d7295b17",
+     "name": "Toronto, CA-ON",
+     "feature_type": "county",
+     "lat": 43.653482,
+     "lon": -79.383935,
+     "distance_km": 0.067
+    },
+    {
+     "id": "f4dd6d5d-afb5-41d6-b26f-1676c385fa1e",
+     "name": "Toronto Driftwood Sign",
+     "feature_type": "poi",
+     "lat": 43.629829,
+     "lon": -79.472549,
+     "distance_km": 7.645
+    },
+    {
+     "id": "63a88e17-5c16-4d98-b2eb-a5c88185b129",
+     "name": "Toronto Pearson International Airport",
+     "feature_type": "poi",
+     "lat": 43.68536,
+     "lon": -79.621033,
+     "distance_km": 19.461
+    },
+    {
+     "id": "4396b158-585c-443e-8d09-6cab63824029",
+     "name": "Toronto Airport Limo Link",
+     "feature_type": "poi",
+     "lat": 43.793114,
+     "lon": -79.670036,
+     "distance_km": 27.809
+    },
+    {
+     "id": "c5bd8369-9ec7-4a19-a574-8911d84200b2",
+     "name": "Holocaust Centre of Toronto",
+     "feature_type": "poi",
+     "lat": 43.764118,
+     "lon": -79.441086,
+     "distance_km": 13.182
+    },
+    {
+     "id": "04dda46f-3fbb-4240-b3c7-897af986d5dd",
+     "name": "ParkforU - Toronto Airport Parking",
+     "feature_type": "poi",
+     "lat": 43.690521,
+     "lon": -79.600601,
+     "distance_km": 17.971
+    },
+    {
+     "id": "681cc756-55d6-484c-b195-30821bdb87fa",
+     "name": "Billy Bishop Toronto City Airport",
+     "feature_type": "poi",
+     "lat": 43.628948,
+     "lon": -79.394409,
+     "distance_km": 2.844
+    },
+    {
+     "id": "68f31db4-57e9-4b1a-a99f-bea7d47e65a7",
+     "name": "Aéroport Billy Bishop de Toronto",
+     "feature_type": "poi",
+     "lat": 43.631592,
+     "lon": -79.395035,
+     "distance_km": 2.585
+    },
+    {
+     "id": "70ea0017-32d2-4d11-99ce-c8bb41ca2743",
+     "name": "Pearson Airport Toronto",
+     "feature_type": "poi",
+     "lat": 43.618153,
+     "lon": -79.553421,
+     "distance_km": 14.242
+    }
+   ]
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:seam:dublin",
+   "kind": "place",
+   "query": "Dublin",
+   "query_style": "seam",
+   "status": 200,
+   "ms": 34.8,
+   "error": null,
+   "rank": 1,
+   "found_at_1": true,
+   "found_at_10": true,
+   "matched_distance_km": 0.05,
+   "top1_distance_km": 0.05,
+   "expected_feature_type": "locality",
+   "top1_feature_type": "locality",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "125dd123-9c04-4380-9ab2-1166f2b333ad",
+     "name": "Dublin, IE-D",
+     "feature_type": "locality",
+     "lat": 53.349379,
+     "lon": -6.260559,
+     "distance_km": 0.05
+    },
+    {
+     "id": "5a07b08b-a088-4e36-b209-53c30ee72ba6",
+     "name": "Dublin, OH",
+     "feature_type": "locality",
+     "lat": 40.099601,
+     "lon": -83.113556,
+     "distance_km": 5741.9
+    },
+    {
+     "id": "f89e06a3-49a0-4a2e-9c6c-211180f7166b",
+     "name": "Dublin, CA",
+     "feature_type": "locality",
+     "lat": 37.702152,
+     "lon": -121.935792,
+     "distance_km": 8159.515
+    },
+    {
+     "id": "28c79270-f756-4e10-a6aa-a6ef9cc3e61b",
+     "name": "Dublin, GA",
+     "feature_type": "locality",
+     "lat": 32.540445,
+     "lon": -82.903754,
+     "distance_km": 6314.08
+    },
+    {
+     "id": "4f84e689-5fa5-46ea-b78b-1f1e90a9a895",
+     "name": "Dublin Airport T2",
+     "feature_type": "poi",
+     "lat": 53.31678,
+     "lon": -6.373749,
+     "distance_km": 8.38
+    },
+    {
+     "id": "d02b8fd6-5df0-457e-b8b8-9e89864df7d4",
+     "name": "Dublin Airport - Gate 108",
+     "feature_type": "poi",
+     "lat": 53.430492,
+     "lon": -6.248687,
+     "distance_km": 9.006
+    },
+    {
+     "id": "c054419f-4e36-47fd-a739-55a88b5b9680",
+     "name": "Dublin Airport Terminal 2",
+     "feature_type": "poi",
+     "lat": 53.424572,
+     "lon": -6.242147,
+     "distance_km": 8.401
+    },
+    {
+     "id": "8d3a37ed-4996-430f-96a4-71373cee62cd",
+     "name": "The Pyramid of Dublin",
+     "feature_type": "poi",
+     "lat": 53.265656,
+     "lon": -6.111002,
+     "distance_km": 13.636
+    },
+    {
+     "id": "230d7ec3-074d-4f10-9cce-b84a0b355fc4",
+     "name": "Old Dublin City Wall",
+     "feature_type": "poi",
+     "lat": 53.34309,
+     "lon": -6.275139,
+     "distance_km": 1.236
+    },
+    {
+     "id": "bbb30b81-789d-4545-a8e2-ffd03ab60fb8",
+     "name": "Bedford Tower Dublin",
+     "feature_type": "poi",
+     "lat": 53.347801,
+     "lon": -6.2597,
+     "distance_km": 0.226
+    }
+   ]
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:seam:manchester",
+   "kind": "place",
+   "query": "Manchester",
+   "query_style": "seam",
+   "status": 200,
+   "ms": 36.7,
+   "error": null,
+   "rank": 2,
+   "found_at_1": false,
+   "found_at_10": true,
+   "matched_distance_km": 0.221,
+   "top1_distance_km": 5044.935,
+   "expected_feature_type": "locality",
+   "top1_feature_type": "locality",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "08598abd-2186-48b8-911c-5aeb28109588",
+     "name": "Manchester, NH",
+     "feature_type": "locality",
+     "lat": 42.99564,
+     "lon": -71.454789,
+     "distance_km": 5044.935
+    },
+    {
+     "id": "f8d16966-7c96-4c71-b2f8-7348e9b2e5c3",
+     "name": "Manchester, GB-ENG",
+     "feature_type": "locality",
+     "lat": 53.479489,
+     "lon": -2.245115,
+     "distance_km": 0.221
+    },
+    {
+     "id": "11a4da8c-d60c-4b8d-9c9d-ed988ca11f3e",
+     "name": "Manchester, CT",
+     "feature_type": "locality",
+     "lat": 41.783402,
+     "lon": -72.523197,
+     "distance_km": 5198.083
+    },
+    {
+     "id": "fcb307fc-eb8d-4792-afc7-caa99113b324",
+     "name": "Manchester, NJ",
+     "feature_type": "locality",
+     "lat": 39.973496,
+     "lon": -74.381697,
+     "distance_km": 5447.63
+    },
+    {
+     "id": "9082be46-d7ab-43d5-b9ce-e59de160b607",
+     "name": "Manchester, MO",
+     "feature_type": "locality",
+     "lat": 38.592531,
+     "lon": -90.510745,
+     "distance_km": 6558.103
+    },
+    {
+     "id": "3bdfb3c3-5858-4df6-9542-55aff2304c36",
+     "name": "Manchester, TN",
+     "feature_type": "locality",
+     "lat": 35.4832,
+     "lon": -86.08873,
+     "distance_km": 6535.183
+    },
+    {
+     "id": "d560979e-b1aa-452c-b88b-98473df5d0aa",
+     "name": "Manchester, VA",
+     "feature_type": "locality",
+     "lat": 37.499182,
+     "lon": -77.537289,
+     "distance_km": 5835.223
+    },
+    {
+     "id": "1e03c2ec-2154-4b93-a301-7978d6e1cc65",
+     "name": "Joinville, BR-SC",
+     "feature_type": "locality",
+     "lat": -26.30449,
+     "lon": -48.848673,
+     "distance_km": 9941.497
+    },
+    {
+     "id": "40dea196-7dd4-4cee-a5f8-78bff22a32ab",
+     "name": "Manchester, New Hampshire Airport",
+     "feature_type": "poi",
+     "lat": 42.927094,
+     "lon": -71.438812,
+     "distance_km": 5048.674
+    },
+    {
+     "id": "c5b3889e-7f37-4758-a9bc-5c8ff466cf2b",
+     "name": "Manchester, JM-12",
+     "feature_type": "region",
+     "lat": 18.049926,
+     "lon": -77.510785,
+     "distance_km": 7435.102
+    }
+   ]
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:seam:phoenix",
+   "kind": "place",
+   "query": "Phoenix",
+   "query_style": "seam",
+   "status": 200,
+   "ms": 72.1,
+   "error": null,
+   "rank": 1,
+   "found_at_1": true,
+   "found_at_10": true,
+   "matched_distance_km": 0.014,
+   "top1_distance_km": 0.014,
+   "expected_feature_type": "locality",
+   "top1_feature_type": "locality",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "691048cf-5f57-4ca8-8918-b96c724e2c7a",
+     "name": "Phoenix, AZ",
+     "feature_type": "locality",
+     "lat": 33.448437,
+     "lon": -112.074141,
+     "distance_km": 0.014
+    },
+    {
+     "id": "e67f4e50-423f-4fe2-87ad-76bbb996327e",
+     "name": "Phoenix Shot Tower",
+     "feature_type": "poi",
+     "lat": 39.290691,
+     "lon": -76.605476,
+     "distance_km": 3219.992
+    },
+    {
+     "id": "a622fc34-2b89-4103-9650-a4cbf987a699",
+     "name": "PHOENIX West (Hochofenwerk)",
+     "feature_type": "poi",
+     "lat": 51.487343,
+     "lon": 7.486238,
+     "distance_km": 8887.055
+    },
+    {
+     "id": "3ef58ba2-6214-4228-bd74-7b8521f7cf10",
+     "name": "Phoenix Tower",
+     "feature_type": "poi",
+     "lat": 53.194168,
+     "lon": -2.890435,
+     "distance_km": 8219.002
+    },
+    {
+     "id": "d6f953dd-1081-46c1-803a-0c86556df862",
+     "name": "Phoenix-Mesa Gateway Airport Library Lounge",
+     "feature_type": "poi",
+     "lat": 33.307076,
+     "lon": -111.66893,
+     "distance_km": 40.763
+    },
+    {
+     "id": "09b1af7d-cb6d-45ed-acb3-3ca5ed952f87",
+     "name": "Phoenix-Mesa Gateway Airport",
+     "feature_type": "poi",
+     "lat": 33.308979,
+     "lon": -111.655937,
+     "distance_km": 41.8
+    },
+    {
+     "id": "f79a89bf-7def-4fa1-adc9-b44b019d586b",
+     "name": "Phoenix Islands, KI-P",
+     "feature_type": "region",
+     "lat": -2.8155,
+     "lon": -171.671144,
+     "distance_km": 7422.72
+    },
+    {
+     "id": "e27a0398-467f-4fce-91ae-f34460e78375",
+     "name": "Foster The Phoenix",
+     "feature_type": "poi",
+     "lat": 45.489021,
+     "lon": -122.594498,
+     "distance_km": 1611.836
+    },
+    {
+     "id": "ae0a47e2-1cc9-480e-a182-d90acb95a89d",
+     "name": "Vacoas-Phoenix, MU-PW",
+     "feature_type": "locality",
+     "lat": -20.293376,
+     "lon": 57.497804,
+     "distance_km": 18226.049
+    },
+    {
+     "id": "195581c8-0bb5-46df-857f-7ea5ac2f20c2",
+     "name": "Deer Valley Airport",
+     "feature_type": "poi",
+     "lat": 33.685417,
+     "lon": -112.083107,
+     "distance_km": 26.369
+    }
+   ]
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:name:eiffel-tower",
+   "kind": "place",
+   "query": "Eiffel Tower",
+   "query_style": "name",
+   "status": 200,
+   "ms": 177.4,
+   "error": null,
+   "rank": 1,
+   "found_at_1": true,
+   "found_at_10": true,
+   "matched_distance_km": 1.638,
+   "top1_distance_km": 1.638,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "d3f9c28f-b2db-4d08-a2ab-3f68c1ecee5b",
+     "name": "Eiffel tower",
+     "feature_type": "poi",
+     "lat": 48.872967,
+     "lon": 2.29786,
+     "distance_km": 1.638
+    },
+    {
+     "id": "d1ec4ca1-4c00-4b03-b0f6-ace7738b639b",
+     "name": "Eiffel Tower",
+     "feature_type": "poi",
+     "lat": 48.849598,
+     "lon": 2.28345,
+     "distance_km": 1.269
+    },
+    {
+     "id": "09f71ddb-27ff-469f-a079-a053776e6d6b",
+     "name": "Eiffel Tower",
+     "feature_type": "poi",
+     "lat": 48.862221,
+     "lon": 2.288713,
+     "distance_km": 0.6
+    },
+    {
+     "id": "7b67eca7-349f-4bdf-9435-a1926755ef1e",
+     "name": "Eiffel Tower",
+     "feature_type": "poi",
+     "lat": 48.874729,
+     "lon": 2.806781,
+     "distance_km": 37.515
+    },
+    {
+     "id": "28faa7e2-a4d1-43bb-b5b2-8ae70fb52057",
+     "name": "Eiffel Tower",
+     "feature_type": "poi",
+     "lat": 22.143536,
+     "lon": 113.562843,
+     "distance_km": 9607.121
+    },
+    {
+     "id": "6db3c592-ce8e-401f-960b-1700c25a245e",
+     "name": "Eiffel Tower",
+     "feature_type": "poi",
+     "lat": 48.824642,
+     "lon": 2.301076,
+     "distance_km": 3.784
+    },
+    {
+     "id": "ac8eb8b8-2259-468d-bd31-bfdda986ed11",
+     "name": "Eiffel Tower",
+     "feature_type": "poi",
+     "lat": 48.887928,
+     "lon": 2.252413,
+     "distance_km": 4.501
+    },
+    {
+     "id": "797417c0-faed-43de-bc6e-6345a5cf7d25",
+     "name": "eiffel tower",
+     "feature_type": "poi",
+     "lat": 48.831921,
+     "lon": 2.340174,
+     "distance_km": 4.454
+    },
+    {
+     "id": "c01d1068-aa00-48b9-9cf0-b9d329567577",
+     "name": "Eiffel Tower,Paris",
+     "feature_type": "poi",
+     "lat": 48.88147,
+     "lon": 2.293854,
+     "distance_km": 2.566
+    },
+    {
+     "id": "85b1ef03-1983-4b2e-8715-9911aaabe564",
+     "name": "Eiffel Tower, Paris France",
+     "feature_type": "poi",
+     "lat": 48.838444,
+     "lon": 2.380798,
+     "distance_km": 6.693
+    }
+   ]
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:name_locality:eiffel-tower",
+   "kind": "place",
+   "query": "Eiffel Tower Paris",
+   "query_style": "name_locality",
+   "status": 200,
+   "ms": 870.1,
+   "error": null,
+   "rank": 1,
+   "found_at_1": true,
+   "found_at_10": true,
+   "matched_distance_km": 1.638,
+   "top1_distance_km": 1.638,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "d3f9c28f-b2db-4d08-a2ab-3f68c1ecee5b",
+     "name": "Eiffel tower",
+     "feature_type": "poi",
+     "lat": 48.872967,
+     "lon": 2.29786,
+     "distance_km": 1.638
+    },
+    {
+     "id": "d1ec4ca1-4c00-4b03-b0f6-ace7738b639b",
+     "name": "Eiffel Tower",
+     "feature_type": "poi",
+     "lat": 48.849598,
+     "lon": 2.28345,
+     "distance_km": 1.269
+    },
+    {
+     "id": "09f71ddb-27ff-469f-a079-a053776e6d6b",
+     "name": "Eiffel Tower",
+     "feature_type": "poi",
+     "lat": 48.862221,
+     "lon": 2.288713,
+     "distance_km": 0.6
+    },
+    {
+     "id": "7b67eca7-349f-4bdf-9435-a1926755ef1e",
+     "name": "Eiffel Tower",
+     "feature_type": "poi",
+     "lat": 48.874729,
+     "lon": 2.806781,
+     "distance_km": 37.515
+    },
+    {
+     "id": "6db3c592-ce8e-401f-960b-1700c25a245e",
+     "name": "Eiffel Tower",
+     "feature_type": "poi",
+     "lat": 48.824642,
+     "lon": 2.301076,
+     "distance_km": 3.784
+    },
+    {
+     "id": "ac8eb8b8-2259-468d-bd31-bfdda986ed11",
+     "name": "Eiffel Tower",
+     "feature_type": "poi",
+     "lat": 48.887928,
+     "lon": 2.252413,
+     "distance_km": 4.501
+    },
+    {
+     "id": "797417c0-faed-43de-bc6e-6345a5cf7d25",
+     "name": "eiffel tower",
+     "feature_type": "poi",
+     "lat": 48.831921,
+     "lon": 2.340174,
+     "distance_km": 4.454
+    },
+    {
+     "id": "c01d1068-aa00-48b9-9cf0-b9d329567577",
+     "name": "Eiffel Tower,Paris",
+     "feature_type": "poi",
+     "lat": 48.88147,
+     "lon": 2.293854,
+     "distance_km": 2.566
+    },
+    {
+     "id": "85b1ef03-1983-4b2e-8715-9911aaabe564",
+     "name": "Eiffel Tower, Paris France",
+     "feature_type": "poi",
+     "lat": 48.838444,
+     "lon": 2.380798,
+     "distance_km": 6.693
+    },
+    {
+     "id": "0d8636cb-1551-4b5c-b2a1-772d61b08a5a",
+     "name": "Eiffel Tower,,Paris,Fra",
+     "feature_type": "poi",
+     "lat": 48.877075,
+     "lon": 2.297212,
+     "distance_km": 2.086
+    }
+   ]
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:name:statue-of-liberty",
+   "kind": "place",
+   "query": "Statue of Liberty",
+   "query_style": "name",
+   "status": 200,
+   "ms": 204.9,
+   "error": null,
+   "rank": 10,
+   "found_at_1": false,
+   "found_at_10": true,
+   "matched_distance_km": 1.113,
+   "top1_distance_km": 6424.993,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "a288e077-2d6b-44a4-9188-22cc46ce9fb2",
+     "name": "Statue of Liberty",
+     "feature_type": "poi",
+     "lat": 43.695042,
+     "lon": 7.272356,
+     "distance_km": 6424.993
+    },
+    {
+     "id": "04c2bcda-872a-429b-957a-3e62697e4255",
+     "name": "Statue of Liberty",
+     "feature_type": "poi",
+     "lat": 47.579288,
+     "lon": -122.410507,
+     "distance_km": 3870.086
+    },
+    {
+     "id": "e6dddeee-4d2e-4a65-be4b-5d0084fce9fa",
+     "name": "Statue of Liberty",
+     "feature_type": "poi",
+     "lat": 36.101162,
+     "lon": -115.173378,
+     "distance_km": 3587.42
+    },
+    {
+     "id": "49af337b-4551-4cd2-b7af-5353305e91df",
+     "name": "Statue of Liberty",
+     "feature_type": "poi",
+     "lat": 48.108475,
+     "lon": 7.363683,
+     "distance_km": 6213.315
+    },
+    {
+     "id": "08aaaa78-8d3e-4b1a-8dba-7e5f98d7e68d",
+     "name": "Statue of Liberty",
+     "feature_type": "poi",
+     "lat": 40.759251,
+     "lon": -73.985321,
+     "distance_km": 9.249
+    },
+    {
+     "id": "9b008df0-eb04-45cb-9643-ef5ffbbc9e89",
+     "name": "Statue of Liberty",
+     "feature_type": "poi",
+     "lat": 40.358238,
+     "lon": -76.929771,
+     "distance_km": 246.622
+    },
+    {
+     "id": "52234ee8-ec6e-40d0-9225-1628424f62e5",
+     "name": "Statue of Liberty",
+     "feature_type": "poi",
+     "lat": 33.481812,
+     "lon": -86.7071,
+     "distance_km": 1377.507
+    },
+    {
+     "id": "a2688efd-ce52-4fd3-8b8a-c35e0cd5fe59",
+     "name": "Statue of Liberty",
+     "feature_type": "poi",
+     "lat": 35.627857,
+     "lon": 139.771851,
+     "distance_km": 10852.793
+    },
+    {
+     "id": "9c40e346-6b8c-4a21-87c9-0c0f3b813a1b",
+     "name": "Statue of Liberty",
+     "feature_type": "poi",
+     "lat": 40.702778,
+     "lon": -74.014427,
+     "distance_km": 2.951
+    },
+    {
+     "id": "707ad7cf-7faf-495f-8b9e-6e0cd8807c25",
+     "name": "Statue Of Liberty National Monument",
+     "feature_type": "poi",
+     "lat": 40.698612,
+     "lon": -74.040001,
+     "distance_km": 1.113
+    }
+   ]
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:name_locality:statue-of-liberty",
+   "kind": "place",
+   "query": "Statue of Liberty New York",
+   "query_style": "name_locality",
+   "status": 200,
+   "ms": 445.4,
+   "error": null,
+   "rank": 3,
+   "found_at_1": false,
+   "found_at_10": true,
+   "matched_distance_km": 1.113,
+   "top1_distance_km": 9.249,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "08aaaa78-8d3e-4b1a-8dba-7e5f98d7e68d",
+     "name": "Statue of Liberty",
+     "feature_type": "poi",
+     "lat": 40.759251,
+     "lon": -73.985321,
+     "distance_km": 9.249
+    },
+    {
+     "id": "9c40e346-6b8c-4a21-87c9-0c0f3b813a1b",
+     "name": "Statue of Liberty",
+     "feature_type": "poi",
+     "lat": 40.702778,
+     "lon": -74.014427,
+     "distance_km": 2.951
+    },
+    {
+     "id": "707ad7cf-7faf-495f-8b9e-6e0cd8807c25",
+     "name": "Statue Of Liberty National Monument",
+     "feature_type": "poi",
+     "lat": 40.698612,
+     "lon": -74.040001,
+     "distance_km": 1.113
+    },
+    {
+     "id": "b7687c72-8aed-461e-a7a4-cefc27b77ed3",
+     "name": "Statue of Liberty & Ellis Island Events",
+     "feature_type": "poi",
+     "lat": 40.703339,
+     "lon": -74.015869,
+     "distance_km": 2.881
+    },
+    {
+     "id": "f331a554-9b45-4998-8448-5ab4bd75ce23",
+     "name": "Statue of Liberty Museum",
+     "feature_type": "poi",
+     "lat": 40.702789,
+     "lon": -74.013878,
+     "distance_km": 2.991
+    },
+    {
+     "id": "9e8e8c96-60c4-44b6-9d21-57c5fd989b29",
+     "name": "Statue of Liberty View",
+     "feature_type": "poi",
+     "lat": 40.694569,
+     "lon": -74.052559,
+     "distance_km": 0.904
+    },
+    {
+     "id": "d7495eee-c48b-4e35-9e32-fe35d9312aa7",
+     "name": "Statue of liberty park NJ",
+     "feature_type": "poi",
+     "lat": 40.707558,
+     "lon": -74.034615,
+     "distance_km": 2.205
+    },
+    {
+     "id": "b050726d-16de-409c-b521-dcf7af5067a5",
+     "name": "Statue of Liberty, State Park",
+     "feature_type": "poi",
+     "lat": 40.7066,
+     "lon": -74.035339,
+     "distance_km": 2.083
+    },
+    {
+     "id": "297827c7-67e7-41d2-90b0-e93e9b98c6fe",
+     "name": "Statue Of Liberty Deli",
+     "feature_type": "poi",
+     "lat": 40.643059,
+     "lon": -74.075447,
+     "distance_km": 5.756
+    },
+    {
+     "id": "aa2bb4c5-6aa5-47cd-9c2b-e4de04c59ab4",
+     "name": "Statue of Liberty Vista Point",
+     "feature_type": "poi",
+     "lat": 40.700924,
+     "lon": -74.01516,
+     "distance_km": 2.796
+    }
+   ]
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:name:colosseum",
+   "kind": "place",
+   "query": "Colosseum",
+   "query_style": "name",
+   "status": 200,
+   "ms": 54.3,
+   "error": null,
+   "rank": 2,
+   "found_at_1": false,
+   "found_at_10": true,
+   "matched_distance_km": 0.499,
+   "top1_distance_km": 747.339,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "089f78db-cfe3-461f-ac8f-8ec6ab99dbc8",
+     "name": "Colosseum",
+     "feature_type": "poi",
+     "lat": 44.651932,
+     "lon": 20.91407,
+     "distance_km": 747.339
+    },
+    {
+     "id": "52c372c8-5637-488b-ac7d-98fb8d954ed2",
+     "name": "Colosseum",
+     "feature_type": "poi",
+     "lat": 41.89394,
+     "lon": 12.488878,
+     "distance_km": 0.499
+    },
+    {
+     "id": "f68cfd89-9c53-4a6d-a7f8-ce9e7e9da385",
+     "name": "Colosseum",
+     "feature_type": "poi",
+     "lat": 51.47908,
+     "lon": 7.198639,
+     "distance_km": 1139.378
+    },
+    {
+     "id": "4bb455af-a3e3-4d60-9b45-b82803ae6d2f",
+     "name": "Colosseum Delhi",
+     "feature_type": "poi",
+     "lat": 28.64563,
+     "lon": 77.122093,
+     "distance_km": 5907.709
+    },
+    {
+     "id": "84657dc6-a934-44db-99b0-39f630d957ea",
+     "name": "Colosseum",
+     "feature_type": "poi",
+     "lat": 41.899307,
+     "lon": 12.476826,
+     "distance_km": 1.626
+    },
+    {
+     "id": "acdfea6a-bf64-4d78-92e2-97232293f47d",
+     "name": "Coliseo Romano",
+     "feature_type": "poi",
+     "lat": 41.890888,
+     "lon": 12.491898,
+     "distance_km": 0.081
+    },
+    {
+     "id": "d963945c-48d6-40a1-98e1-934c88f2e5a4",
+     "name": "Mount Colosseum",
+     "feature_type": "poi",
+     "lat": -24.41028,
+     "lon": 151.579163,
+     "distance_km": 15791.834
+    },
+    {
+     "id": "9680ac50-487f-4355-8ea0-4833427798be",
+     "name": "The Colosseum",
+     "feature_type": "poi",
+     "lat": 43.220428,
+     "lon": -75.412102,
+     "distance_km": 6839.008
+    },
+    {
+     "id": "843df8f4-d1d9-4e9c-8d46-6f31a5633aeb",
+     "name": "Cineteatro Colosseum",
+     "feature_type": "poi",
+     "lat": 38.082024,
+     "lon": 13.358362,
+     "distance_km": 429.825
+    },
+    {
+     "id": "773e2e18-36fa-4bcf-ae72-914df44065e0",
+     "name": "Klicperův dům Chlumec nad Cidlinou",
+     "feature_type": "poi",
+     "lat": 50.158932,
+     "lon": 15.457381,
+     "distance_km": 947.308
+    }
+   ]
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:name_locality:colosseum",
+   "kind": "place",
+   "query": "Colosseum Rome",
+   "query_style": "name_locality",
+   "status": 200,
+   "ms": 70.0,
+   "error": null,
+   "rank": 1,
+   "found_at_1": true,
+   "found_at_10": true,
+   "matched_distance_km": 0.081,
+   "top1_distance_km": 0.081,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "acdfea6a-bf64-4d78-92e2-97232293f47d",
+     "name": "Coliseo Romano",
+     "feature_type": "poi",
+     "lat": 41.890888,
+     "lon": 12.491898,
+     "distance_km": 0.081
+    },
+    {
+     "id": "9680ac50-487f-4355-8ea0-4833427798be",
+     "name": "The Colosseum",
+     "feature_type": "poi",
+     "lat": 43.220428,
+     "lon": -75.412102,
+     "distance_km": 6839.008
+    }
+   ]
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:name:big-ben",
+   "kind": "place",
+   "query": "Big Ben",
+   "query_style": "name",
+   "status": 200,
+   "ms": 75.5,
+   "error": null,
+   "rank": 1,
+   "found_at_1": true,
+   "found_at_10": true,
+   "matched_distance_km": 0.002,
+   "top1_distance_km": 0.002,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "99f74940-898a-49d5-9eca-18a8a2c47918",
+     "name": "Big Ben",
+     "feature_type": "poi",
+     "lat": 51.500702,
+     "lon": -0.124575,
+     "distance_km": 0.002
+    },
+    {
+     "id": "20c452b0-7554-4407-aa8e-b0186eab8d9f",
+     "name": "Big Ben Memorial Statue",
+     "feature_type": "poi",
+     "lat": 44.899681,
+     "lon": -76.25174,
+     "distance_km": 5430.893
+    },
+    {
+     "id": "50ba72f2-f781-4ab1-93e0-1adc4ac6699b",
+     "name": "Big Ben",
+     "feature_type": "poi",
+     "lat": 51.510838,
+     "lon": -0.114208,
+     "distance_km": 1.337
+    },
+    {
+     "id": "3a0ff840-a3a5-4171-9f73-24fab2ece25b",
+     "name": "Big Ben",
+     "feature_type": "poi",
+     "lat": 51.503422,
+     "lon": -0.118871,
+     "distance_km": 0.499
+    },
+    {
+     "id": "d4d3a382-81c3-42ea-b53f-97d372242dfb",
+     "name": "Big Ben",
+     "feature_type": "poi",
+     "lat": 51.565693,
+     "lon": -0.102611,
+     "distance_km": 7.385
+    }
+   ]
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:name_locality:big-ben",
+   "kind": "place",
+   "query": "Big Ben London",
+   "query_style": "name_locality",
+   "status": 200,
+   "ms": 510.7,
+   "error": null,
+   "rank": 1,
+   "found_at_1": true,
+   "found_at_10": true,
+   "matched_distance_km": 0.002,
+   "top1_distance_km": 0.002,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "99f74940-898a-49d5-9eca-18a8a2c47918",
+     "name": "Big Ben",
+     "feature_type": "poi",
+     "lat": 51.500702,
+     "lon": -0.124575,
+     "distance_km": 0.002
+    },
+    {
+     "id": "1fc2110b-ce75-4983-a440-2e2788d115bb",
+     "name": "Big Ben, Parliament Square",
+     "feature_type": "poi",
+     "lat": 51.500717,
+     "lon": -0.126419,
+     "distance_km": 0.126
+    },
+    {
+     "id": "ed8c0658-1bc1-4178-be56-74a3b4692e69",
+     "name": "Big Ben, House Of Parliament, London Eye & London Bridge",
+     "feature_type": "poi",
+     "lat": 51.503109,
+     "lon": -0.119568,
+     "distance_km": 0.439
+    },
+    {
+     "id": "4e8454cc-92e7-456f-9e74-70265d1af438",
+     "name": "Big Ben, Westminster, London",
+     "feature_type": "poi",
+     "lat": 51.526447,
+     "lon": -0.130019,
+     "distance_km": 2.887
+    },
+    {
+     "id": "50ba72f2-f781-4ab1-93e0-1adc4ac6699b",
+     "name": "Big Ben",
+     "feature_type": "poi",
+     "lat": 51.510838,
+     "lon": -0.114208,
+     "distance_km": 1.337
+    },
+    {
+     "id": "3a0ff840-a3a5-4171-9f73-24fab2ece25b",
+     "name": "Big Ben",
+     "feature_type": "poi",
+     "lat": 51.503422,
+     "lon": -0.118871,
+     "distance_km": 0.499
+    },
+    {
+     "id": "d4d3a382-81c3-42ea-b53f-97d372242dfb",
+     "name": "Big Ben",
+     "feature_type": "poi",
+     "lat": 51.565693,
+     "lon": -0.102611,
+     "distance_km": 7.385
+    },
+    {
+     "id": "cf1dcd02-b741-47d1-909b-5c31cd9d6b09",
+     "name": "Big Ben",
+     "feature_type": "poi",
+     "lat": 51.612419,
+     "lon": -0.06451,
+     "distance_km": 13.099
+    },
+    {
+     "id": "39bf33ee-3192-481f-8046-bd7294ee550d",
+     "name": "Big Ben London",
+     "feature_type": "poi",
+     "lat": 51.50079,
+     "lon": -0.126385,
+     "distance_km": 0.124
+    },
+    {
+     "id": "94cbbedc-f72f-498b-9302-b7052699d364",
+     "name": "Big Ben Fish Bar",
+     "feature_type": "poi",
+     "lat": 51.539822,
+     "lon": -0.253059,
+     "distance_km": 9.895
+    }
+   ]
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:name:taj-mahal",
+   "kind": "place",
+   "query": "Taj Mahal",
+   "query_style": "name",
+   "status": 200,
+   "ms": 255.9,
+   "error": null,
+   "rank": 1,
+   "found_at_1": true,
+   "found_at_10": true,
+   "matched_distance_km": 0.348,
+   "top1_distance_km": 0.348,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "ef056384-8934-404d-8a3c-3cd95c858bbb",
+     "name": "Taj Mahal",
+     "feature_type": "poi",
+     "lat": 27.171972,
+     "lon": 78.042122,
+     "distance_km": 0.348
+    },
+    {
+     "id": "c2031b7a-737e-47e0-8404-c3c8821721d7",
+     "name": "Taj Mahal, Agra, India",
+     "feature_type": "poi",
+     "lat": 28.513336,
+     "lon": 77.093216,
+     "distance_km": 175.631
+    },
+    {
+     "id": "d825fe4a-2417-4ca4-a11b-da73c3cb74e2",
+     "name": "Taj Mahal, Agra.",
+     "feature_type": "poi",
+     "lat": 18.965778,
+     "lon": 72.815826,
+     "distance_km": 1057.516
+    },
+    {
+     "id": "f3e63699-8984-4ba4-bb3b-f2718fb1849d",
+     "name": "Taj Mahal",
+     "feature_type": "poi",
+     "lat": 19.901457,
+     "lon": 75.320221,
+     "distance_km": 854.97
+    },
+    {
+     "id": "e202315c-d39a-44df-a0a6-71355fb3ade5",
+     "name": "Taj Mahal",
+     "feature_type": "poi",
+     "lat": 28.646111,
+     "lon": 77.214714,
+     "distance_km": 182.657
+    },
+    {
+     "id": "b2244213-e27d-4c19-a0d4-a103debb2177",
+     "name": "Taj Mahal",
+     "feature_type": "poi",
+     "lat": 27.209991,
+     "lon": 78.008507,
+     "distance_km": 5.108
+    },
+    {
+     "id": "998dd551-0425-4524-abe6-05e8e0eda4e2",
+     "name": "Taj Mahal",
+     "feature_type": "poi",
+     "lat": 27.1621,
+     "lon": 78.03968,
+     "distance_km": 1.465
+    },
+    {
+     "id": "87054c63-8d33-4496-bf49-8e4f38ad2657",
+     "name": "Taj Mahal",
+     "feature_type": "poi",
+     "lat": 34.709515,
+     "lon": -82.791512,
+     "distance_km": 12844.43
+    },
+    {
+     "id": "e4fe4624-9148-4129-b406-c521507ad53a",
+     "name": "Taj Mahal",
+     "feature_type": "poi",
+     "lat": 44.815254,
+     "lon": 20.468279,
+     "distance_km": 5412.726
+    },
+    {
+     "id": "cff09695-a9c4-4cf2-888a-1e5597fbcbac",
+     "name": "Taj Mahal",
+     "feature_type": "poi",
+     "lat": -23.572052,
+     "lon": -46.648079,
+     "distance_km": 14488.0
+    }
+   ]
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:name_locality:taj-mahal",
+   "kind": "place",
+   "query": "Taj Mahal Agra",
+   "query_style": "name_locality",
+   "status": 200,
+   "ms": 627.5,
+   "error": null,
+   "rank": 1,
+   "found_at_1": true,
+   "found_at_10": true,
+   "matched_distance_km": 0.348,
+   "top1_distance_km": 0.348,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "ef056384-8934-404d-8a3c-3cd95c858bbb",
+     "name": "Taj Mahal",
+     "feature_type": "poi",
+     "lat": 27.171972,
+     "lon": 78.042122,
+     "distance_km": 0.348
+    },
+    {
+     "id": "b2244213-e27d-4c19-a0d4-a103debb2177",
+     "name": "Taj Mahal",
+     "feature_type": "poi",
+     "lat": 27.209991,
+     "lon": 78.008507,
+     "distance_km": 5.108
+    },
+    {
+     "id": "998dd551-0425-4524-abe6-05e8e0eda4e2",
+     "name": "Taj Mahal",
+     "feature_type": "poi",
+     "lat": 27.1621,
+     "lon": 78.03968,
+     "distance_km": 1.465
+    },
+    {
+     "id": "f9c4fca0-4e67-4961-b70a-0ed28af4a6af",
+     "name": "Taj Mahal Monument",
+     "feature_type": "poi",
+     "lat": 27.165899,
+     "lon": 78.074341,
+     "distance_km": 3.349
+    },
+    {
+     "id": "96741dbc-a9e0-4662-be83-c53283b8590f",
+     "name": "Taj Mahal East Gate VIP Entry",
+     "feature_type": "poi",
+     "lat": 27.171112,
+     "lon": 78.043503,
+     "distance_km": 0.465
+    },
+    {
+     "id": "97592c20-90f9-4033-a9d1-323cd74301b3",
+     "name": "Taj Mahal, Agra, India",
+     "feature_type": "poi",
+     "lat": 27.189981,
+     "lon": 78.001373,
+     "distance_km": 4.355
+    },
+    {
+     "id": "706b37e5-bddd-4219-834b-b799ce07e75a",
+     "name": "Taj Mahal | ताज महल | تاج محل",
+     "feature_type": "poi",
+     "lat": 27.171337,
+     "lon": 78.042,
+     "distance_km": 0.419
+    },
+    {
+     "id": "41a5d632-3659-4180-a546-4f14bef39d52",
+     "name": "Taj Mahal - Wonder of the world",
+     "feature_type": "poi",
+     "lat": 27.192169,
+     "lon": 78.000076,
+     "distance_km": 4.57
+    },
+    {
+     "id": "a188cc41-c4dc-4b09-83a5-76f9754751ce",
+     "name": "Taj Mahal Agra",
+     "feature_type": "poi",
+     "lat": 27.175985,
+     "lon": 78.021667,
+     "distance_km": 2.024
+    },
+    {
+     "id": "0eda8078-dfa1-4d75-a641-b35e295abaf8",
+     "name": "Taj Mahal Mosque 2",
+     "feature_type": "poi",
+     "lat": 27.172829,
+     "lon": 78.040543,
+     "distance_km": 0.296
+    }
+   ]
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:name:machu-picchu",
+   "kind": "place",
+   "query": "Machu Picchu",
+   "query_style": "name",
+   "status": 200,
+   "ms": 215.9,
+   "error": null,
+   "rank": 1,
+   "found_at_1": true,
+   "found_at_10": true,
+   "matched_distance_km": 2.291,
+   "top1_distance_km": 2.291,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "487cc093-6904-4102-b932-d31c32fcd471",
+     "name": "Machu Picchu",
+     "feature_type": "poi",
+     "lat": -13.155101,
+     "lon": -72.525505,
+     "distance_km": 2.291
+    },
+    {
+     "id": "716503e0-dc5c-442e-a7e2-b622742bd07c",
+     "name": "Machu Picchu",
+     "feature_type": "poi",
+     "lat": -13.163532,
+     "lon": -72.545921,
+     "distance_km": 0.111
+    },
+    {
+     "id": "4e6d7566-1b64-41a6-9406-c1bc98be6d2a",
+     "name": "Machu Picchu Museum",
+     "feature_type": "poi",
+     "lat": -13.517032,
+     "lon": -71.977196,
+     "distance_km": 72.958
+    },
+    {
+     "id": "114248b1-4c9d-4e3b-abbf-ae2949b79c1f",
+     "name": "Machu Picchu et les Trésors du Pérou",
+     "feature_type": "poi",
+     "lat": 48.862984,
+     "lon": 2.289393,
+     "distance_km": 10032.558
+    },
+    {
+     "id": "eb31d83e-a543-495a-92b8-d2b1196cb181",
+     "name": "Machu Picchu",
+     "feature_type": "poi",
+     "lat": -13.31658,
+     "lon": -72.087952,
+     "distance_km": 52.332
+    },
+    {
+     "id": "6229816f-3283-4d1b-8a22-5617cf9be792",
+     "name": "Mirador La Picota, Huamanga",
+     "feature_type": "poi",
+     "lat": -13.160549,
+     "lon": -74.226479,
+     "distance_km": 182.06
+    },
+    {
+     "id": "75b6fe8c-5aed-4d32-b1ba-0788d2faf716",
+     "name": "Central Hidroelectrica Machu Picchu Km122",
+     "feature_type": "poi",
+     "lat": -13.174622,
+     "lon": -72.559715,
+     "distance_km": 2.044
+    },
+    {
+     "id": "eb38070d-09d9-4dc3-9a5e-652b8891bcd1",
+     "name": "Museo Machu Picchu Casa Concha",
+     "feature_type": "poi",
+     "lat": -13.517369,
+     "lon": -71.97686,
+     "distance_km": 73.009
+    },
+    {
+     "id": "2bd5d88b-c31b-4c9c-87ef-c18c722bca53",
+     "name": "Santuario Histórico De Machu Picchu",
+     "feature_type": "poi",
+     "lat": -13.523475,
+     "lon": -71.952271,
+     "distance_km": 75.619
+    },
+    {
+     "id": "2fe76e46-e532-43ce-bfde-082d27ff1091",
+     "name": "Ciudadela De Machu Picchu",
+     "feature_type": "poi",
+     "lat": -13.165723,
+     "lon": -72.543129,
+     "distance_km": 0.355
+    }
+   ]
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:name_locality:machu-picchu",
+   "kind": "place",
+   "query": "Machu Picchu Cusco",
+   "query_style": "name_locality",
+   "status": 200,
+   "ms": 458.1,
+   "error": null,
+   "rank": null,
+   "found_at_1": false,
+   "found_at_10": false,
+   "matched_distance_km": null,
+   "top1_distance_km": 73.274,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "55828264-ee79-4dd0-b553-1cbb0d0b6e5d",
+     "name": "Machu Picchu, Peru - Wonder Of The World",
+     "feature_type": "poi",
+     "lat": -13.51918,
+     "lon": -71.975143,
+     "distance_km": 73.274
+    },
+    {
+     "id": "4e6d7566-1b64-41a6-9406-c1bc98be6d2a",
+     "name": "Machu Picchu Museum",
+     "feature_type": "poi",
+     "lat": -13.517032,
+     "lon": -71.977196,
+     "distance_km": 72.958
+    },
+    {
+     "id": "650471db-76e6-443e-892a-46b464af0f40",
+     "name": "Machu Picchu - The Lost City Of The Incas",
+     "feature_type": "poi",
+     "lat": -13.53411,
+     "lon": -71.958183,
+     "distance_km": 75.714
+    },
+    {
+     "id": "21a277e9-5fc4-44a7-9cad-ab18ef082848",
+     "name": "Machu Picchu",
+     "feature_type": "poi",
+     "lat": -13.522865,
+     "lon": -71.973129,
+     "distance_km": 73.679
+    },
+    {
+     "id": "62159b79-2eb5-4fba-b562-d57c5f45453d",
+     "name": "Machu Picchu",
+     "feature_type": "poi",
+     "lat": -13.518265,
+     "lon": -71.979729,
+     "distance_km": 72.802
+    },
+    {
+     "id": "58b2d49d-ecff-4ae9-95a7-f0481ab57f20",
+     "name": "Machu Picchu Reservations",
+     "feature_type": "poi",
+     "lat": -13.516805,
+     "lon": -71.979996,
+     "distance_km": 72.69
+    },
+    {
+     "id": "67469cd0-6596-4971-874b-a70407963882",
+     "name": "Machu Picchu Inca Trekking",
+     "feature_type": "poi",
+     "lat": -13.521523,
+     "lon": -71.985588,
+     "distance_km": 72.468
+    },
+    {
+     "id": "2a30cbee-12f7-433f-8a5f-7f5e910ce8f4",
+     "name": "Machu Picchu Magico Tours",
+     "feature_type": "poi",
+     "lat": -13.524163,
+     "lon": -71.96833,
+     "distance_km": 74.193
+    },
+    {
+     "id": "af312573-4510-4910-aab9-ab17af97e7e4",
+     "name": "Machu Picchu Valle Sagrado",
+     "feature_type": "poi",
+     "lat": -13.521524,
+     "lon": -71.979919,
+     "distance_km": 72.981
+    },
+    {
+     "id": "56ac4d18-ad76-42e2-be60-20c67ccda0f6",
+     "name": "Machu Picchu Bus Packers (Transporte Turístico Cusco Hidroelectrica en Bus)",
+     "feature_type": "poi",
+     "lat": -13.52108,
+     "lon": -71.973488,
+     "distance_km": 73.539
+    }
+   ]
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:name:sagrada-familia",
+   "kind": "place",
+   "query": "Sagrada Familia",
+   "query_style": "name",
+   "status": 200,
+   "ms": 202.2,
+   "error": null,
+   "rank": 1,
+   "found_at_1": true,
+   "found_at_10": true,
+   "matched_distance_km": 0.058,
+   "top1_distance_km": 0.058,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "a3abf2c0-cbc5-456d-b847-cc68b6d4b172",
+     "name": "Sagrada Familia",
+     "feature_type": "poi",
+     "lat": 41.403221,
+     "lon": 2.17487,
+     "distance_km": 0.058
+    },
+    {
+     "id": "54b5d41e-1a9f-4422-9c98-951ba8512c2f",
+     "name": "Sagrada Família, BR-RS",
+     "feature_type": "locality",
+     "lat": -27.708545,
+     "lon": -53.136411,
+     "distance_km": 9558.558
+    },
+    {
+     "id": "ebbdac76-3581-4320-bd66-4c997ee61df8",
+     "name": "Sagrada Familia Barcelona",
+     "feature_type": "poi",
+     "lat": 41.391731,
+     "lon": 2.158512,
+     "distance_km": 1.87
+    },
+    {
+     "id": "a5ee2efb-3ef0-46e8-906f-f9d7d8f00498",
+     "name": "Sagrada Família, BR-ES",
+     "feature_type": "locality",
+     "lat": -20.578922,
+     "lon": -40.698516,
+     "distance_km": 8185.174
+    },
+    {
+     "id": "fb591bb6-0cfd-47ec-bcc0-ff82ad81f4bf",
+     "name": "Sagrada Familia",
+     "feature_type": "poi",
+     "lat": 26.646681,
+     "lon": -81.827217,
+     "distance_km": 7615.706
+    },
+    {
+     "id": "67feae8f-3ee7-4210-909d-23da929b97d6",
+     "name": "Sagrada Familia",
+     "feature_type": "poi",
+     "lat": 21.520176,
+     "lon": -104.915611,
+     "distance_km": 9768.281
+    },
+    {
+     "id": "d742aa6b-61b3-4aa6-8cd9-c2f7d5521e02",
+     "name": "Sagrada Familia",
+     "feature_type": "poi",
+     "lat": 26.080265,
+     "lon": -98.363892,
+     "distance_km": 8935.095
+    },
+    {
+     "id": "59957fcd-5948-4697-a245-fd2852f17ecd",
+     "name": "sagrada familia",
+     "feature_type": "poi",
+     "lat": 41.381989,
+     "lon": 2.168857,
+     "distance_km": 2.447
+    },
+    {
+     "id": "e6642e18-ff31-4db5-8f67-d517ab0cdc72",
+     "name": "Sagrada Familia",
+     "feature_type": "poi",
+     "lat": 20.818146,
+     "lon": -102.766991,
+     "distance_km": 9661.531
+    },
+    {
+     "id": "77b08727-fbfb-44cc-abfb-d1026880b98a",
+     "name": "Sagrada Familia",
+     "feature_type": "poi",
+     "lat": 41.372749,
+     "lon": 2.169983,
+     "distance_km": 3.45
+    }
+   ]
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:name_locality:sagrada-familia",
+   "kind": "place",
+   "query": "Sagrada Familia Barcelona",
+   "query_style": "name_locality",
+   "status": 200,
+   "ms": 471.7,
+   "error": null,
+   "rank": 1,
+   "found_at_1": true,
+   "found_at_10": true,
+   "matched_distance_km": 0.058,
+   "top1_distance_km": 0.058,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "a3abf2c0-cbc5-456d-b847-cc68b6d4b172",
+     "name": "Sagrada Familia",
+     "feature_type": "poi",
+     "lat": 41.403221,
+     "lon": 2.17487,
+     "distance_km": 0.058
+    },
+    {
+     "id": "ebbdac76-3581-4320-bd66-4c997ee61df8",
+     "name": "Sagrada Familia Barcelona",
+     "feature_type": "poi",
+     "lat": 41.391731,
+     "lon": 2.158512,
+     "distance_km": 1.87
+    },
+    {
+     "id": "e4262a49-a863-462f-8f37-72fb3cf4e72c",
+     "name": "Sagrada Familia Photo Zone",
+     "feature_type": "poi",
+     "lat": 41.404526,
+     "lon": 2.175786,
+     "distance_km": 0.155
+    },
+    {
+     "id": "59957fcd-5948-4697-a245-fd2852f17ecd",
+     "name": "sagrada familia",
+     "feature_type": "poi",
+     "lat": 41.381989,
+     "lon": 2.168857,
+     "distance_km": 2.447
+    },
+    {
+     "id": "77b08727-fbfb-44cc-abfb-d1026880b98a",
+     "name": "Sagrada Familia",
+     "feature_type": "poi",
+     "lat": 41.372749,
+     "lon": 2.169983,
+     "distance_km": 3.45
+    },
+    {
+     "id": "812454fd-f4cc-40c6-b579-d526e4a8d1d3",
+     "name": "sagrada familia",
+     "feature_type": "poi",
+     "lat": 41.410316,
+     "lon": 2.218331,
+     "distance_km": 3.739
+    },
+    {
+     "id": "70a8e40e-7233-4f4b-952c-74fc03a63e49",
+     "name": "Sagrada Familia Barcelona",
+     "feature_type": "poi",
+     "lat": 41.245541,
+     "lon": 1.823501,
+     "distance_km": 34.169
+    },
+    {
+     "id": "216afbc9-f0cf-496a-8902-549a05eb9451",
+     "name": "Sagrada familia",
+     "feature_type": "poi",
+     "lat": 41.376259,
+     "lon": 2.141971,
+     "distance_km": 4.07
+    },
+    {
+     "id": "b3194910-d31b-44bc-8fd4-e650c3e931d3",
+     "name": "Sagrada Familia",
+     "feature_type": "poi",
+     "lat": 41.384544,
+     "lon": 2.181806,
+     "distance_km": 2.207
+    },
+    {
+     "id": "00e1dd47-6f3f-4ff7-b1b0-6e40627549bd",
+     "name": "Sagrada familia",
+     "feature_type": "poi",
+     "lat": 41.390011,
+     "lon": 2.170472,
+     "distance_km": 1.546
+    }
+   ]
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:name:empire-state-building",
+   "kind": "place",
+   "query": "Empire State Building",
+   "query_style": "name",
+   "status": 200,
+   "ms": 109.9,
+   "error": null,
+   "rank": 2,
+   "found_at_1": false,
+   "found_at_10": true,
+   "matched_distance_km": 0.004,
+   "top1_distance_km": 4.16,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "58cebdfc-eba5-4c46-a86d-57bc05aca28b",
+     "name": "Empire State Building",
+     "feature_type": "poi",
+     "lat": 40.78072,
+     "lon": -73.960815,
+     "distance_km": 4.16
+    },
+    {
+     "id": "91b41dc1-59cb-4822-af8b-bb45d3b96f42",
+     "name": "Empire State Building",
+     "feature_type": "poi",
+     "lat": 40.748425,
+     "lon": -73.985664,
+     "distance_km": 0.004
+    },
+    {
+     "id": "f041dba7-18f9-49b8-8f22-5b8b8d9b4902",
+     "name": "Empire State Building",
+     "feature_type": "poi",
+     "lat": 40.764748,
+     "lon": -73.98085,
+     "distance_km": 1.863
+    },
+    {
+     "id": "f3ef1a38-544d-4157-9f33-3c7d542f18b9",
+     "name": "Empire State Building",
+     "feature_type": "poi",
+     "lat": 40.780624,
+     "lon": -73.98101,
+     "distance_km": 3.605
+    },
+    {
+     "id": "f78e6e6d-7085-4f6c-9093-f2f8088e9c01",
+     "name": "Empire State Building",
+     "feature_type": "poi",
+     "lat": 40.701389,
+     "lon": -73.988632,
+     "distance_km": 5.233
+    }
+   ]
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:name_locality:empire-state-building",
+   "kind": "place",
+   "query": "Empire State Building New York",
+   "query_style": "name_locality",
+   "status": 200,
+   "ms": 466.8,
+   "error": null,
+   "rank": 2,
+   "found_at_1": false,
+   "found_at_10": true,
+   "matched_distance_km": 0.004,
+   "top1_distance_km": 4.16,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "58cebdfc-eba5-4c46-a86d-57bc05aca28b",
+     "name": "Empire State Building",
+     "feature_type": "poi",
+     "lat": 40.78072,
+     "lon": -73.960815,
+     "distance_km": 4.16
+    },
+    {
+     "id": "91b41dc1-59cb-4822-af8b-bb45d3b96f42",
+     "name": "Empire State Building",
+     "feature_type": "poi",
+     "lat": 40.748425,
+     "lon": -73.985664,
+     "distance_km": 0.004
+    },
+    {
+     "id": "f041dba7-18f9-49b8-8f22-5b8b8d9b4902",
+     "name": "Empire State Building",
+     "feature_type": "poi",
+     "lat": 40.764748,
+     "lon": -73.98085,
+     "distance_km": 1.863
+    },
+    {
+     "id": "f3ef1a38-544d-4157-9f33-3c7d542f18b9",
+     "name": "Empire State Building",
+     "feature_type": "poi",
+     "lat": 40.780624,
+     "lon": -73.98101,
+     "distance_km": 3.605
+    },
+    {
+     "id": "f78e6e6d-7085-4f6c-9093-f2f8088e9c01",
+     "name": "Empire State Building",
+     "feature_type": "poi",
+     "lat": 40.701389,
+     "lon": -73.988632,
+     "distance_km": 5.233
+    },
+    {
+     "id": "b6a64328-6c33-4341-b95e-6fb10c8cc3bc",
+     "name": "Empire State Building, Manatthan",
+     "feature_type": "poi",
+     "lat": 40.748367,
+     "lon": -73.978043,
+     "distance_km": 0.645
+    },
+    {
+     "id": "c704e6e1-c664-4364-a040-f5ce99aa241c",
+     "name": "Empire State Building, New York",
+     "feature_type": "poi",
+     "lat": 40.756664,
+     "lon": -73.97142,
+     "distance_km": 1.514
+    },
+    {
+     "id": "29c9ddd2-f908-4aa9-af5d-03dfd1bf1aab",
+     "name": "Empire State Building Co.",
+     "feature_type": "poi",
+     "lat": 40.752289,
+     "lon": -73.978462,
+     "distance_km": 0.747
+    },
+    {
+     "id": "11a7a79e-1228-481f-95d1-b360c1de6d95",
+     "name": "Hampton Inn Manhattan-35th Street and Empire State Building",
+     "feature_type": "poi",
+     "lat": 40.750248,
+     "lon": -73.986465,
+     "distance_km": 0.215
+    },
+    {
+     "id": "3e5a04fb-d588-4266-95fe-658f2f324a9b",
+     "name": "Starbucks Reserve - Empire State Building",
+     "feature_type": "poi",
+     "lat": 40.748245,
+     "lon": -73.985107,
+     "distance_km": 0.053
+    }
+   ]
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:name:buckingham-palace",
+   "kind": "place",
+   "query": "Buckingham Palace",
+   "query_style": "name",
+   "status": 200,
+   "ms": 202.3,
+   "error": null,
+   "rank": 1,
+   "found_at_1": true,
+   "found_at_10": true,
+   "matched_distance_km": 0.004,
+   "top1_distance_km": 0.004,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "7a9efff7-53ad-4b62-9ed5-d661d36d4160",
+     "name": "Buckingham Palace",
+     "feature_type": "poi",
+     "lat": 51.501366,
+     "lon": -0.141891,
+     "distance_km": 0.004
+    },
+    {
+     "id": "24c3f079-f9be-4b0c-ba22-f4495e884b80",
+     "name": "Buckingham Palace",
+     "feature_type": "poi",
+     "lat": 51.494862,
+     "lon": -0.146227,
+     "distance_km": 0.786
+    },
+    {
+     "id": "c1b00c9f-14d2-4944-a5d6-ead68c8249ad",
+     "name": "Buckingham Palace",
+     "feature_type": "poi",
+     "lat": -7.87895,
+     "lon": 112.51989,
+     "distance_km": 12250.707
+    },
+    {
+     "id": "13935c58-a1d3-4994-9c0f-8ec400006306",
+     "name": "Buckingham Palace",
+     "feature_type": "poi",
+     "lat": 51.499508,
+     "lon": -0.124938,
+     "distance_km": 1.193
+    },
+    {
+     "id": "abb1eb30-874c-4830-a1a1-941e65472a5a",
+     "name": "Buckingham Palace",
+     "feature_type": "poi",
+     "lat": 35.898972,
+     "lon": 14.51369,
+     "distance_km": 2088.574
+    },
+    {
+     "id": "c7770745-8f96-4962-998d-441ef5a0d4cd",
+     "name": "Buckingham Palace",
+     "feature_type": "poi",
+     "lat": 55.965523,
+     "lon": -3.17022,
+     "distance_km": 534.734
+    },
+    {
+     "id": "4eb570c3-2100-4c78-a798-1f8c5d631d55",
+     "name": "Buckingham Palace",
+     "feature_type": "poi",
+     "lat": 51.500248,
+     "lon": -0.143887,
+     "distance_km": 0.188
+    },
+    {
+     "id": "99d3bd92-363a-4b12-a88b-b0233ec3431f",
+     "name": "Buckingham Palace",
+     "feature_type": "poi",
+     "lat": 51.524261,
+     "lon": -0.137841,
+     "distance_km": 2.558
+    },
+    {
+     "id": "9079d375-3b0a-446c-9cf3-0036b033e540",
+     "name": "Buckingham Palace",
+     "feature_type": "poi",
+     "lat": 44.809132,
+     "lon": 20.47991,
+     "distance_km": 1693.261
+    },
+    {
+     "id": "6f7fd618-5397-44e2-9c1d-68d9010e4753",
+     "name": "Palacio De Buckingham, Londres Inglaterra",
+     "feature_type": "poi",
+     "lat": -36.764706,
+     "lon": -73.09024,
+     "distance_km": 12097.522
+    }
+   ]
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:name_locality:buckingham-palace",
+   "kind": "place",
+   "query": "Buckingham Palace London",
+   "query_style": "name_locality",
+   "status": 200,
+   "ms": 504.9,
+   "error": null,
+   "rank": 1,
+   "found_at_1": true,
+   "found_at_10": true,
+   "matched_distance_km": 0.004,
+   "top1_distance_km": 0.004,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "7a9efff7-53ad-4b62-9ed5-d661d36d4160",
+     "name": "Buckingham Palace",
+     "feature_type": "poi",
+     "lat": 51.501366,
+     "lon": -0.141891,
+     "distance_km": 0.004
+    },
+    {
+     "id": "24c3f079-f9be-4b0c-ba22-f4495e884b80",
+     "name": "Buckingham Palace",
+     "feature_type": "poi",
+     "lat": 51.494862,
+     "lon": -0.146227,
+     "distance_km": 0.786
+    },
+    {
+     "id": "13935c58-a1d3-4994-9c0f-8ec400006306",
+     "name": "Buckingham Palace",
+     "feature_type": "poi",
+     "lat": 51.499508,
+     "lon": -0.124938,
+     "distance_km": 1.193
+    },
+    {
+     "id": "55084c06-21c7-4956-857b-fb1c74a2e8b0",
+     "name": "Buckingham Palace",
+     "feature_type": "poi",
+     "lat": 51.472942,
+     "lon": -0.205135,
+     "distance_km": 5.402
+    },
+    {
+     "id": "76d16cb6-df3b-406d-bbad-3d422740cdda",
+     "name": "Buckingham Palace",
+     "feature_type": "poi",
+     "lat": 51.507191,
+     "lon": -0.128544,
+     "distance_km": 1.127
+    },
+    {
+     "id": "07360bc0-a671-4426-81ba-c8ef84498139",
+     "name": "Buckingham Palace",
+     "feature_type": "poi",
+     "lat": 51.480633,
+     "lon": -0.197694,
+     "distance_km": 4.5
+    },
+    {
+     "id": "f56d3314-0037-413e-b390-3e89a984f0c8",
+     "name": "Buckingham Palace & the British Museum",
+     "feature_type": "poi",
+     "lat": 51.526253,
+     "lon": -0.125865,
+     "distance_km": 2.978
+    },
+    {
+     "id": "3bce6491-4e7d-4c5e-8a27-82c49e632a28",
+     "name": "Buckingham Palace State Rooms",
+     "feature_type": "poi",
+     "lat": 51.500355,
+     "lon": -0.148631,
+     "distance_km": 0.48
+    },
+    {
+     "id": "a609b97c-dc17-4c06-afdd-c24dde0270b1",
+     "name": "Buckingham Palace Garden London",
+     "feature_type": "poi",
+     "lat": 51.52108,
+     "lon": -0.049493,
+     "distance_km": 6.759
+    },
+    {
+     "id": "4eb570c3-2100-4c78-a798-1f8c5d631d55",
+     "name": "Buckingham Palace",
+     "feature_type": "poi",
+     "lat": 51.500248,
+     "lon": -0.143887,
+     "distance_km": 0.188
+    }
+   ]
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:name:brandenburg-gate",
+   "kind": "place",
+   "query": "Brandenburg Gate",
+   "query_style": "name",
+   "status": 200,
+   "ms": 94.7,
+   "error": null,
+   "rank": null,
+   "found_at_1": false,
+   "found_at_10": false,
+   "matched_distance_km": null,
+   "top1_distance_km": 25.83,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "79c68718-3958-4a97-97bc-fadc212c4cd8",
+     "name": "Brandenburg Gate",
+     "feature_type": "poi",
+     "lat": 52.399559,
+     "lon": 13.048114,
+     "distance_km": 25.83
+    },
+    {
+     "id": "d899f222-1282-4a9a-b3c5-a488a0b953fb",
+     "name": "Brandenburg Gate",
+     "feature_type": "poi",
+     "lat": 46.484371,
+     "lon": 30.73798,
+     "distance_km": 1416.747
+    }
+   ]
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:name_locality:brandenburg-gate",
+   "kind": "place",
+   "query": "Brandenburg Gate Berlin",
+   "query_style": "name_locality",
+   "status": 200,
+   "ms": 498.2,
+   "error": null,
+   "rank": null,
+   "found_at_1": false,
+   "found_at_10": false,
+   "matched_distance_km": null,
+   "top1_distance_km": 25.83,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "79c68718-3958-4a97-97bc-fadc212c4cd8",
+     "name": "Brandenburg Gate",
+     "feature_type": "poi",
+     "lat": 52.399559,
+     "lon": 13.048114,
+     "distance_km": 25.83
+    },
+    {
+     "id": "5c97941c-4947-4457-bbcf-0a867631e99d",
+     "name": "Brandenburg Gate Berlin",
+     "feature_type": "poi",
+     "lat": 52.528591,
+     "lon": 13.33681,
+     "distance_km": 3.086
+    },
+    {
+     "id": "07b1e659-4ecd-441c-af4d-e40bb9fc13ac",
+     "name": "Apartments at Brandenburg Gate",
+     "feature_type": "poi",
+     "lat": 52.514786,
+     "lon": 13.380661,
+     "distance_km": 0.262
+    },
+    {
+     "id": "55c1c983-49de-4936-ab6f-d1a986aac1a3",
+     "name": "Primary School at the Brandenburg Gate",
+     "feature_type": "poi",
+     "lat": 52.513107,
+     "lon": 13.382801,
+     "distance_km": 0.495
+    },
+    {
+     "id": "3306ecba-a4d5-4d31-a5ea-275f287c3dad",
+     "name": "Bounce Luggage Storage - Near Brandenburg Gate",
+     "feature_type": "poi",
+     "lat": 52.516426,
+     "lon": 13.381678,
+     "distance_km": 0.27
+    },
+    {
+     "id": "a22f99f8-91fe-4297-a5de-60e05626a01f",
+     "name": "ApartmentRooms near Brandenburg Gate - Two-Bedroom Apartment",
+     "feature_type": "poi",
+     "lat": 52.512276,
+     "lon": 13.383645,
+     "distance_km": 0.602
+    }
+   ]
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:named_poi:pike-place-chowder",
+   "kind": "place",
+   "query": "Pike Place Chowder Seattle",
+   "query_style": "named_poi",
+   "status": 200,
+   "ms": 462.5,
+   "error": null,
+   "rank": 1,
+   "found_at_1": true,
+   "found_at_10": true,
+   "matched_distance_km": 0.576,
+   "top1_distance_km": 0.576,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "5466e2fa-9b56-43df-9bd2-c585755f9049",
+     "name": "Pike Place Chowder",
+     "feature_type": "poi",
+     "lat": 47.612823,
+     "lon": -122.335304,
+     "distance_km": 0.576
+    },
+    {
+     "id": "cf4881c7-6ad8-49a5-a83c-e9b5b87ece31",
+     "name": "Pike Place Chowder",
+     "feature_type": "poi",
+     "lat": 47.609417,
+     "lon": -122.341263,
+     "distance_km": 0.01
+    }
+   ],
+   "strata": {
+    "poi_family": "food_drink",
+    "scope": "independent"
+   }
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:named_poi:noma",
+   "kind": "place",
+   "query": "Noma Copenhagen",
+   "query_style": "named_poi",
+   "status": 200,
+   "ms": 1136.5,
+   "error": null,
+   "rank": 1,
+   "found_at_1": true,
+   "found_at_10": true,
+   "matched_distance_km": 0.009,
+   "top1_distance_km": 0.009,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "8a39e121-0c83-4a70-82f4-4cf5558b8a7d",
+     "name": "Noma",
+     "feature_type": "poi",
+     "lat": 55.682838,
+     "lon": 12.610465,
+     "distance_km": 0.009
+    },
+    {
+     "id": "e1c8f50a-21a3-44a4-83c1-c03e4267c4e7",
+     "name": "Noma",
+     "feature_type": "poi",
+     "lat": 55.677841,
+     "lon": 12.596325,
+     "distance_km": 1.051
+    },
+    {
+     "id": "75bb5fd1-4d03-4811-9e4a-8ff037697d16",
+     "name": "Noma Restaurant , Copenhagen",
+     "feature_type": "poi",
+     "lat": 55.638897,
+     "lon": 12.580356,
+     "distance_km": 5.237
+    }
+   ],
+   "strata": {
+    "poi_family": "food_drink",
+    "scope": "independent"
+   }
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:brand_branch:din-tai-fung-xinyi",
+   "kind": "place",
+   "query": "Din Tai Fung Xinyi",
+   "query_style": "brand_branch",
+   "status": 200,
+   "ms": 3184.3,
+   "error": null,
+   "rank": null,
+   "found_at_1": false,
+   "found_at_10": false,
+   "matched_distance_km": null,
+   "top1_distance_km": null,
+   "expected_feature_type": "poi",
+   "top1_feature_type": null,
+   "type_at_1": false,
+   "type_present": false,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [],
+   "strata": {
+    "poi_family": "food_drink",
+    "scope": "brand_branch"
+   }
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:named_poi:cafe-de-flore",
+   "kind": "place",
+   "query": "Cafe de Flore Paris",
+   "query_style": "named_poi",
+   "status": 200,
+   "ms": 407.5,
+   "error": null,
+   "rank": 1,
+   "found_at_1": true,
+   "found_at_10": true,
+   "matched_distance_km": 0.006,
+   "top1_distance_km": 0.006,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "17ddb220-ee08-4f7f-9d8d-8fd7c7c5953b",
+     "name": "Café de Flore",
+     "feature_type": "poi",
+     "lat": 48.854084,
+     "lon": 2.332585,
+     "distance_km": 0.006
+    }
+   ],
+   "strata": {
+    "poi_family": "food_drink",
+    "scope": "independent"
+   }
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:named_poi:harrods",
+   "kind": "place",
+   "query": "Harrods London",
+   "query_style": "named_poi",
+   "status": 200,
+   "ms": 67.4,
+   "error": null,
+   "rank": null,
+   "found_at_1": false,
+   "found_at_10": false,
+   "matched_distance_km": null,
+   "top1_distance_km": 4.791,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "1581821c-e83f-4656-bdc9-9cb86ce139f6",
+     "name": "Harrods Furniture Depository",
+     "feature_type": "poi",
+     "lat": 51.484818,
+     "lon": -0.228222,
+     "distance_km": 4.791
+    }
+   ],
+   "strata": {
+    "poi_family": "retail",
+    "scope": "independent"
+   }
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:named_poi:kadewe",
+   "kind": "place",
+   "query": "KaDeWe Berlin",
+   "query_style": "named_poi",
+   "status": 200,
+   "ms": 102.6,
+   "error": null,
+   "rank": 3,
+   "found_at_1": false,
+   "found_at_10": true,
+   "matched_distance_km": 0.019,
+   "top1_distance_km": 0.118,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "267d2a41-6477-45ea-bde0-fa72948500b3",
+     "name": "CONTIPARK Tiefgarage Am KaDeWe",
+     "feature_type": "poi",
+     "lat": 52.50095,
+     "lon": 13.33973,
+     "distance_km": 0.118
+    },
+    {
+     "id": "ae2832d0-fcd6-46fc-80c7-7695f962427e",
+     "name": "Läderach | Deutschland | Berlin | KaDeWe",
+     "feature_type": "poi",
+     "lat": 52.501854,
+     "lon": 13.340837,
+     "distance_km": 0.033
+    },
+    {
+     "id": "f5906d0f-91e2-4101-80ad-3ac775091884",
+     "name": "KaDeWe",
+     "feature_type": "poi",
+     "lat": 52.50177,
+     "lon": 13.341117,
+     "distance_km": 0.019
+    },
+    {
+     "id": "6f7a72d3-44eb-4353-9a22-76fdd89020b8",
+     "name": "Valentino KaDeWe Women",
+     "feature_type": "poi",
+     "lat": 52.501961,
+     "lon": 13.341284,
+     "distance_km": 0.042
+    },
+    {
+     "id": "f64c7678-7a91-45ee-a4ee-5be0e5c4e79f",
+     "name": "Apotheke am Zoo",
+     "feature_type": "poi",
+     "lat": 52.504463,
+     "lon": 13.331605,
+     "distance_km": 0.717
+    },
+    {
+     "id": "9c2ea96c-2b96-44d8-9ee7-54ddc6f220cf",
+     "name": "THE LOOK - im KaDeWe",
+     "feature_type": "poi",
+     "lat": 52.502029,
+     "lon": 13.34133,
+     "distance_km": 0.05
+    },
+    {
+     "id": "d4d330d7-5064-4565-8253-5513cd8afb02",
+     "name": "Montblanc Boutique Berlin - KaDeWe",
+     "feature_type": "poi",
+     "lat": 52.502151,
+     "lon": 13.341489,
+     "distance_km": 0.067
+    },
+    {
+     "id": "208133a0-1c72-4db1-953a-a0ade18c2fea",
+     "name": "Apotheke im KaDeWe",
+     "feature_type": "poi",
+     "lat": 52.501102,
+     "lon": 13.339809,
+     "distance_km": 0.103
+    },
+    {
+     "id": "0a52ebfb-4986-41a3-ada6-dc8125be317c",
+     "name": "Hackett London KaDeWe",
+     "feature_type": "poi",
+     "lat": 52.502151,
+     "lon": 13.341489,
+     "distance_km": 0.067
+    },
+    {
+     "id": "a443f7b3-f874-4f77-b167-152c2b4928c8",
+     "name": "Ovest im KaDeWe",
+     "feature_type": "poi",
+     "lat": 52.501781,
+     "lon": 13.340973,
+     "distance_km": 0.022
+    }
+   ],
+   "strata": {
+    "poi_family": "retail",
+    "scope": "independent"
+   }
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:brand_branch:ikea-berlin-lichtenberg",
+   "kind": "place",
+   "query": "IKEA Lichtenberg Berlin",
+   "query_style": "brand_branch",
+   "status": 200,
+   "ms": 409.5,
+   "error": null,
+   "rank": null,
+   "found_at_1": false,
+   "found_at_10": false,
+   "matched_distance_km": null,
+   "top1_distance_km": 1.529,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "39d686fd-d6a7-4b2a-adb0-772a9d6d8f96",
+     "name": "Freetrailer PKW Anhängervermietung - IKEA Berlin-Lichtenberg",
+     "feature_type": "poi",
+     "lat": 52.534153,
+     "lon": 13.512807,
+     "distance_km": 1.529
+    }
+   ],
+   "strata": {
+    "poi_family": "retail",
+    "scope": "brand_branch"
+   }
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:brand_branch:apple-marunouchi",
+   "kind": "place",
+   "query": "Apple Marunouchi Tokyo",
+   "query_style": "brand_branch",
+   "status": 200,
+   "ms": 1566.0,
+   "error": null,
+   "rank": null,
+   "found_at_1": false,
+   "found_at_10": false,
+   "matched_distance_km": null,
+   "top1_distance_km": null,
+   "expected_feature_type": "poi",
+   "top1_feature_type": null,
+   "type_at_1": false,
+   "type_present": false,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [],
+   "strata": {
+    "poi_family": "retail",
+    "scope": "brand_branch"
+   }
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:named_poi:raffles-singapore",
+   "kind": "place",
+   "query": "Raffles Hotel Singapore",
+   "query_style": "named_poi",
+   "status": 200,
+   "ms": 651.1,
+   "error": null,
+   "rank": 8,
+   "found_at_1": false,
+   "found_at_10": true,
+   "matched_distance_km": 0.029,
+   "top1_distance_km": 0.139,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "d3cf3bef-312e-4f5a-8280-d9763aaa0120",
+     "name": "Raffles Hotel Long Bar",
+     "feature_type": "poi",
+     "lat": 1.294948,
+     "lon": 103.853249,
+     "distance_km": 0.139
+    },
+    {
+     "id": "e3a3dde4-71a3-4394-815e-38e8ee11ede0",
+     "name": "Raffles Sentosa Singapore",
+     "feature_type": "poi",
+     "lat": 1.247639,
+     "lon": 103.825722,
+     "distance_km": 6.152
+    },
+    {
+     "id": "b208af28-ce5b-4da5-8d13-88a590f5d15e",
+     "name": "Ascott Raffles Place Singapore",
+     "feature_type": "poi",
+     "lat": 1.28208,
+     "lon": 103.851562,
+     "distance_km": 1.462
+    },
+    {
+     "id": "8139b5c2-4a38-48d9-8b62-c39dfe19bdeb",
+     "name": "Leica Store Raffles Hotel Arcade",
+     "feature_type": "poi",
+     "lat": 1.295734,
+     "lon": 103.856178,
+     "distance_km": 0.208
+    },
+    {
+     "id": "f44ec13d-9709-4c71-ae8c-e9b4c11318cd",
+     "name": "The Hour Glass Raffles Hotel",
+     "feature_type": "poi",
+     "lat": 1.295413,
+     "lon": 103.853485,
+     "distance_km": 0.126
+    },
+    {
+     "id": "51e6d6dc-a0b5-4857-9ab0-15c240da4205",
+     "name": "The Hour Glass Raffles Hotel - Official Rolex & Patek Philippe Retailer",
+     "feature_type": "poi",
+     "lat": 1.295893,
+     "lon": 103.853897,
+     "distance_km": 0.129
+    },
+    {
+     "id": "c3d89ae0-f30a-46c5-9680-0c0d314ac3d1",
+     "name": "Burger & Lobster Raffles Hotel",
+     "feature_type": "poi",
+     "lat": 1.295885,
+     "lon": 103.854065,
+     "distance_km": 0.12
+    },
+    {
+     "id": "8b3965e2-d891-414e-a56c-56edffa4e419",
+     "name": "萊佛士酒店",
+     "feature_type": "poi",
+     "lat": 1.294667,
+     "lon": 103.854614,
+     "distance_km": 0.029
+    },
+    {
+     "id": "25f63178-7e8f-4b60-83b9-9d123be282c9",
+     "name": "Casuarina Suites, Raffles Hotel",
+     "feature_type": "poi",
+     "lat": 1.296003,
+     "lon": 103.854507,
+     "distance_km": 0.123
+    }
+   ],
+   "strata": {
+    "poi_family": "lodging",
+    "scope": "independent"
+   }
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:named_poi:hotel-sacher-vienna",
+   "kind": "place",
+   "query": "Hotel Sacher Vienna",
+   "query_style": "named_poi",
+   "status": 200,
+   "ms": 110.0,
+   "error": null,
+   "rank": 1,
+   "found_at_1": true,
+   "found_at_10": true,
+   "matched_distance_km": 0.032,
+   "top1_distance_km": 0.032,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "823c67c2-222e-4629-abf9-e23ce74c676f",
+     "name": "Hotel Sacher Vienna",
+     "feature_type": "poi",
+     "lat": 48.203903,
+     "lon": 16.369736,
+     "distance_km": 0.032
+    }
+   ],
+   "strata": {
+    "poi_family": "lodging",
+    "scope": "independent"
+   }
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:named_poi:plaza-hotel",
+   "kind": "place",
+   "query": "Plaza Hotel New York",
+   "query_style": "named_poi",
+   "status": 200,
+   "ms": 239.8,
+   "error": null,
+   "rank": 8,
+   "found_at_1": false,
+   "found_at_10": true,
+   "matched_distance_km": 0.042,
+   "top1_distance_km": 63.198,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "56a25dcd-dec8-4654-9570-ef1101e0df0f",
+     "name": "Ramada Plaza by Wyndham Cranbury/S Brunswick Hotel & Conf Ct",
+     "feature_type": "poi",
+     "lat": 40.344341,
+     "lon": -74.478256,
+     "distance_km": 63.198
+    },
+    {
+     "id": "3849ddce-c706-4b3b-b254-05b016c9bddf",
+     "name": "Hotel Riu Plaza New York Times Square",
+     "feature_type": "poi",
+     "lat": 40.759933,
+     "lon": -73.988266,
+     "distance_km": 1.266
+    },
+    {
+     "id": "57310395-a066-4899-b82c-7b8614d98fab",
+     "name": "Crowne Plaza HY36",
+     "feature_type": "poi",
+     "lat": 40.753906,
+     "lon": -73.993698,
+     "distance_km": 2.001
+    },
+    {
+     "id": "7e5fb99c-0bb0-451c-b6d6-958fc0d27bea",
+     "name": "Pointe Plaza Hotel",
+     "feature_type": "poi",
+     "lat": 40.699272,
+     "lon": -73.959267,
+     "distance_km": 7.366
+    },
+    {
+     "id": "a451e7d5-7188-4500-8cd0-b89b80e945c1",
+     "name": "Lic Plaza Hotel",
+     "feature_type": "poi",
+     "lat": 40.752167,
+     "lon": -73.938377,
+     "distance_km": 3.337
+    },
+    {
+     "id": "b70526fc-04f8-4e9e-adaf-4cb3992310f1",
+     "name": "Crowne Plaza Newark Airport",
+     "feature_type": "poi",
+     "lat": 40.678791,
+     "lon": -74.19413,
+     "distance_km": 20.818
+    },
+    {
+     "id": "d4206b88-4c62-4137-83ed-214f3806975e",
+     "name": "Hotel Riu Plaza Manhattan Times Square",
+     "feature_type": "poi",
+     "lat": 40.758858,
+     "lon": -73.983559,
+     "distance_km": 0.988
+    },
+    {
+     "id": "0d005357-b4de-4e12-8a77-deefbc0ad92e",
+     "name": "The Plaza - A Fairmont Managed Hotel",
+     "feature_type": "poi",
+     "lat": 40.764153,
+     "lon": -73.974709,
+     "distance_km": 0.042
+    }
+   ],
+   "strata": {
+    "poi_family": "lodging",
+    "scope": "independent"
+   }
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:named_poi:novotel-monte-carlo",
+   "kind": "place",
+   "query": "Novotel Monte Carlo",
+   "query_style": "named_poi",
+   "status": 200,
+   "ms": 272.8,
+   "error": null,
+   "rank": null,
+   "found_at_1": false,
+   "found_at_10": false,
+   "matched_distance_km": null,
+   "top1_distance_km": null,
+   "expected_feature_type": "poi",
+   "top1_feature_type": null,
+   "type_at_1": false,
+   "type_present": false,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [],
+   "strata": {
+    "poi_family": "lodging",
+    "scope": "brand_branch"
+   }
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:named_poi:mayo-clinic-rochester",
+   "kind": "place",
+   "query": "Mayo Clinic Rochester",
+   "query_style": "named_poi",
+   "status": 200,
+   "ms": 1507.1,
+   "error": null,
+   "rank": null,
+   "found_at_1": false,
+   "found_at_10": false,
+   "matched_distance_km": null,
+   "top1_distance_km": 12.578,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "7472d2b8-ecc5-4bb7-bed2-9bb6ea6ca18d",
+     "name": "Mayo Clinic",
+     "feature_type": "poi",
+     "lat": 43.910263,
+     "lon": -92.49015,
+     "distance_km": 12.578
+    },
+    {
+     "id": "130939d6-ca3b-4377-af59-9a2f47c49570",
+     "name": "Mayo Clinic",
+     "feature_type": "poi",
+     "lat": 44.065536,
+     "lon": -92.521942,
+     "distance_km": 6.549
+    },
+    {
+     "id": "ecd0bb88-62d0-44ab-92ad-3a0c5d6b6e11",
+     "name": "Mayo Clinic",
+     "feature_type": "poi",
+     "lat": 44.053333,
+     "lon": -92.494118,
+     "distance_km": 4.111
+    },
+    {
+     "id": "f64e15ba-9e03-4e0d-8c0a-aaa88e8d12f6",
+     "name": "Mayo Clinic",
+     "feature_type": "poi",
+     "lat": 44.058285,
+     "lon": -92.786797,
+     "distance_km": 25.909
+    },
+    {
+     "id": "78a187d3-c555-4542-b40b-b6aee4864426",
+     "name": "Mayo Clinic Hospital, Saint Marys Campus",
+     "feature_type": "poi",
+     "lat": 44.020721,
+     "lon": -92.482765,
+     "distance_km": 1.302
+    },
+    {
+     "id": "bf952a07-0ee1-4533-abea-0f4492bcf147",
+     "name": "Mayo Clinic Hospital Methodist Campus",
+     "feature_type": "poi",
+     "lat": 44.023949,
+     "lon": -92.466637,
+     "distance_km": 0.206
+    },
+    {
+     "id": "3fff3d4b-ea13-44c3-bdb4-481a2221d7a8",
+     "name": "Mayo Clinic Hospital",
+     "feature_type": "poi",
+     "lat": 44.018913,
+     "lon": -92.478455,
+     "distance_km": 1.012
+    },
+    {
+     "id": "5d7fe4b6-ee43-48bd-91a1-865b22cde276",
+     "name": "Mayo Clinic - Charlton Building",
+     "feature_type": "poi",
+     "lat": 44.023941,
+     "lon": -92.466965,
+     "distance_km": 0.207
+    },
+    {
+     "id": "d561b6ad-d6c8-410f-93f4-07e2a3307cb7",
+     "name": "Mayo Clinic - Harwick Building",
+     "feature_type": "poi",
+     "lat": 44.021355,
+     "lon": -92.467491,
+     "distance_km": 0.109
+    },
+    {
+     "id": "9ef43138-968b-4b24-8ce6-de978eb03dcc",
+     "name": "Mayo Clinic Health System",
+     "feature_type": "poi",
+     "lat": 44.246349,
+     "lon": -91.497879,
+     "distance_km": 81.231
+    }
+   ],
+   "strata": {
+    "poi_family": "healthcare",
+    "scope": "brand_branch"
+   }
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:named_poi:sickkids-toronto",
+   "kind": "place",
+   "query": "SickKids Toronto",
+   "query_style": "named_poi",
+   "status": 200,
+   "ms": 76.4,
+   "error": null,
+   "rank": 1,
+   "found_at_1": true,
+   "found_at_10": true,
+   "matched_distance_km": 0.009,
+   "top1_distance_km": 0.009,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "eae349ef-31d1-437c-b77f-464a7400fe00",
+     "name": "SickKids",
+     "feature_type": "poi",
+     "lat": 43.657543,
+     "lon": -79.386589,
+     "distance_km": 0.009
+    },
+    {
+     "id": "437d8f8e-5ff5-45cf-a691-c0bee401445b",
+     "name": "The Hospital for Sick Children",
+     "feature_type": "poi",
+     "lat": 43.657608,
+     "lon": -79.386513,
+     "distance_km": 0.012
+    },
+    {
+     "id": "c5e05ca8-4fd7-4abe-a4ff-be80a40062f6",
+     "name": "MRI Department Sick Kids Hospital",
+     "feature_type": "poi",
+     "lat": 43.65744,
+     "lon": -79.386642,
+     "distance_km": 0.013
+    },
+    {
+     "id": "ff645a71-dcc7-45cd-9260-31105ca04f74",
+     "name": "SickKids Foundation",
+     "feature_type": "poi",
+     "lat": 43.656254,
+     "lon": -79.388512,
+     "distance_km": 0.213
+    },
+    {
+     "id": "2fc4ee4c-85f5-4169-80bd-86140cef27cd",
+     "name": "SickKids Centre for Community Mental Health",
+     "feature_type": "poi",
+     "lat": 43.665577,
+     "lon": -79.378433,
+     "distance_km": 1.108
+    },
+    {
+     "id": "d1f82d9d-5ac1-4110-8b3a-cf38e7324734",
+     "name": "Kiran More MD, Neonatal/Perinatal Medicine - Leading Physician of the World",
+     "feature_type": "poi",
+     "lat": 43.657501,
+     "lon": -79.388306,
+     "distance_km": 0.145
+    },
+    {
+     "id": "87ec750c-0145-4c01-a645-3631b9fe3c87",
+     "name": "Peter Gilgan Centre for Research and Learning",
+     "feature_type": "poi",
+     "lat": 43.657597,
+     "lon": -79.384811,
+     "distance_km": 0.136
+    },
+    {
+     "id": "713d5f67-919b-4abb-bf51-32f388e38664",
+     "name": "The Farmers Market at Sickkids",
+     "feature_type": "poi",
+     "lat": 43.656799,
+     "lon": -79.388496,
+     "distance_km": 0.179
+    }
+   ],
+   "strata": {
+    "poi_family": "healthcare",
+    "scope": "independent"
+   }
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:named_poi:royal-childrens-melbourne",
+   "kind": "place",
+   "query": "Royal Childrens Hospital Melbourne",
+   "query_style": "named_poi",
+   "status": 200,
+   "ms": 418.1,
+   "error": null,
+   "rank": null,
+   "found_at_1": false,
+   "found_at_10": false,
+   "matched_distance_km": null,
+   "top1_distance_km": 0.136,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "cb736c55-3bda-455a-9c4d-4b6259457dc1",
+     "name": "Royal Childrens Hospital Precinct ATM",
+     "feature_type": "poi",
+     "lat": -37.794922,
+     "lon": 144.950027,
+     "distance_km": 0.136
+    },
+    {
+     "id": "3259791c-6a5a-4930-8547-06ae724342d6",
+     "name": "Kelpie Ward, Royal Childrens Hospital",
+     "feature_type": "poi",
+     "lat": -37.792568,
+     "lon": 144.949219,
+     "distance_km": 0.138
+    },
+    {
+     "id": "e92940fb-1083-45ff-b0b0-c0785c6bdd99",
+     "name": "atmx Royal Childrens Hospital",
+     "feature_type": "poi",
+     "lat": -37.793953,
+     "lon": 144.9487,
+     "distance_km": 0.064
+    }
+   ],
+   "strata": {
+    "poi_family": "healthcare",
+    "scope": "independent"
+   }
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:named_poi:singapore-general-hospital",
+   "kind": "place",
+   "query": "Singapore General Hospital",
+   "query_style": "named_poi",
+   "status": 200,
+   "ms": 223.6,
+   "error": null,
+   "rank": 1,
+   "found_at_1": true,
+   "found_at_10": true,
+   "matched_distance_km": 0.139,
+   "top1_distance_km": 0.139,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "96e65ac8-1430-419e-ac64-3f7405b04c29",
+     "name": "Singapore General Hospital",
+     "feature_type": "poi",
+     "lat": 1.280469,
+     "lon": 103.834785,
+     "distance_km": 0.139
+    },
+    {
+     "id": "ebb92d72-1783-45b0-b003-5c62af7a9476",
+     "name": "Singapore General Hospital",
+     "feature_type": "poi",
+     "lat": -6.187299,
+     "lon": 106.831566,
+     "distance_km": 894.438
+    },
+    {
+     "id": "b6899bdb-1a56-453a-8f0f-5c7d97aa58c9",
+     "name": "Singapore General Hospital",
+     "feature_type": "poi",
+     "lat": 1.280194,
+     "lon": 103.838829,
+     "distance_km": 0.327
+    }
+   ],
+   "strata": {
+    "poi_family": "healthcare",
+    "scope": "independent"
+   }
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:named_poi:seattle-central-library",
+   "kind": "place",
+   "query": "Seattle Central Library",
+   "query_style": "named_poi",
+   "status": 200,
+   "ms": 299.4,
+   "error": null,
+   "rank": 1,
+   "found_at_1": true,
+   "found_at_10": true,
+   "matched_distance_km": 0.573,
+   "top1_distance_km": 0.573,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "62106118-b51f-4c4e-b84c-a645320cc1b9",
+     "name": "Seattle Central library",
+     "feature_type": "poi",
+     "lat": 47.604912,
+     "lon": -122.325333,
+     "distance_km": 0.573
+    }
+   ],
+   "strata": {
+    "poi_family": "civic_transit",
+    "scope": "independent"
+   }
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:named_poi:gpo-dublin",
+   "kind": "place",
+   "query": "GPO Dublin",
+   "query_style": "named_poi",
+   "status": 200,
+   "ms": 79.9,
+   "error": null,
+   "rank": null,
+   "found_at_1": false,
+   "found_at_10": false,
+   "matched_distance_km": null,
+   "top1_distance_km": 0.021,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "c0a4e981-9880-4b8a-bbcb-aad7fc01bbdf",
+     "name": "GPO Museum",
+     "feature_type": "poi",
+     "lat": 53.349556,
+     "lon": -6.260485,
+     "distance_km": 0.021
+    }
+   ],
+   "strata": {
+    "poi_family": "civic_transit",
+    "scope": "independent"
+   }
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:named_poi:burton-barr-library",
+   "kind": "place",
+   "query": "Burton Barr Library Phoenix",
+   "query_style": "named_poi",
+   "status": 200,
+   "ms": 549.4,
+   "error": null,
+   "rank": 1,
+   "found_at_1": true,
+   "found_at_10": true,
+   "matched_distance_km": 0.267,
+   "top1_distance_km": 0.267,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "214b232e-0b9c-4804-aa1d-9264e57018b7",
+     "name": "Burton Barr Central Library",
+     "feature_type": "poi",
+     "lat": 33.462589,
+     "lon": -112.072929,
+     "distance_km": 0.267
+    }
+   ],
+   "strata": {
+    "poi_family": "civic_transit",
+    "scope": "independent"
+   }
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:named_poi:union-station-toronto",
+   "kind": "place",
+   "query": "Union Station Toronto",
+   "query_style": "named_poi",
+   "status": 200,
+   "ms": 476.4,
+   "error": null,
+   "rank": 1,
+   "found_at_1": true,
+   "found_at_10": true,
+   "matched_distance_km": 0.019,
+   "top1_distance_km": 0.019,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "018a7bb9-d353-49d1-a562-3007b7b2a6dd",
+     "name": "Union Station",
+     "feature_type": "poi",
+     "lat": 43.645428,
+     "lon": -79.38076,
+     "distance_km": 0.019
+    },
+    {
+     "id": "3ae50e45-4704-4365-8728-78b1b8a03951",
+     "name": "Union Station, via Rail Platform",
+     "feature_type": "poi",
+     "lat": 43.64447,
+     "lon": -79.380272,
+     "distance_km": 0.096
+    },
+    {
+     "id": "4de866de-eee6-4b9d-aa07-7a4612fbd495",
+     "name": "Union Station Toronto",
+     "feature_type": "poi",
+     "lat": 43.72287,
+     "lon": -79.250526,
+     "distance_km": 13.557
+    },
+    {
+     "id": "d9c2f399-f446-4e27-b78b-022624b9abd9",
+     "name": "Union Station (Toronto)",
+     "feature_type": "poi",
+     "lat": 43.645729,
+     "lon": -79.384979,
+     "distance_km": 0.356
+    },
+    {
+     "id": "6d9f79d6-30f7-4887-bc20-87f991e53438",
+     "name": "Union Station - Toronto Railyard",
+     "feature_type": "poi",
+     "lat": 43.644806,
+     "lon": -79.380363,
+     "distance_km": 0.058
+    },
+    {
+     "id": "b4925a00-58cc-4d56-b268-1cc0285fd6d7",
+     "name": "Union Station Train Terminal",
+     "feature_type": "poi",
+     "lat": 43.675663,
+     "lon": -79.327507,
+     "distance_km": 5.444
+    },
+    {
+     "id": "77bff1d8-7a0d-4b58-89c9-77ce6da6b757",
+     "name": "Union Station Bus Terminal",
+     "feature_type": "poi",
+     "lat": 43.645557,
+     "lon": -79.377777,
+     "distance_km": 0.229
+    },
+    {
+     "id": "37316a3d-71cd-4772-a20e-e9c5cd099e7c",
+     "name": "Union Subway Station",
+     "feature_type": "poi",
+     "lat": 43.645584,
+     "lon": -79.379639,
+     "distance_km": 0.084
+    },
+    {
+     "id": "1d18a534-bce2-4443-b0b2-5177d1ecbab4",
+     "name": "Toronto Union Station",
+     "feature_type": "poi",
+     "lat": 43.644722,
+     "lon": -79.382027,
+     "distance_km": 0.132
+    },
+    {
+     "id": "686102c4-3322-4abf-8d05-fd0903083d7c",
+     "name": "Toronto Union Station",
+     "feature_type": "poi",
+     "lat": 43.870731,
+     "lon": -78.885147,
+     "distance_km": 47.028
+    }
+   ],
+   "strata": {
+    "poi_family": "civic_transit",
+    "scope": "independent"
+   }
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:inverse_seam:sydney-opera-house",
+   "kind": "place",
+   "query": "Sydney Opera House",
+   "query_style": "inverse_seam",
+   "status": 200,
+   "ms": 309.1,
+   "error": null,
+   "rank": 1,
+   "found_at_1": true,
+   "found_at_10": true,
+   "matched_distance_km": 0.006,
+   "top1_distance_km": 0.006,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "49a93fe0-f3e4-4739-8a91-be57f4a411b5",
+     "name": "Sydney Opera House",
+     "feature_type": "poi",
+     "lat": -33.85675,
+     "lon": 151.215317,
+     "distance_km": 0.006
+    },
+    {
+     "id": "49e70055-e80c-4ff8-bc6a-c955ec8d9d11",
+     "name": "Sydney Opera House",
+     "feature_type": "poi",
+     "lat": -33.917698,
+     "lon": 151.229874,
+     "distance_km": 6.904
+    }
+   ]
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:inverse_seam:golden-gate-bridge",
+   "kind": "place",
+   "query": "Golden Gate Bridge",
+   "query_style": "inverse_seam",
+   "status": 200,
+   "ms": 208.7,
+   "error": null,
+   "rank": null,
+   "found_at_1": false,
+   "found_at_10": false,
+   "matched_distance_km": null,
+   "top1_distance_km": 13509.795,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "bf65b701-8571-411b-862e-3a2b267178c7",
+     "name": "Golden Gate bridge",
+     "feature_type": "poi",
+     "lat": 18.6534,
+     "lon": 73.7658,
+     "distance_km": 13509.795
+    },
+    {
+     "id": "243bb857-8d8d-46c8-a843-223f19c76607",
+     "name": "Golden Gate Bridge",
+     "feature_type": "poi",
+     "lat": 37.774929,
+     "lon": -122.419418,
+     "distance_km": 7.195
+    },
+    {
+     "id": "e1a000e7-5ae4-4155-9808-f6a8ffc46046",
+     "name": "Golden Gate Bridge",
+     "feature_type": "poi",
+     "lat": 37.786865,
+     "lon": -122.409348,
+     "distance_km": 7.085
+    },
+    {
+     "id": "1354f3d1-cd3f-4995-95f1-8e3ad9f2f29c",
+     "name": "Golden Gate",
+     "feature_type": "poi",
+     "lat": 54.349674,
+     "lon": 18.64813,
+     "distance_km": 9113.807
+    },
+    {
+     "id": "1272e6fa-2287-4e6d-88c5-27e81d13132c",
+     "name": "Golden Gate",
+     "feature_type": "poi",
+     "lat": 27.672123,
+     "lon": 85.428391,
+     "distance_km": 12173.537
+    },
+    {
+     "id": "81658273-5266-4922-8948-4cf1f2a20a5b",
+     "name": "Golden Gate",
+     "feature_type": "poi",
+     "lat": -8.139132,
+     "lon": -34.906105,
+     "distance_km": 10349.75
+    },
+    {
+     "id": "f1aaed16-4aa5-4375-9bee-87a92453bc9a",
+     "name": "Golden Gate",
+     "feature_type": "poi",
+     "lat": -21.759621,
+     "lon": -41.316364,
+     "distance_km": 10739.228
+    },
+    {
+     "id": "62d6577e-8325-4fdb-9ce3-585e400645ee",
+     "name": "Golden Gate",
+     "feature_type": "poi",
+     "lat": 5.810874,
+     "lon": 118.05983,
+     "distance_km": 12112.717
+    },
+    {
+     "id": "147b9c16-b881-4567-aee3-80e716ad32b4",
+     "name": "Golden gate",
+     "feature_type": "poi",
+     "lat": 37.827545,
+     "lon": -122.498894,
+     "distance_km": 1.999
+    },
+    {
+     "id": "67e45fa1-b835-4122-b11f-3352c9b9eea5",
+     "name": "Golden Gate",
+     "feature_type": "poi",
+     "lat": 43.509182,
+     "lon": 16.440674,
+     "distance_km": 10069.318
+    }
+   ]
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:inverse_seam:casino-de-monte-carlo",
+   "kind": "place",
+   "query": "Casino de Monte-Carlo",
+   "query_style": "inverse_seam",
+   "status": 200,
+   "ms": 1396.6,
+   "error": null,
+   "rank": null,
+   "found_at_1": false,
+   "found_at_10": false,
+   "matched_distance_km": null,
+   "top1_distance_km": null,
+   "expected_feature_type": "poi",
+   "top1_feature_type": null,
+   "type_at_1": false,
+   "type_present": false,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": []
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:inverse_seam:times-square",
+   "kind": "place",
+   "query": "Times Square",
+   "query_style": "inverse_seam",
+   "status": 200,
+   "ms": 287.7,
+   "error": null,
+   "rank": null,
+   "found_at_1": false,
+   "found_at_10": false,
+   "matched_distance_km": null,
+   "top1_distance_km": 777.47,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "123ca2ae-8c61-4103-8edd-0a69d359b73a",
+     "name": "Times Square",
+     "feature_type": "poi",
+     "lat": 40.068501,
+     "lon": -83.128159,
+     "distance_km": 777.47
+    },
+    {
+     "id": "10937869-ebba-4b0d-a1e9-9362ac18ec8c",
+     "name": "Times Square",
+     "feature_type": "poi",
+     "lat": -33.883762,
+     "lon": 151.203293,
+     "distance_km": 15992.017
+    },
+    {
+     "id": "0505c721-540e-4f67-b37a-bf42ac939ccb",
+     "name": "Times Square",
+     "feature_type": "poi",
+     "lat": -1.446815,
+     "lon": -48.48735,
+     "distance_km": 5355.658
+    },
+    {
+     "id": "561f1ae6-e37f-445d-a1b8-9ba86773c47e",
+     "name": "Times Square",
+     "feature_type": "poi",
+     "lat": 40.679829,
+     "lon": -73.988892,
+     "distance_km": 8.697
+    },
+    {
+     "id": "65ace003-b4da-4634-98f0-19eae9e0b7ec",
+     "name": "Times Square",
+     "feature_type": "poi",
+     "lat": 54.967819,
+     "lon": -1.621279,
+     "distance_km": 5361.409
+    },
+    {
+     "id": "1ba2b447-e372-48e7-95b6-1960639ca2a3",
+     "name": "Times Square",
+     "feature_type": "poi",
+     "lat": 41.251865,
+     "lon": -74.120049,
+     "distance_km": 56.064
+    },
+    {
+     "id": "5686124f-6f72-4779-8e15-8b7dcea4a38b",
+     "name": "Times Square",
+     "feature_type": "poi",
+     "lat": -21.206154,
+     "lon": -47.810837,
+     "distance_km": 7402.392
+    },
+    {
+     "id": "12dd4af6-696c-45c3-b174-19d8a6336bb7",
+     "name": "MTV 44 ½ Times Square Billboard",
+     "feature_type": "poi",
+     "lat": 40.757584,
+     "lon": -73.986061,
+     "distance_km": 0.066
+    },
+    {
+     "id": "aaaba1ee-04a6-4fa8-a5c1-54df7c49cc9a",
+     "name": "The Humans",
+     "feature_type": "poi",
+     "lat": 40.758652,
+     "lon": -73.98745,
+     "distance_km": 0.179
+    }
+   ]
+  },
+  {
+   "provider": "overture",
+   "scoring_mode": "exact_gers_id",
+   "capability": "supported",
+   "capability_reason": null,
+   "case_id": "gold:inverse_seam:louvre-museum",
+   "kind": "place",
+   "query": "Louvre Museum",
+   "query_style": "inverse_seam",
+   "status": 200,
+   "ms": 75.6,
+   "error": null,
+   "rank": null,
+   "found_at_1": false,
+   "found_at_10": false,
+   "matched_distance_km": null,
+   "top1_distance_km": 4.441,
+   "expected_feature_type": "poi",
+   "top1_feature_type": "poi",
+   "type_at_1": true,
+   "type_present": true,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "60f4fa7f-6eec-4362-8bc7-fcb07d56d1a6",
+     "name": "Louvre Museum",
+     "feature_type": "poi",
+     "lat": 48.879944,
+     "lon": 2.284485,
+     "distance_km": 4.441
+    },
+    {
+     "id": "abbf616b-a9d0-4d78-bf9e-06e730423f7a",
+     "name": "Louvre Museum",
+     "feature_type": "poi",
+     "lat": 48.902084,
+     "lon": 2.307391,
+     "distance_km": 5.114
+    },
+    {
+     "id": "abd05b88-422f-4789-a439-46f9f9250dd0",
+     "name": "Louvre Museum",
+     "feature_type": "poi",
+     "lat": 48.855301,
+     "lon": 2.292627,
+     "distance_km": 3.342
+    },
+    {
+     "id": "7ff07150-e363-4a63-88ab-0ff175b08e65",
+     "name": "Louvre Museum",
+     "feature_type": "poi",
+     "lat": 48.830345,
+     "lon": 2.679221,
+     "distance_km": 25.224
+    },
+    {
+     "id": "8d93ff5f-fb2e-4327-a4fb-064fc3fce07e",
+     "name": "Louvre Museum",
+     "feature_type": "poi",
+     "lat": 48.92205,
+     "lon": 2.343199,
+     "distance_km": 6.845
+    },
+    {
+     "id": "6c17b565-2ab7-471c-9b1c-114fcaea6897",
+     "name": "Louvre Museum",
+     "feature_type": "poi",
+     "lat": 51.493721,
+     "lon": -0.149025,
+     "distance_km": 342.124
+    },
+    {
+     "id": "e5a594b1-21bf-4904-b9d8-aa103c88bd10",
+     "name": "Louvre Museum",
+     "feature_type": "poi",
+     "lat": 51.430534,
+     "lon": 6.778805,
+     "distance_km": 426.259
+    },
+    {
+     "id": "1caca135-48ff-41b9-bd2c-7ce436a9d67b",
+     "name": "Louvre Museum Paris",
+     "feature_type": "poi",
+     "lat": 55.962742,
+     "lon": -3.196062,
+     "distance_km": 873.712
+    },
+    {
+     "id": "0fa065e8-a6b6-43a2-b37d-cd3d834255c2",
+     "name": "Louvre Museum Paris",
+     "feature_type": "poi",
+     "lat": 48.779175,
+     "lon": 2.215492,
+     "distance_km": 12.724
+    },
+    {
+     "id": "a25a11e1-ecf6-4275-95ef-30ddf94d6e69",
+     "name": "Louvre Abu Dhabi",
+     "feature_type": "poi",
+     "lat": 24.533697,
+     "lon": 54.39814,
+     "distance_km": 5237.584
+    }
+   ]
+  }
+ ]
+}

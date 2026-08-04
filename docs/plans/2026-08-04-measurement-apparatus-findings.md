@@ -142,3 +142,80 @@ nonetheless strictly worse than lever 1 and should not precede it.
   control already on disk costs zero live traffic.
 - The largest untested quality lever on the board is the Overture release move
   from `2026-06-17.0`, which has never been benchmarked.
+
+---
+
+# Measured outcome (same day, after the additive wave deployed)
+
+Both hypotheses above were tested. One held, one was refuted by measurement.
+
+## The additive wave moved both sets
+
+Build `2026-08-03.0` throughout (a Worker change, no rebuild), paired against
+baselines captured immediately before the deploy, same scorer both sides:
+
+| set | before | after | delta |
+|---|---|---|---|
+| gold 55 r@1 | 0.545 | 0.564 | +1 case |
+| gold 55 r@10 | 0.709 | **0.727** | +1 case |
+| gold 55 starved | 6 | **4** | −2 |
+| everyday 200 r@1 | 0.325 | 0.345 | +4 cases |
+| everyday 200 r@10 | 0.330 | **0.350** | +4 cases |
+| everyday 200 starved | 111 | **107** | −4 |
+
+Notable against the prediction above: the everyday set moved **+4**, where the
+entire v4 planet rebuild plus phrase admission had moved it +1. The
+"0 of 40 competitor-solvable" figure bounds what *external evidence* can
+confirm; it does not bound what is winnable. Both readings were too confident.
+
+## The name-unscorability hypothesis is REFUTED
+
+Predicted: a large share of misses are correct answers rejected on exact-name
+equality. Measured, by scoring one run both ways — same build, same responses,
+no new requests:
+
+```
+baseline  (      exact)  @1  69  @10  70  r@10 0.350
+rescored  (containment)  @1  70  @10  71  r@10 0.355
+delta @10            +1
+```
+
+**One case.** And the ceiling is 5, not 40:
+
+- 130 misses total
+- **106 (82%) returned literally nothing.** An empty response has no candidate
+  to re-score, so no name rule of any kind can recover it.
+- 24 misses were non-empty, and only **5** had any candidate inside the 1 km
+  tolerance. Those 5 are the entire addressable surface for name scoring.
+
+The single flip is `許家蝦仁肉圓/芋粿` against `許家蝦仁肉圓 芋粿` at 7 m — the
+same restaurant, `/` versus a space. It is recorded `audit: PENDING` in
+`benchmarks/2026-08-04-everyday-poi-containment-rescore.json` and needs a human
+to confirm before the 0.355 is quoted anywhere.
+
+**So the miss pile is a retrieval problem, not a scoring artifact**, and the
+proposed "add alt_names to all 200 cases / relax the scorer" workstream is
+worth at most 5 cases. It should not be scheduled. That is the useful result:
+a cheap measurement closed an expensive-looking workstream.
+
+Caveat found while measuring: the first re-scoring run reported a confident
+"no cases flipped", which was partly a bug — the tokenizer used an ASCII-only
+character class, so every CJK, Hangul and Cyrillic name produced an empty token
+set and containment was a silent no-op on half the set. Fixed and regression
+tested. The corrected number is the +1 above. A known limit remains: the
+2-token floor is Latin-shaped and still blocks a dense single CJK compound
+(`중앙대학교병원` against `중앙대학교병원 (Chung-Ang Univ. Hospital)`, 7 m). With a
+measured ceiling of 5 cases it is not worth guessing at a fix.
+
+## What this leaves
+
+The two live questions are now both about **retrieval**, and the instrument can
+speak to neither from where it sits:
+
+1. Why do 106 of 130 misses return nothing at all? That is the whole game.
+2. Does the Overture release move from `2026-06-17.0` change it? Never tested,
+   and it is the only lever that adds *data* rather than re-ranking what is
+   already there.
+
+Candidate retention now ships on every run, so the next round can answer
+retrieval-versus-ranking from a frozen artifact instead of re-querying.

@@ -1,0 +1,69 @@
+{
+  "schema": "benchmark-v2-forward-rescore-v1",
+  "mode": "containment",
+  "rationale": "Every non-address place match is already gated on distance (tolerance_km,\n1.0 km for the everyday-POI set), so relaxing the NAME test cannot admit an\nunrelated entity in another city -- it can only admit a differently-named\nentity within a kilometre of the expected point. That is the whole risk\nsurface, and the two floors above bound it.\n\nThe defect this addresses: gold names are verbatim government-registry\nstrings while Overture carries signage/OSM names. Under exact equality\n`BEDOK RESERVOIR MRT STATION` cannot match `Bedok Reservoir Station` even\nwhen returned at 10 m, so a perfect retrieval fix still scores a miss.\n\nThis mode is OPT-IN and never the default. A metric may not silently change\nmeaning between runs, and every case it newly accepts is emitted for human\naudit rather than folded into a headline number.",
+  "run_meta": {
+    "timestamp": "2026-08-04T14:35:26+00:00",
+    "base_url": "https://geocoder.bradr.dev",
+    "git_sha": "88b7819",
+    "data_version": "2026-08-03.0",
+    "interval_s": 0.35,
+    "primary_provider": "overture",
+    "benchmark_mode": "exact_id_self_recall",
+    "providers": {
+      "overture": {
+        "base_url": "https://geocoder.bradr.dev",
+        "interval_s": 0.35,
+        "capabilities": {
+          "places_free_text": true,
+          "address_structured": true
+        },
+        "scoring_mode": "exact_gers_id",
+        "data_version": "2026-08-03.0"
+      }
+    },
+    "name_match": "exact",
+    "case_counts": {
+      "place": 200
+    },
+    "transient_retries_allowed": 2,
+    "transient_retries_used": 0,
+    "cases_with_transient_retry": 0
+  },
+  "cases": 200,
+  "baseline": {
+    "name_match": "exact",
+    "found_at_1": 69,
+    "found_at_10": 70,
+    "recall_at_1": 0.345,
+    "recall_at_10": 0.35
+  },
+  "rescored": {
+    "name_match": "containment",
+    "found_at_1": 70,
+    "found_at_10": 71,
+    "recall_at_1": 0.35,
+    "recall_at_10": 0.355
+  },
+  "delta_at_10": 1,
+  "flips_pending_audit": [
+    {
+      "case_id": "everyday-tw-Restaurant_395000000A_001459",
+      "query": "\u8a31\u5bb6\u8766\u4ec1\u8089\u5713/\u828b\u7cbf",
+      "expected_name": "\u8a31\u5bb6\u8766\u4ec1\u8089\u5713/\u828b\u7cbf",
+      "accepted_name": "\u8a31\u5bb6\u8766\u4ec1\u8089\u5713 \u828b\u7cbf",
+      "accepted_id": "ea398f5c-ec83-476c-aa74-592dbbf5dbd8",
+      "accepted_distance_km": 0.007,
+      "rank": 1,
+      "strata": {
+        "country": "TW",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "food_drink",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "audit": "PENDING"
+    }
+  ]
+}
