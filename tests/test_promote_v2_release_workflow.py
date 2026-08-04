@@ -18,12 +18,19 @@ import yaml
 ROOT = Path(__file__).parent.parent
 WORKFLOW = ROOT / ".github" / "workflows" / "promote-v2-release.yml"
 
-STAGES = ["probe", "promote-slice", "publish-release", "promote-catalog"]
+STAGES = [
+    "probe",
+    "promote-slice",
+    "publish-release",
+    "publish-overlay-release",
+    "promote-catalog",
+]
 INPUTS = {
     "stage",
     "mode",
     "slice_version",
     "geocoder_build",
+    "base_geocoder_build",
     "overture_release",
     "legacy_core",
     "places_source",
@@ -68,7 +75,7 @@ def test_permissions_are_read_only_with_actions_read_only_for_artifact_fetch():
     wf = load()
     assert wf["permissions"] == {"contents": "read"}
     for name, job in jobs().items():
-        if name in {"promote-slice", "publish-release"}:
+        if name in {"promote-slice", "publish-release", "publish-overlay-release"}:
             assert job["permissions"] == {"contents": "read", "actions": "read"}
         else:
             assert "permissions" not in job, name
@@ -96,7 +103,12 @@ def test_every_stage_job_needs_the_gate_and_is_main_only():
 
 def test_gate_records_the_stage_target_and_validates_the_cas_expectation():
     gate = "\n".join(scripts(jobs()["gate"]))
-    for token in ("PROMOTE-SLICE", "PUBLISH-RELEASE", "PROMOTE-CATALOG"):
+    for token in (
+        "PROMOTE-SLICE",
+        "PUBLISH-RELEASE",
+        "PUBLISH-OVERLAY-RELEASE",
+        "PROMOTE-CATALOG",
+    ):
         assert token in gate, token
     # The typed PROBES-GREEN attestation was removed deliberately.
     assert "PROBES-GREEN:" not in gate
@@ -111,6 +123,7 @@ def test_execute_only_steps_are_gated_on_mode():
     execute_gated = {
         "promote-slice": 2,  # execute+verify, slice manifest (plan is ungated)
         "publish-release": 1,  # the create-only publish
+        "publish-overlay-release": 1,  # the create-only overlay publish
         "promote-catalog": 2,  # the CAS execute and the smoke
     }
     for name, minimum in execute_gated.items():
@@ -128,6 +141,7 @@ def test_dry_run_announcement_precedes_every_execute():
     # must come before the gated one WITH --execute.
     for job_name, needle in (
         ("publish-release", "v2_release_manifest.py publish-release"),
+        ("publish-overlay-release", "v2_release_manifest.py publish-release"),
         ("promote-catalog", "v2_release_manifest.py promote"),
     ):
         steps = named[job_name]["steps"]
@@ -253,6 +267,19 @@ def test_publish_release_attaches_external_reverse_only_when_not_in_source():
     # The old unconditional per-family attachment is gone.
     assert '--reverse-publication "places=' not in body
     assert '--reverse-publication "addresses=' not in body
+
+
+def test_overlay_release_preserves_operations_and_requires_matching_reverse():
+    gate = "\n".join(scripts(jobs()["gate"]))
+    assert "publish-overlay-release needs places_source with :<reverse-run-id>" in gate
+    assert "publish-overlay-release needs the current catalog sha256" in gate
+    body = "\n".join(scripts(jobs()["publish-overlay-release"]))
+    assert 'reverse-v2-places-catalog' in body
+    assert '.name == "Build v2 reverse indexes"' in body
+    assert "v2_release_manifest.py assemble-overlay" in body
+    assert '--catalog-expect-sha256 "$CATALOG_EXPECTATION"' in body
+    assert '--base-build "$BASE_GEOCODER_BUILD"' in body
+    assert "overlay changed the live operation set" in body
 
 
 # --- create-only / no-delete discipline ----------------------------------------
