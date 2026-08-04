@@ -180,6 +180,24 @@ def main(argv=None) -> int:
                              "longer fire before ENOSPC. Recorded in the run "
                              "summary so a local result is never mistaken for a "
                              "hosted-shaped one.")
+    # The hosted limits are sized for a 16 GiB, low-core runner: 4 DuckDB
+    # threads and an 8GB memory limit. On a 20-core / 62 GB workstation that
+    # leaves most of the machine idle and forces spill that RAM could absorb.
+    #
+    # These two are SAFE to raise because they change only how fast the same
+    # work happens -- neither alters what is emitted. Deliberately NOT included
+    # here: head_merge_fan_in and head_shard_copy_batch. Those reshape the merge
+    # tree and the COPY batching, which can change which rows survive
+    # `result_cap` tie-breaking, so a run using them is not byte-comparable to a
+    # hosted-shaped one. Treat those as a separate, deliberate experiment.
+    parser.add_argument("--duckdb-threads", type=int, default=None,
+                        help="LOCAL ONLY: raise the contract's places "
+                             "duckdb_threads (hosted default 4). Speed only; "
+                             "does not change output.")
+    parser.add_argument("--duckdb-memory", default=None,
+                        help="LOCAL ONLY: raise the contract's places "
+                             "duckdb_memory_limit, e.g. '32GB' (hosted default "
+                             "8GB). Speed only; does not change output.")
     parser.add_argument("--tasks", default=None,
                         help="Comma/dash task selection (e.g. 0-9,20). "
                              "Default: every task in the inventory.")
@@ -244,6 +262,19 @@ def main(argv=None) -> int:
     contract = work / "contract.json"
     hosted("derive-contract", "--request", request, "--output", contract,
            "--runtime", work / "runtime.json", "--allow-unpinned-duckdb")
+    overrides: dict[str, object] = {}
+    if args.duckdb_threads is not None:
+        overrides["duckdb_threads"] = args.duckdb_threads
+    if args.duckdb_memory is not None:
+        overrides["duckdb_memory_limit"] = args.duckdb_memory
+    if overrides:
+        document = json.loads(contract.read_text())
+        before = {k: document["limits"]["places"].get(k) for k in overrides}
+        document["limits"]["places"].update(overrides)
+        contract.write_text(json.dumps(document, indent=2) + "\n")
+        for key, value in overrides.items():
+            print(f"limits       {key} {before[key]} -> {value} (LOCAL override)",
+                  flush=True)
     if args.max_scratch_gib is not None:
         # Patched AFTER derivation rather than threaded through the request:
         # the request digest is what binds a run to its reviewed shape, and a
@@ -378,6 +409,7 @@ def main(argv=None) -> int:
         "inventory_sha256": inventory["inventory_sha256"],
         "source_mirror": mirror,
         "max_scratch_gib_override": args.max_scratch_gib,
+        "resource_overrides": overrides,
         "tasks": len(tasks),
         "records": total_records,
         "map_seconds": round(map_seconds, 1),
