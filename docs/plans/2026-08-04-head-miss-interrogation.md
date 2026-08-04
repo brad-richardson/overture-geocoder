@@ -183,3 +183,88 @@ no-proximity query. It is NOT cap eviction — `e2:times square` has 6 rows
 against a cap of 10 — so raising the cap would not help. Note also that the
 landmark itself is often absent while derived businesses are present, which is
 a construction-side admission question rather than a serving one.
+
+---
+
+# CORRECTION: the headline above is wrong
+
+A follow-up diagnosis of the remaining IN_HEAD cases invalidated this doc's
+central claim. Three findings, all verified directly rather than accepted.
+
+## 1. The interrogation measured a DIFFERENT RELEASE than the benchmark
+
+Production serves `overture_release 2026-06-17.0`. The head-candidate packs
+probed here are from the local **2026-07-22.0** build. So every verdict compares
+a July index against a June measurement.
+
+This is a methodological flaw in the whole report, not a footnote. At least one
+case is explained by it outright: KR `하나효요양병원` exists in 2026-07-22.0 as a
+single head row at global rank 1 (`prominence_rank 102`), and returns empty from
+the deployed June index even with proximity at the gold point. It is a
+measurement artifact and should not be counted as a serving defect.
+
+## 2. "IN_HEAD" mostly means CAP-EVICTED, which needs a rebuild
+
+The limitation was stated above — candidates are pre-merge, and `result_cap`
+(10) is applied afterwards — and then the headline ignored it. Measured:
+
+```
+token 'habana' posting, 452 rows, cap keeps 10
+  rank  1  Aeropuerto de La Habana            prominence_rank 230
+  rank  3  Museo Napoleónico de La Habana     prominence_rank 217
+  rank 58  Hotel Habana                       prominence_rank 0   <- wanted
+e2:hotel habana rows planet-wide: 0
+```
+
+`hotel` is a commodity category, so `prominence_rank = 0` sorts it below every
+monument, airport and museum in the same posting, and the entity-phrase key is
+never emitted at all (`entity_phrase_key` returns `None` at rank 0). Ten cases
+share this shape — five empty, five wrong-answer. The wanted rows are **not in
+the head artifact bytes**, so no Worker change can retrieve them.
+
+**Fix side: construction. A rebuild.**
+
+## 3. `alt_names` inflated IN_HEAD by at least four
+
+The four Hong Kong Chinese-language queries (`聖母醫院`, `屯門醫院`,
+`麥理浩復康院`, `香港兒童醫院`) were counted IN_HEAD because the probe accepts a
+case's `alt_names`, and each carries the English name Overture actually holds.
+Under the string that was QUERIED they are absent — the source records have an
+English `names.primary` and a null `names.common`, so no Chinese string exists
+to index. One match was outright spurious: `香港兒童醫院` matched
+`Kai Tak Promenade (Hong Kong Children's Hospital Section) Children's
+Playground`.
+
+**Fix side: neither. No rebuild or Worker change reaches a name the source does
+not carry.**
+
+## Revised accounting for the 23 everyday IN_HEAD cases
+
+| | count | fix side |
+|---|---|---|
+| cap eviction at `prominence_rank = 0` | 10 | **construction (rebuild)** |
+| Chinese query, English-only record | 4 | neither — source data |
+| deployed-release skew | 1 | neither — re-measure after promotion |
+| correct feature served, scorer rejected the name form | 2 | benchmark scoring |
+| compound-category proof (Singapore stations) | 6 | Worker — **fixed today** |
+
+So the true Worker-fixable count on the everyday set is **6, not 23**, and the
+claim that "the largest actionable class needs no rebuild" does not survive.
+The largest actionable class is cap eviction, and it needs one.
+
+What does survive: ABSENT at 92 of 130 is unaffected by all of this — those
+cases have no candidate at any rank — so the ceiling argument (~0.54, and 0.350
+being ~65% of achievable) still stands. The gold set's 9 exact-tier IN_HEAD
+cases are also untouched by mechanisms 2-4, but they are wrong-instance
+homonyms, which is arbitration and likewise construction-shaped.
+
+## Also recorded: CJK query tokenization is whole-run-only
+
+The index emits, per CJK run, the whole word plus every character bigram
+(`places_transform_v1.rs:250-283`). The Worker's query tokenizer emits whole
+words only — `query_terms` is `normalized_words`, and the bigram-producing
+`tokenize_query` is `#[cfg(test)]` and dead on the serving path. So a CJK query
+of three or more characters can only match a record whose normalized run is
+exactly the query, and can never reach a longer name. No case in this set is
+explained by it alone, but it will bite other CJK queries. Fix side is Worker;
+the read-cost of adding bigram clauses is not determined.
