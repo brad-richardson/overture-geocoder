@@ -1,0 +1,839 @@
+{
+  "cap_order": "((field_mask & 3) != 0) DESC, prominence_rank DESC, confidence_rank DESC, feature_id, source_object_index, source_row_group, source_row_index",
+  "cases": [
+    {
+      "blocked_by": [
+        "INDETERMINATE_PACK_FULL"
+      ],
+      "cap_bound_unknown": false,
+      "cap_needed_to_recover": null,
+      "case_id": "gold:name_locality:machu-picchu",
+      "expected_name": "Machu Picchu",
+      "query": "Machu Picchu Cusco",
+      "query_words": [
+        "machu",
+        "picchu",
+        "cusco"
+      ],
+      "recoverable_by_cap_raise": false,
+      "strata": {},
+      "target": {
+        "category": "landmark_and_historical_building",
+        "confidence_rank": 248,
+        "emittable_tokens": [
+          "ciudadela",
+          "de",
+          "landmark_and_historical_building",
+          "machu",
+          "machupicchu",
+          "pe",
+          "picchu"
+        ],
+        "feature_uuid": "2fe76e46e53243cebfde082d27ff1091",
+        "pack": "/home/brad/dev/overture-local/planet/store/map/places-v1/head-candidates/sha256/16c3f6cf1aaf5c22cd80f1a72254963ae275881e2803c385e1497ee2db4a1b70.parquet",
+        "primary_name": "Ciudadela De Machu Picchu",
+        "prominence_rank": 128,
+        "tokens_emitted": 4
+      },
+      "tokens": [
+        {
+          "cap_decided_by_feature_id": false,
+          "contenders": 204,
+          "rank": 9,
+          "survives_current_cap": true,
+          "target_category": "landmark_and_historical_building",
+          "target_confidence_rank": 248,
+          "target_identifying": true,
+          "target_prominence_rank": 128,
+          "token": "machu"
+        },
+        {
+          "cap_decided_by_feature_id": false,
+          "contenders": 151,
+          "rank": 8,
+          "survives_current_cap": true,
+          "target_category": "landmark_and_historical_building",
+          "target_confidence_rank": 248,
+          "target_identifying": true,
+          "target_prominence_rank": 128,
+          "token": "picchu"
+        },
+        {
+          "contenders": 115,
+          "detail": "the record carries this word in no indexed field, so the producer never emits the token for it",
+          "rank": null,
+          "reason": "INDETERMINATE_PACK_FULL",
+          "rows_in_targets_own_pack": 10,
+          "token": "cusco",
+          "token_is_emittable_for_target": false,
+          "token_saturated_globally": false
+        }
+      ]
+    },
+    {
+      "blocked_by": [
+        "INDETERMINATE_PACK_FULL"
+      ],
+      "cap_bound_unknown": false,
+      "cap_needed_to_recover": null,
+      "case_id": "gold:name:brandenburg-gate",
+      "expected_name": "Brandenburg Gate",
+      "query": "Brandenburg Gate",
+      "query_words": [
+        "brandenburg",
+        "gate"
+      ],
+      "recoverable_by_cap_raise": false,
+      "strata": {},
+      "target": {
+        "category": "landmark_and_historical_building",
+        "confidence_rank": 254,
+        "emittable_tokens": [
+          "berlin",
+          "brandenburger",
+          "de",
+          "landmark_and_historical_building",
+          "tor"
+        ],
+        "feature_uuid": "a071ff525af8431784f129dc88f877d2",
+        "pack": "/home/brad/dev/overture-local/planet/store/map/places-v1/head-candidates/sha256/a467a1f1b9fa15f6b3fb2760203ba063d68a3e0cc788f96fba3df3741bd03af9.parquet",
+        "primary_name": "Brandenburger Tor",
+        "prominence_rank": 128,
+        "tokens_emitted": 2
+      },
+      "tokens": [
+        {
+          "contenders": 202,
+          "detail": "the record carries this word in no indexed field, so the producer never emits the token for it",
+          "rank": null,
+          "reason": "INDETERMINATE_PACK_FULL",
+          "rows_in_targets_own_pack": 10,
+          "token": "brandenburg",
+          "token_is_emittable_for_target": false,
+          "token_saturated_globally": false
+        },
+        {
+          "contenders": 880,
+          "detail": "the record carries this word in no indexed field, so the producer never emits the token for it",
+          "rank": null,
+          "reason": "INDETERMINATE_PACK_FULL",
+          "rows_in_targets_own_pack": 10,
+          "token": "gate",
+          "token_is_emittable_for_target": false,
+          "token_saturated_globally": true
+        }
+      ]
+    },
+    {
+      "blocked_by": [
+        "EVICTED_BEFORE_MERGE",
+        "INDETERMINATE_PACK_FULL"
+      ],
+      "cap_bound_unknown": true,
+      "cap_needed_to_recover": null,
+      "case_id": "gold:name_locality:brandenburg-gate",
+      "expected_name": "Brandenburg Gate",
+      "query": "Brandenburg Gate Berlin",
+      "query_words": [
+        "brandenburg",
+        "gate",
+        "berlin"
+      ],
+      "recoverable_by_cap_raise": false,
+      "strata": {},
+      "target": {
+        "category": "landmark_and_historical_building",
+        "confidence_rank": 254,
+        "emittable_tokens": [
+          "berlin",
+          "brandenburger",
+          "de",
+          "landmark_and_historical_building",
+          "tor"
+        ],
+        "feature_uuid": "a071ff525af8431784f129dc88f877d2",
+        "pack": "/home/brad/dev/overture-local/planet/store/map/places-v1/head-candidates/sha256/a467a1f1b9fa15f6b3fb2760203ba063d68a3e0cc788f96fba3df3741bd03af9.parquet",
+        "primary_name": "Brandenburger Tor",
+        "prominence_rank": 128,
+        "tokens_emitted": 2
+      },
+      "tokens": [
+        {
+          "contenders": 202,
+          "detail": "the record carries this word in no indexed field, so the producer never emits the token for it",
+          "rank": null,
+          "reason": "INDETERMINATE_PACK_FULL",
+          "rows_in_targets_own_pack": 10,
+          "token": "brandenburg",
+          "token_is_emittable_for_target": false,
+          "token_saturated_globally": false
+        },
+        {
+          "contenders": 880,
+          "detail": "the record carries this word in no indexed field, so the producer never emits the token for it",
+          "rank": null,
+          "reason": "INDETERMINATE_PACK_FULL",
+          "rows_in_targets_own_pack": 10,
+          "token": "gate",
+          "token_is_emittable_for_target": false,
+          "token_saturated_globally": true
+        },
+        {
+          "contenders": 821,
+          "detail": "the record carries this word in an indexed field and its own map task filled the per-task cap for the token, so it was dropped before the merge",
+          "rank": null,
+          "reason": "EVICTED_BEFORE_MERGE",
+          "rows_in_targets_own_pack": 10,
+          "token": "berlin",
+          "token_is_emittable_for_target": true,
+          "token_saturated_globally": false
+        }
+      ]
+    },
+    {
+      "blocked_by": [
+        "EVICTED_BEFORE_MERGE"
+      ],
+      "cap_bound_unknown": true,
+      "cap_needed_to_recover": null,
+      "case_id": "gold:named_poi:harrods",
+      "expected_name": "Harrods",
+      "query": "Harrods London",
+      "query_words": [
+        "harrods",
+        "london"
+      ],
+      "recoverable_by_cap_raise": false,
+      "strata": {
+        "poi_family": "retail",
+        "scope": "independent"
+      },
+      "target": {
+        "category": "department_store",
+        "confidence_rank": 255,
+        "emittable_tokens": [
+          "department_store",
+          "eng",
+          "gb",
+          "harrods",
+          "london"
+        ],
+        "feature_uuid": "fe52c66c9aed4158b4c0f161758cd156",
+        "pack": "/home/brad/dev/overture-local/planet/store/map/places-v1/head-candidates/sha256/1edd2bcbd9742b0e9e6ae4df29900dab1eb672ecef8336ae824735aa400097e7.parquet",
+        "primary_name": "Harrods",
+        "prominence_rank": 0,
+        "tokens_emitted": 1
+      },
+      "tokens": [
+        {
+          "cap_decided_by_feature_id": false,
+          "contenders": 69,
+          "rank": 22,
+          "survives_current_cap": false,
+          "target_category": "department_store",
+          "target_confidence_rank": 255,
+          "target_identifying": true,
+          "target_prominence_rank": 0,
+          "token": "harrods"
+        },
+        {
+          "contenders": 878,
+          "detail": "the record carries this word in an indexed field and its own map task filled the per-task cap for the token, so it was dropped before the merge",
+          "rank": null,
+          "reason": "EVICTED_BEFORE_MERGE",
+          "rows_in_targets_own_pack": 10,
+          "token": "london",
+          "token_is_emittable_for_target": true,
+          "token_saturated_globally": false
+        }
+      ]
+    },
+    {
+      "blocked_by": [
+        "EVICTED_BEFORE_MERGE"
+      ],
+      "cap_bound_unknown": true,
+      "cap_needed_to_recover": null,
+      "case_id": "gold:named_poi:novotel-monte-carlo",
+      "expected_name": "Novotel Monte Carlo",
+      "query": "Novotel Monte Carlo",
+      "query_words": [
+        "novotel",
+        "monte",
+        "carlo"
+      ],
+      "recoverable_by_cap_raise": false,
+      "strata": {
+        "poi_family": "lodging",
+        "scope": "brand_branch"
+      },
+      "target": {
+        "category": "hotel",
+        "confidence_rank": 255,
+        "emittable_tokens": [
+          "carlo",
+          "hotel",
+          "mc",
+          "monte",
+          "novotel"
+        ],
+        "feature_uuid": "3aa4b82a919b4969940ec41bffbb0775",
+        "pack": "/home/brad/dev/overture-local/planet/store/map/places-v1/head-candidates/sha256/25adc2bfe4828dc212922a0eb96e06531e362e2f2aeba9b56711a8b6fc6d4fdf.parquet",
+        "primary_name": "Novotel Monte Carlo",
+        "prominence_rank": 0,
+        "tokens_emitted": 1
+      },
+      "tokens": [
+        {
+          "cap_decided_by_feature_id": false,
+          "contenders": 500,
+          "rank": 91,
+          "survives_current_cap": false,
+          "target_category": "hotel",
+          "target_confidence_rank": 255,
+          "target_identifying": true,
+          "target_prominence_rank": 0,
+          "token": "novotel"
+        },
+        {
+          "contenders": 876,
+          "detail": "the record carries this word in an indexed field and its own map task filled the per-task cap for the token, so it was dropped before the merge",
+          "rank": null,
+          "reason": "EVICTED_BEFORE_MERGE",
+          "rows_in_targets_own_pack": 10,
+          "token": "monte",
+          "token_is_emittable_for_target": true,
+          "token_saturated_globally": false
+        },
+        {
+          "contenders": 818,
+          "detail": "the record carries this word in an indexed field and its own map task filled the per-task cap for the token, so it was dropped before the merge",
+          "rank": null,
+          "reason": "EVICTED_BEFORE_MERGE",
+          "rows_in_targets_own_pack": 10,
+          "token": "carlo",
+          "token_is_emittable_for_target": true,
+          "token_saturated_globally": false
+        }
+      ]
+    },
+    {
+      "blocked_by": [
+        "EVICTED_BEFORE_MERGE"
+      ],
+      "cap_bound_unknown": true,
+      "cap_needed_to_recover": null,
+      "case_id": "gold:named_poi:mayo-clinic-rochester",
+      "expected_name": "Mayo Clinic",
+      "query": "Mayo Clinic Rochester",
+      "query_words": [
+        "mayo",
+        "clinic",
+        "rochester"
+      ],
+      "recoverable_by_cap_raise": false,
+      "strata": {
+        "poi_family": "healthcare",
+        "scope": "brand_branch"
+      },
+      "target": {
+        "category": "hospital",
+        "confidence_rank": 250,
+        "emittable_tokens": [
+          "clinic",
+          "hospital",
+          "mayo",
+          "mn",
+          "rochester",
+          "us"
+        ],
+        "feature_uuid": "711284b154144aaf922a37f40d1f61e4",
+        "pack": "/home/brad/dev/overture-local/planet/store/map/places-v1/head-candidates/sha256/e3171d1e459c8037055c1db029c13a117c0a44ba1dd932efd3257279bc974fc7.parquet",
+        "primary_name": "Mayo Clinic",
+        "prominence_rank": 102,
+        "tokens_emitted": 2
+      },
+      "tokens": [
+        {
+          "cap_decided_by_feature_id": false,
+          "contenders": 753,
+          "rank": 213,
+          "survives_current_cap": false,
+          "target_category": "hospital",
+          "target_confidence_rank": 250,
+          "target_identifying": true,
+          "target_prominence_rank": 102,
+          "token": "mayo"
+        },
+        {
+          "contenders": 880,
+          "detail": "the record carries this word in an indexed field and its own map task filled the per-task cap for the token, so it was dropped before the merge",
+          "rank": null,
+          "reason": "EVICTED_BEFORE_MERGE",
+          "rows_in_targets_own_pack": 10,
+          "token": "clinic",
+          "token_is_emittable_for_target": true,
+          "token_saturated_globally": true
+        },
+        {
+          "contenders": 414,
+          "detail": "the record carries this word in an indexed field and its own map task filled the per-task cap for the token, so it was dropped before the merge",
+          "rank": null,
+          "reason": "EVICTED_BEFORE_MERGE",
+          "rows_in_targets_own_pack": 10,
+          "token": "rochester",
+          "token_is_emittable_for_target": true,
+          "token_saturated_globally": false
+        }
+      ]
+    },
+    {
+      "blocked_by": [
+        "EVICTED_BEFORE_MERGE"
+      ],
+      "cap_bound_unknown": true,
+      "cap_needed_to_recover": null,
+      "case_id": "gold:inverse_seam:louvre-museum",
+      "expected_name": "Louvre Museum",
+      "query": "Louvre Museum",
+      "query_words": [
+        "louvre",
+        "museum"
+      ],
+      "recoverable_by_cap_raise": false,
+      "strata": {},
+      "target": {
+        "category": "museum",
+        "confidence_rank": 238,
+        "emittable_tokens": [
+          "du",
+          "fr",
+          "louvre",
+          "musee",
+          "museum",
+          "paris"
+        ],
+        "feature_uuid": "5fd0e472bc044f7fab4f1d6639812bae",
+        "pack": "/home/brad/dev/overture-local/planet/store/map/places-v1/head-candidates/sha256/3212947577f1a27494aa96d46c3dfc10e7325c0937e1c07619d175fe34ff46a7.parquet",
+        "primary_name": "Musee Du Louvre",
+        "prominence_rank": 217,
+        "tokens_emitted": 1
+      },
+      "tokens": [
+        {
+          "contenders": 329,
+          "detail": "the record carries this word in an indexed field and its own map task filled the per-task cap for the token, so it was dropped before the merge",
+          "rank": null,
+          "reason": "EVICTED_BEFORE_MERGE",
+          "rows_in_targets_own_pack": 10,
+          "token": "louvre",
+          "token_is_emittable_for_target": true,
+          "token_saturated_globally": false
+        },
+        {
+          "contenders": 880,
+          "detail": "the record carries this word in an indexed field and its own map task filled the per-task cap for the token, so it was dropped before the merge",
+          "rank": null,
+          "reason": "EVICTED_BEFORE_MERGE",
+          "rows_in_targets_own_pack": 10,
+          "token": "museum",
+          "token_is_emittable_for_target": true,
+          "token_saturated_globally": true
+        }
+      ]
+    }
+  ],
+  "counts": {
+    "blocked_by_reason": {
+      "EVICTED_BEFORE_MERGE": 5,
+      "INDETERMINATE_PACK_FULL": 3
+    },
+    "candidate_packs": 88,
+    "cases_with_a_uuid_decided_token": 0,
+    "in_head_misses": 9,
+    "rankable": 7,
+    "recoverable_by_cap_raise": 0,
+    "refused_by_token_cap": 2,
+    "saturation_ceiling_rows_per_token": 880,
+    "tokens_decided_by_feature_id": 0
+  },
+  "head_query_token_cap": 3,
+  "head_result_cap": 10,
+  "limitations": [
+    "Ranks head CANDIDATES, the merge's input, not the merged shards.",
+    "Candidate packs are ALREADY capped per map task, so a token's rows top out at tasks * HEAD_RESULT_CAP. A computed rank <= HEAD_RESULT_CAP is exact (that is the decomposability property the cap key is built on); a computed rank ABOVE it is a LOWER BOUND, because better-ranked siblings may have been dropped by their own task's cap. Read 'cap_needed_to_recover' above 10 as 'at least this much', never as a sufficient cap.",
+    "Query tokenization mirrors the producer's word normalization; it is not the Worker's tokenizer executed in-process.",
+    "A cap raise is scored as recovery only if the record survives in EVERY queried token, since the head intersects per-token lists."
+  ],
+  "recovered_at_cap": {
+    "10": 0,
+    "20": 0,
+    "50": 0,
+    "100": 0,
+    "250": 0,
+    "500": 0,
+    "1000": 0
+  },
+  "refused_cases": [
+    {
+      "case_id": "gold:brand_branch:din-tai-fung-xinyi",
+      "query": "Din Tai Fung Xinyi",
+      "query_words": [
+        "din",
+        "tai",
+        "fung",
+        "xinyi"
+      ]
+    },
+    {
+      "case_id": "gold:inverse_seam:casino-de-monte-carlo",
+      "query": "Casino de Monte-Carlo",
+      "query_words": [
+        "casino",
+        "de",
+        "monte",
+        "carlo"
+      ]
+    }
+  ],
+  "schema": "overture-places-head-cap-eviction-rank-v1",
+  "source_interrogation": "benchmarks/2026-08-04-gold-head-miss-interrogation-v1.json",
+  "source_interrogation_schema": "head-miss-interrogation-v1",
+  "token_stats": {
+    "berlin": {
+      "cap_decided_by_feature_id": false,
+      "retained_confidence": [
+        227,
+        232,
+        235,
+        236,
+        241,
+        243,
+        244,
+        250,
+        254
+      ],
+      "retained_prominence": [
+        255
+      ],
+      "rows_identifying": 812,
+      "rows_prominent": 313,
+      "rows_total": 821
+    },
+    "brandenburg": {
+      "cap_decided_by_feature_id": false,
+      "retained_confidence": [
+        145,
+        190,
+        197,
+        204,
+        207,
+        215,
+        228,
+        234,
+        246,
+        248
+      ],
+      "retained_prominence": [
+        230,
+        255
+      ],
+      "rows_identifying": 200,
+      "rows_prominent": 51,
+      "rows_total": 202
+    },
+    "carlo": {
+      "cap_decided_by_feature_id": false,
+      "retained_confidence": [
+        196,
+        205,
+        206,
+        211,
+        245,
+        249,
+        251,
+        253,
+        254
+      ],
+      "retained_prominence": [
+        255
+      ],
+      "rows_identifying": 818,
+      "rows_prominent": 237,
+      "rows_total": 818
+    },
+    "clinic": {
+      "cap_decided_by_feature_id": false,
+      "retained_confidence": [
+        173,
+        192,
+        193,
+        196,
+        203,
+        206,
+        224,
+        235,
+        246,
+        248
+      ],
+      "retained_prominence": [
+        230,
+        255
+      ],
+      "rows_identifying": 880,
+      "rows_prominent": 878,
+      "rows_total": 880
+    },
+    "cusco": {
+      "cap_decided_by_feature_id": false,
+      "retained_confidence": [
+        187,
+        209,
+        219,
+        221,
+        223,
+        224,
+        232,
+        240
+      ],
+      "retained_prominence": [
+        230,
+        255
+      ],
+      "rows_identifying": 115,
+      "rows_prominent": 30,
+      "rows_total": 115
+    },
+    "gate": {
+      "cap_decided_by_feature_id": false,
+      "retained_confidence": [
+        242,
+        243,
+        244,
+        245,
+        247,
+        248,
+        249,
+        251,
+        252
+      ],
+      "retained_prominence": [
+        255
+      ],
+      "rows_identifying": 880,
+      "rows_prominent": 856,
+      "rows_total": 880
+    },
+    "harrods": {
+      "cap_decided_by_feature_id": false,
+      "retained_confidence": [
+        208,
+        219,
+        235,
+        242,
+        253,
+        254,
+        255
+      ],
+      "retained_prominence": [
+        115,
+        128,
+        140,
+        255
+      ],
+      "rows_identifying": 69,
+      "rows_prominent": 16,
+      "rows_total": 69
+    },
+    "london": {
+      "cap_decided_by_feature_id": false,
+      "retained_confidence": [
+        209,
+        224,
+        232,
+        235,
+        238,
+        239,
+        248,
+        251
+      ],
+      "retained_prominence": [
+        255
+      ],
+      "rows_identifying": 878,
+      "rows_prominent": 534,
+      "rows_total": 878
+    },
+    "louvre": {
+      "cap_decided_by_feature_id": false,
+      "retained_confidence": [
+        245,
+        247,
+        248,
+        249,
+        250,
+        251,
+        253,
+        255
+      ],
+      "retained_prominence": [
+        217
+      ],
+      "rows_identifying": 329,
+      "rows_prominent": 96,
+      "rows_total": 329
+    },
+    "machu": {
+      "cap_decided_by_feature_id": false,
+      "retained_confidence": [
+        132,
+        192,
+        198,
+        201,
+        203,
+        205,
+        233,
+        240,
+        244,
+        248
+      ],
+      "retained_prominence": [
+        128,
+        140,
+        217,
+        255
+      ],
+      "rows_identifying": 204,
+      "rows_prominent": 20,
+      "rows_total": 204
+    },
+    "mayo": {
+      "cap_decided_by_feature_id": false,
+      "retained_confidence": [
+        115,
+        118,
+        134,
+        181,
+        189,
+        215,
+        224,
+        226,
+        235,
+        247
+      ],
+      "retained_prominence": [
+        230,
+        255
+      ],
+      "rows_identifying": 752,
+      "rows_prominent": 309,
+      "rows_total": 753
+    },
+    "monte": {
+      "cap_decided_by_feature_id": false,
+      "retained_confidence": [
+        247,
+        248,
+        249,
+        250,
+        251
+      ],
+      "retained_prominence": [
+        255
+      ],
+      "rows_identifying": 876,
+      "rows_prominent": 654,
+      "rows_total": 876
+    },
+    "museum": {
+      "cap_decided_by_feature_id": false,
+      "retained_confidence": [
+        235,
+        236,
+        238,
+        240,
+        243,
+        250,
+        253,
+        254
+      ],
+      "retained_prominence": [
+        255
+      ],
+      "rows_identifying": 880,
+      "rows_prominent": 880,
+      "rows_total": 880
+    },
+    "novotel": {
+      "cap_decided_by_feature_id": false,
+      "retained_confidence": [
+        99,
+        145,
+        205,
+        227,
+        231,
+        234,
+        247,
+        254,
+        255
+      ],
+      "retained_prominence": [
+        0,
+        51,
+        57,
+        89,
+        115,
+        128,
+        140
+      ],
+      "rows_identifying": 500,
+      "rows_prominent": 8,
+      "rows_total": 500
+    },
+    "picchu": {
+      "cap_decided_by_feature_id": false,
+      "retained_confidence": [
+        132,
+        192,
+        198,
+        201,
+        203,
+        205,
+        233,
+        240,
+        244,
+        248
+      ],
+      "retained_prominence": [
+        128,
+        140,
+        217,
+        255
+      ],
+      "rows_identifying": 151,
+      "rows_prominent": 19,
+      "rows_total": 151
+    },
+    "rochester": {
+      "cap_decided_by_feature_id": false,
+      "retained_confidence": [
+        137,
+        188,
+        196,
+        203,
+        208,
+        217,
+        243,
+        248,
+        250
+      ],
+      "retained_prominence": [
+        230,
+        255
+      ],
+      "rows_identifying": 395,
+      "rows_prominent": 178,
+      "rows_total": 414
+    }
+  }
+}

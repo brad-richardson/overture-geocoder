@@ -1,0 +1,929 @@
+{
+  "cap_order": "((field_mask & 3) != 0) DESC, prominence_rank DESC, confidence_rank DESC, feature_id, source_object_index, source_row_group, source_row_index",
+  "cases": [
+    {
+      "blocked_by": [
+        "TOKEN_NOT_EMITTED"
+      ],
+      "cap_bound_unknown": false,
+      "cap_needed_to_recover": null,
+      "case_id": "everyday-hk-32",
+      "expected_name": "\u8056\u6bcd\u91ab\u9662",
+      "query": "\u8056\u6bcd\u91ab\u9662",
+      "query_words": [
+        "\u8056\u6bcd\u91ab\u9662"
+      ],
+      "recoverable_by_cap_raise": false,
+      "strata": {
+        "country": "HK",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "target": {
+        "category": "hospital",
+        "confidence_rank": 252,
+        "emittable_tokens": [
+          "hk",
+          "hospital",
+          "kowloon",
+          "lady",
+          "maryknoll",
+          "of",
+          "our"
+        ],
+        "feature_uuid": "53c8ea0782a245babef817e3cbfc3c1f",
+        "pack": "/home/brad/dev/overture-local/planet/store/map/places-v1/head-candidates/sha256/f11363e164fc2bfaf08fbbbe7decc0ee7e1e09d03dc8b13b29dc7ebae9a0b8ce.parquet",
+        "primary_name": "Our Lady of Maryknoll Hospital",
+        "prominence_rank": 102,
+        "tokens_emitted": 1
+      },
+      "tokens": [
+        {
+          "contenders": null,
+          "detail": "the record carries this word in no indexed field, so the producer never emits the token for it",
+          "rank": null,
+          "reason": "TOKEN_NOT_EMITTED",
+          "rows_in_targets_own_pack": 0,
+          "token": "\u8056\u6bcd\u91ab\u9662",
+          "token_is_emittable_for_target": false,
+          "token_saturated_globally": false
+        }
+      ]
+    },
+    {
+      "blocked_by": [
+        "TOKEN_NOT_EMITTED"
+      ],
+      "cap_bound_unknown": false,
+      "cap_needed_to_recover": null,
+      "case_id": "everyday-hk-17",
+      "expected_name": "\u5c6f\u9580\u91ab\u9662",
+      "query": "\u5c6f\u9580\u91ab\u9662",
+      "query_words": [
+        "\u5c6f\u9580\u91ab\u9662"
+      ],
+      "recoverable_by_cap_raise": false,
+      "strata": {
+        "country": "HK",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "target": {
+        "category": "hospital",
+        "confidence_rank": 171,
+        "emittable_tokens": [
+          "clinic",
+          "hk",
+          "hospital",
+          "hygiene",
+          "mun",
+          "new",
+          "social",
+          "territories",
+          "tuen"
+        ],
+        "feature_uuid": "c92342cc7ab944a580c80f4bfe0d0f95",
+        "pack": "/home/brad/dev/overture-local/planet/store/map/places-v1/head-candidates/sha256/e2a4f220d5709e483c980d980a438761c4ecde1389a9a84c6c3c5881b9e11668.parquet",
+        "primary_name": "Tuen Mun Social Hygiene Clinic, Tuen Mun Hospital",
+        "prominence_rank": 102,
+        "tokens_emitted": 2
+      },
+      "tokens": [
+        {
+          "contenders": null,
+          "detail": "the record carries this word in no indexed field, so the producer never emits the token for it",
+          "rank": null,
+          "reason": "TOKEN_NOT_EMITTED",
+          "rows_in_targets_own_pack": 0,
+          "token": "\u5c6f\u9580\u91ab\u9662",
+          "token_is_emittable_for_target": false,
+          "token_saturated_globally": false
+        }
+      ]
+    },
+    {
+      "blocked_by": [
+        "TOKEN_NOT_EMITTED"
+      ],
+      "cap_bound_unknown": false,
+      "cap_needed_to_recover": null,
+      "case_id": "everyday-hk-4",
+      "expected_name": "\u9ea5\u7406\u6d69\u5fa9\u5eb7\u9662",
+      "query": "\u9ea5\u7406\u6d69\u5fa9\u5eb7\u9662",
+      "query_words": [
+        "\u9ea5\u7406\u6d69\u5fa9\u5eb7\u9662"
+      ],
+      "recoverable_by_cap_raise": false,
+      "strata": {
+        "country": "HK",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "target": {
+        "category": "hospital",
+        "confidence_rank": 236,
+        "emittable_tokens": [
+          "centre",
+          "hk",
+          "hong",
+          "hospital",
+          "kong",
+          "maclehose",
+          "medical",
+          "rehabilitation"
+        ],
+        "feature_uuid": "2feb046065444248a361a9e02bfc8bb2",
+        "pack": "/home/brad/dev/overture-local/planet/store/map/places-v1/head-candidates/sha256/e2a4f220d5709e483c980d980a438761c4ecde1389a9a84c6c3c5881b9e11668.parquet",
+        "primary_name": "Maclehose Medical Rehabilitation Centre",
+        "prominence_rank": 102,
+        "tokens_emitted": 2
+      },
+      "tokens": [
+        {
+          "contenders": null,
+          "detail": "the record carries this word in no indexed field, so the producer never emits the token for it",
+          "rank": null,
+          "reason": "TOKEN_NOT_EMITTED",
+          "rows_in_targets_own_pack": 0,
+          "token": "\u9ea5\u7406\u6d69\u5fa9\u5eb7\u9662",
+          "token_is_emittable_for_target": false,
+          "token_saturated_globally": false
+        }
+      ]
+    },
+    {
+      "blocked_by": [],
+      "cap_bound_unknown": false,
+      "cap_needed_to_recover": 2,
+      "case_id": "everyday-kr-PHMA220043190033021200001",
+      "expected_name": "\uc911\uc559\ub300\ud559\uad50\ubcd1\uc6d0",
+      "query": "\uc911\uc559\ub300\ud559\uad50\ubcd1\uc6d0",
+      "query_words": [
+        "\u110c\u116e\u11bc\u110b\u1161\u11bc\u1103\u1162\u1112\u1161\u11a8\u1100\u116d\u1107\u1167\u11bc\u110b\u116f\u11ab"
+      ],
+      "recoverable_by_cap_raise": true,
+      "strata": {
+        "country": "KR",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "target": {
+        "category": "medical_center",
+        "confidence_rank": 253,
+        "emittable_tokens": [
+          "kr",
+          "medical_center",
+          "\u110c\u116e\u11bc\u110b\u1161\u11bc\u1103\u1162\u1112\u1161\u11a8\u1100\u116d\u1107\u1167\u11bc\u110b\u116f\u11ab"
+        ],
+        "feature_uuid": "773c066218fc455f97df98c19901801f",
+        "pack": "/home/brad/dev/overture-local/planet/store/map/places-v1/head-candidates/sha256/f515d02105cf9d25a877baaeac7099f03d374c4ce5dd2cf01ae89ee912abaa34.parquet",
+        "primary_name": "\uc911\uc559\ub300\ud559\uad50\ubcd1\uc6d0",
+        "prominence_rank": 51,
+        "tokens_emitted": 2
+      },
+      "tokens": [
+        {
+          "cap_decided_by_feature_id": false,
+          "contenders": 3,
+          "rank": 2,
+          "survives_current_cap": true,
+          "target_category": "medical_center",
+          "target_confidence_rank": 253,
+          "target_identifying": true,
+          "target_prominence_rank": 51,
+          "token": "\u110c\u116e\u11bc\u110b\u1161\u11bc\u1103\u1162\u1112\u1161\u11a8\u1100\u116d\u1107\u1167\u11bc\u110b\u116f\u11ab"
+        }
+      ]
+    },
+    {
+      "blocked_by": [],
+      "cap_bound_unknown": false,
+      "cap_needed_to_recover": 1,
+      "case_id": "everyday-kr-PHMA220073110032021200001",
+      "expected_name": "\ud558\ub098\ud6a8\uc694\uc591\ubcd1\uc6d0",
+      "query": "\ud558\ub098\ud6a8\uc694\uc591\ubcd1\uc6d0",
+      "query_words": [
+        "\u1112\u1161\u1102\u1161\u1112\u116d\u110b\u116d\u110b\u1163\u11bc\u1107\u1167\u11bc\u110b\u116f\u11ab"
+      ],
+      "recoverable_by_cap_raise": true,
+      "strata": {
+        "country": "KR",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "target": {
+        "category": "hospital",
+        "confidence_rank": 162,
+        "emittable_tokens": [
+          "hospital",
+          "kr",
+          "seoul",
+          "\u1112\u1161\u1102\u1161\u1112\u116d\u110b\u116d\u110b\u1163\u11bc\u1107\u1167\u11bc\u110b\u116f\u11ab"
+        ],
+        "feature_uuid": "fe10b3d4d2994802bfa4afde09bd0138",
+        "pack": "/home/brad/dev/overture-local/planet/store/map/places-v1/head-candidates/sha256/f515d02105cf9d25a877baaeac7099f03d374c4ce5dd2cf01ae89ee912abaa34.parquet",
+        "primary_name": "\ud558\ub098\ud6a8\uc694\uc591\ubcd1\uc6d0",
+        "prominence_rank": 102,
+        "tokens_emitted": 1
+      },
+      "tokens": [
+        {
+          "cap_decided_by_feature_id": false,
+          "contenders": 1,
+          "rank": 1,
+          "survives_current_cap": true,
+          "target_category": "hospital",
+          "target_confidence_rank": 162,
+          "target_identifying": true,
+          "target_prominence_rank": 102,
+          "token": "\u1112\u1161\u1102\u1161\u1112\u116d\u110b\u116d\u110b\u1163\u11bc\u1107\u1167\u11bc\u110b\u116f\u11ab"
+        }
+      ]
+    },
+    {
+      "blocked_by": [
+        "EVICTED_BEFORE_MERGE"
+      ],
+      "cap_bound_unknown": true,
+      "cap_needed_to_recover": null,
+      "case_id": "everyday-mx-6313837",
+      "expected_name": "HOTEL PORTO NOVO",
+      "query": "HOTEL PORTO NOVO",
+      "query_words": [
+        "hotel",
+        "porto",
+        "novo"
+      ],
+      "recoverable_by_cap_raise": false,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "lodging",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "target": {
+        "category": "hotel",
+        "confidence_rank": 254,
+        "emittable_tokens": [
+          "benito",
+          "cmx",
+          "hotel",
+          "juarez",
+          "mx",
+          "novo",
+          "porto"
+        ],
+        "feature_uuid": "e9f54953ac1b46aa9f3c8bd3cbbba525",
+        "pack": "/home/brad/dev/overture-local/planet/store/map/places-v1/head-candidates/sha256/fc0e9c9d26bd0d00011dd4370131ce7b9d8ecc0a86d9932d36d55d302dbdc413.parquet",
+        "primary_name": "Hotel Porto Novo",
+        "prominence_rank": 0,
+        "tokens_emitted": 2
+      },
+      "tokens": [
+        {
+          "contenders": 880,
+          "detail": "the record carries this word in an indexed field and its own map task filled the per-task cap for the token, so it was dropped before the merge",
+          "rank": null,
+          "reason": "EVICTED_BEFORE_MERGE",
+          "rows_in_targets_own_pack": 10,
+          "token": "hotel",
+          "token_is_emittable_for_target": true,
+          "token_saturated_globally": true
+        },
+        {
+          "cap_decided_by_feature_id": false,
+          "contenders": 671,
+          "rank": 332,
+          "survives_current_cap": false,
+          "target_category": "hotel",
+          "target_confidence_rank": 254,
+          "target_identifying": true,
+          "target_prominence_rank": 0,
+          "token": "porto"
+        },
+        {
+          "cap_decided_by_feature_id": false,
+          "contenders": 811,
+          "rank": 304,
+          "survives_current_cap": false,
+          "target_category": "hotel",
+          "target_confidence_rank": 254,
+          "target_identifying": true,
+          "target_prominence_rank": 0,
+          "token": "novo"
+        }
+      ]
+    },
+    {
+      "blocked_by": [
+        "EVICTED_BEFORE_MERGE"
+      ],
+      "cap_bound_unknown": true,
+      "cap_needed_to_recover": null,
+      "case_id": "everyday-mx-6325182",
+      "expected_name": "HOTEL HABANA",
+      "query": "HOTEL HABANA",
+      "query_words": [
+        "hotel",
+        "habana"
+      ],
+      "recoverable_by_cap_raise": false,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "lodging",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "target": {
+        "category": "hotel",
+        "confidence_rank": 254,
+        "emittable_tokens": [
+          "cmx",
+          "cuauhtemoc",
+          "habana",
+          "hotel",
+          "mx"
+        ],
+        "feature_uuid": "9e42821827e3461c8a191ca9839a20ce",
+        "pack": "/home/brad/dev/overture-local/planet/store/map/places-v1/head-candidates/sha256/fc0e9c9d26bd0d00011dd4370131ce7b9d8ecc0a86d9932d36d55d302dbdc413.parquet",
+        "primary_name": "Hotel Habana",
+        "prominence_rank": 0,
+        "tokens_emitted": 1
+      },
+      "tokens": [
+        {
+          "contenders": 880,
+          "detail": "the record carries this word in an indexed field and its own map task filled the per-task cap for the token, so it was dropped before the merge",
+          "rank": null,
+          "reason": "EVICTED_BEFORE_MERGE",
+          "rows_in_targets_own_pack": 10,
+          "token": "hotel",
+          "token_is_emittable_for_target": true,
+          "token_saturated_globally": true
+        },
+        {
+          "cap_decided_by_feature_id": false,
+          "contenders": 452,
+          "rank": 72,
+          "survives_current_cap": false,
+          "target_category": "hotel",
+          "target_confidence_rank": 254,
+          "target_identifying": true,
+          "target_prominence_rank": 0,
+          "token": "habana"
+        }
+      ]
+    },
+    {
+      "blocked_by": [
+        "EVICTED_BEFORE_MERGE"
+      ],
+      "cap_bound_unknown": true,
+      "cap_needed_to_recover": null,
+      "case_id": "everyday-mx-6313854",
+      "expected_name": "HOTEL HARARE",
+      "query": "HOTEL HARARE",
+      "query_words": [
+        "hotel",
+        "harare"
+      ],
+      "recoverable_by_cap_raise": false,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "lodging",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "target": {
+        "category": "hotel",
+        "confidence_rank": 254,
+        "emittable_tokens": [
+          "benito",
+          "cmx",
+          "harare",
+          "hotel",
+          "juarez",
+          "mx"
+        ],
+        "feature_uuid": "5056251e01104d89ab3d15518c321915",
+        "pack": "/home/brad/dev/overture-local/planet/store/map/places-v1/head-candidates/sha256/fc0e9c9d26bd0d00011dd4370131ce7b9d8ecc0a86d9932d36d55d302dbdc413.parquet",
+        "primary_name": "Hotel Harare",
+        "prominence_rank": 0,
+        "tokens_emitted": 1
+      },
+      "tokens": [
+        {
+          "contenders": 880,
+          "detail": "the record carries this word in an indexed field and its own map task filled the per-task cap for the token, so it was dropped before the merge",
+          "rank": null,
+          "reason": "EVICTED_BEFORE_MERGE",
+          "rows_in_targets_own_pack": 10,
+          "token": "hotel",
+          "token_is_emittable_for_target": true,
+          "token_saturated_globally": true
+        },
+        {
+          "cap_decided_by_feature_id": false,
+          "contenders": 41,
+          "rank": 25,
+          "survives_current_cap": false,
+          "target_category": "hotel",
+          "target_confidence_rank": 254,
+          "target_identifying": true,
+          "target_prominence_rank": 0,
+          "token": "harare"
+        }
+      ]
+    },
+    {
+      "blocked_by": [
+        "EVICTED_BEFORE_MERGE"
+      ],
+      "cap_bound_unknown": true,
+      "cap_needed_to_recover": null,
+      "case_id": "everyday-mx-6324958",
+      "expected_name": "HOTEL ANTENAS",
+      "query": "HOTEL ANTENAS",
+      "query_words": [
+        "hotel",
+        "antenas"
+      ],
+      "recoverable_by_cap_raise": false,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "lodging",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "target": {
+        "category": "hotel",
+        "confidence_rank": 242,
+        "emittable_tokens": [
+          "a",
+          "antenas",
+          "cmx",
+          "gustavo",
+          "hotel",
+          "madero",
+          "mx"
+        ],
+        "feature_uuid": "a19f81dca73643d3a519129a0dd308f2",
+        "pack": "/home/brad/dev/overture-local/planet/store/map/places-v1/head-candidates/sha256/007d41cbefac1f3445af330548ea583fd670f4d6c4ded221fa46be7ba8511c59.parquet",
+        "primary_name": "Hotel Antenas",
+        "prominence_rank": 0,
+        "tokens_emitted": 1
+      },
+      "tokens": [
+        {
+          "contenders": 880,
+          "detail": "the record carries this word in an indexed field and its own map task filled the per-task cap for the token, so it was dropped before the merge",
+          "rank": null,
+          "reason": "EVICTED_BEFORE_MERGE",
+          "rows_in_targets_own_pack": 10,
+          "token": "hotel",
+          "token_is_emittable_for_target": true,
+          "token_saturated_globally": true
+        },
+        {
+          "cap_decided_by_feature_id": false,
+          "contenders": 198,
+          "rank": 97,
+          "survives_current_cap": false,
+          "target_category": "hotel",
+          "target_confidence_rank": 242,
+          "target_identifying": true,
+          "target_prominence_rank": 0,
+          "token": "antenas"
+        }
+      ]
+    },
+    {
+      "blocked_by": [
+        "EVICTED_BEFORE_MERGE"
+      ],
+      "cap_bound_unknown": true,
+      "cap_needed_to_recover": null,
+      "case_id": "everyday-mx-6325352",
+      "expected_name": "HOTEL PENSIL",
+      "query": "HOTEL PENSIL",
+      "query_words": [
+        "hotel",
+        "pensil"
+      ],
+      "recoverable_by_cap_raise": false,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "lodging",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "target": {
+        "category": "hotel",
+        "confidence_rank": 245,
+        "emittable_tokens": [
+          "cmx",
+          "hidalgo",
+          "hotel",
+          "miguel",
+          "mx",
+          "pensil"
+        ],
+        "feature_uuid": "99f2fa392e444076a3245d15647f2fb6",
+        "pack": "/home/brad/dev/overture-local/planet/store/map/places-v1/head-candidates/sha256/fc0e9c9d26bd0d00011dd4370131ce7b9d8ecc0a86d9932d36d55d302dbdc413.parquet",
+        "primary_name": "Hotel Pensil",
+        "prominence_rank": 0,
+        "tokens_emitted": 1
+      },
+      "tokens": [
+        {
+          "contenders": 880,
+          "detail": "the record carries this word in an indexed field and its own map task filled the per-task cap for the token, so it was dropped before the merge",
+          "rank": null,
+          "reason": "EVICTED_BEFORE_MERGE",
+          "rows_in_targets_own_pack": 10,
+          "token": "hotel",
+          "token_is_emittable_for_target": true,
+          "token_saturated_globally": true
+        },
+        {
+          "cap_decided_by_feature_id": false,
+          "contenders": 69,
+          "rank": 20,
+          "survives_current_cap": false,
+          "target_category": "hotel",
+          "target_confidence_rank": 245,
+          "target_identifying": true,
+          "target_prominence_rank": 0,
+          "token": "pensil"
+        }
+      ]
+    },
+    {
+      "blocked_by": [
+        "EVICTED_BEFORE_MERGE"
+      ],
+      "cap_bound_unknown": true,
+      "cap_needed_to_recover": null,
+      "case_id": "everyday-mx-6304780",
+      "expected_name": "HOTEL ESTORIL",
+      "query": "HOTEL ESTORIL",
+      "query_words": [
+        "hotel",
+        "estoril"
+      ],
+      "recoverable_by_cap_raise": false,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "lodging",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "target": {
+        "category": "hotel",
+        "confidence_rank": 253,
+        "emittable_tokens": [
+          "cmx",
+          "cuauhtemoc",
+          "estoril",
+          "hotel",
+          "mx"
+        ],
+        "feature_uuid": "8f1cd50908cb435fb0542f6a453e33f2",
+        "pack": "/home/brad/dev/overture-local/planet/store/map/places-v1/head-candidates/sha256/fc0e9c9d26bd0d00011dd4370131ce7b9d8ecc0a86d9932d36d55d302dbdc413.parquet",
+        "primary_name": "Hotel Estoril",
+        "prominence_rank": 0,
+        "tokens_emitted": 1
+      },
+      "tokens": [
+        {
+          "contenders": 880,
+          "detail": "the record carries this word in an indexed field and its own map task filled the per-task cap for the token, so it was dropped before the merge",
+          "rank": null,
+          "reason": "EVICTED_BEFORE_MERGE",
+          "rows_in_targets_own_pack": 10,
+          "token": "hotel",
+          "token_is_emittable_for_target": true,
+          "token_saturated_globally": true
+        },
+        {
+          "cap_decided_by_feature_id": false,
+          "contenders": 174,
+          "rank": 79,
+          "survives_current_cap": false,
+          "target_category": "hotel",
+          "target_confidence_rank": 253,
+          "target_identifying": true,
+          "target_prominence_rank": 0,
+          "token": "estoril"
+        }
+      ]
+    }
+  ],
+  "counts": {
+    "blocked_by_reason": {
+      "EVICTED_BEFORE_MERGE": 6,
+      "TOKEN_NOT_EMITTED": 3
+    },
+    "candidate_packs": 88,
+    "cases_with_a_uuid_decided_token": 0,
+    "in_head_misses": 13,
+    "rankable": 11,
+    "recoverable_by_cap_raise": 2,
+    "refused_by_token_cap": 2,
+    "saturation_ceiling_rows_per_token": 880,
+    "tokens_decided_by_feature_id": 0
+  },
+  "head_query_token_cap": 3,
+  "head_result_cap": 10,
+  "limitations": [
+    "Ranks head CANDIDATES, the merge's input, not the merged shards.",
+    "Candidate packs are ALREADY capped per map task, so a token's rows top out at tasks * HEAD_RESULT_CAP. A computed rank <= HEAD_RESULT_CAP is exact (that is the decomposability property the cap key is built on); a computed rank ABOVE it is a LOWER BOUND, because better-ranked siblings may have been dropped by their own task's cap. Read 'cap_needed_to_recover' above 10 as 'at least this much', never as a sufficient cap.",
+    "Query tokenization mirrors the producer's word normalization; it is not the Worker's tokenizer executed in-process.",
+    "A cap raise is scored as recovery only if the record survives in EVERY queried token, since the head intersects per-token lists."
+  ],
+  "recovered_at_cap": {
+    "10": 2,
+    "20": 2,
+    "50": 2,
+    "100": 2,
+    "250": 2,
+    "500": 2,
+    "1000": 2
+  },
+  "refused_cases": [
+    {
+      "case_id": "everyday-sg-21727",
+      "query": "LABRADOR PARK MRT STATION",
+      "query_words": [
+        "labrador",
+        "park",
+        "mrt",
+        "station"
+      ]
+    },
+    {
+      "case_id": "everyday-sg-21587",
+      "query": "TECK LEE LRT STATION",
+      "query_words": [
+        "teck",
+        "lee",
+        "lrt",
+        "station"
+      ]
+    }
+  ],
+  "schema": "overture-places-head-cap-eviction-rank-v1",
+  "source_interrogation": "benchmarks/2026-08-04-everyday-head-miss-interrogation-v1.json",
+  "source_interrogation_schema": "head-miss-interrogation-v1",
+  "token_stats": {
+    "antenas": {
+      "cap_decided_by_feature_id": false,
+      "retained_confidence": [
+        128,
+        140,
+        161,
+        187,
+        217,
+        228,
+        240,
+        241,
+        242,
+        248
+      ],
+      "retained_prominence": [
+        115,
+        128,
+        140,
+        153
+      ],
+      "rows_identifying": 198,
+      "rows_prominent": 25,
+      "rows_total": 198
+    },
+    "estoril": {
+      "cap_decided_by_feature_id": false,
+      "retained_confidence": [
+        213,
+        240,
+        246,
+        248,
+        251,
+        252,
+        253
+      ],
+      "retained_prominence": [
+        140,
+        153,
+        217,
+        255
+      ],
+      "rows_identifying": 174,
+      "rows_prominent": 64,
+      "rows_total": 174
+    },
+    "habana": {
+      "cap_decided_by_feature_id": false,
+      "retained_confidence": [
+        136,
+        164,
+        173,
+        182,
+        188,
+        199,
+        222,
+        227,
+        246,
+        249
+      ],
+      "retained_prominence": [
+        217,
+        230
+      ],
+      "rows_identifying": 452,
+      "rows_prominent": 48,
+      "rows_total": 452
+    },
+    "harare": {
+      "cap_decided_by_feature_id": false,
+      "retained_confidence": [
+        136,
+        144,
+        161,
+        191,
+        215,
+        230,
+        231,
+        235,
+        243,
+        255
+      ],
+      "retained_prominence": [
+        140,
+        153,
+        217,
+        230
+      ],
+      "rows_identifying": 41,
+      "rows_prominent": 23,
+      "rows_total": 41
+    },
+    "hotel": {
+      "cap_decided_by_feature_id": false,
+      "retained_confidence": [
+        241,
+        242,
+        243,
+        248,
+        249,
+        250,
+        252,
+        253,
+        254
+      ],
+      "retained_prominence": [
+        255
+      ],
+      "rows_identifying": 880,
+      "rows_prominent": 832,
+      "rows_total": 880
+    },
+    "novo": {
+      "cap_decided_by_feature_id": false,
+      "retained_confidence": [
+        164,
+        183,
+        190,
+        192,
+        205,
+        215,
+        222,
+        224,
+        232,
+        244
+      ],
+      "retained_prominence": [
+        230,
+        255
+      ],
+      "rows_identifying": 811,
+      "rows_prominent": 252,
+      "rows_total": 811
+    },
+    "pensil": {
+      "cap_decided_by_feature_id": false,
+      "retained_confidence": [
+        95,
+        114,
+        135,
+        152,
+        167,
+        205,
+        208,
+        220,
+        231,
+        244
+      ],
+      "retained_prominence": [
+        89,
+        108,
+        115,
+        128,
+        140
+      ],
+      "rows_identifying": 69,
+      "rows_prominent": 17,
+      "rows_total": 69
+    },
+    "porto": {
+      "cap_decided_by_feature_id": false,
+      "retained_confidence": [
+        208,
+        209,
+        214,
+        217,
+        227,
+        230,
+        231,
+        238,
+        242,
+        248
+      ],
+      "retained_prominence": [
+        255
+      ],
+      "rows_identifying": 671,
+      "rows_prominent": 263,
+      "rows_total": 671
+    },
+    "\u110c\u116e\u11bc\u110b\u1161\u11bc\u1103\u1162\u1112\u1161\u11a8\u1100\u116d\u1107\u1167\u11bc\u110b\u116f\u11ab": {
+      "cap_decided_by_feature_id": false,
+      "retained_confidence": [
+        236,
+        250,
+        253
+      ],
+      "retained_prominence": [
+        0,
+        51,
+        102
+      ],
+      "rows_identifying": 3,
+      "rows_prominent": 2,
+      "rows_total": 3
+    },
+    "\u1112\u1161\u1102\u1161\u1112\u116d\u110b\u116d\u110b\u1163\u11bc\u1107\u1167\u11bc\u110b\u116f\u11ab": {
+      "cap_decided_by_feature_id": false,
+      "retained_confidence": [
+        162
+      ],
+      "retained_prominence": [
+        102
+      ],
+      "rows_identifying": 1,
+      "rows_prominent": 1,
+      "rows_total": 1
+    },
+    "\u5c6f\u9580\u91ab\u9662": {
+      "cap_decided_by_feature_id": false,
+      "retained_confidence": [],
+      "retained_prominence": []
+    },
+    "\u8056\u6bcd\u91ab\u9662": {
+      "cap_decided_by_feature_id": false,
+      "retained_confidence": [],
+      "retained_prominence": []
+    },
+    "\u9ea5\u7406\u6d69\u5fa9\u5eb7\u9662": {
+      "cap_decided_by_feature_id": false,
+      "retained_confidence": [],
+      "retained_prominence": []
+    }
+  }
+}
