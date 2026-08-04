@@ -194,6 +194,32 @@ python scripts/benchmark_geocoders.py --limit 40 --warmup 1
 *   Cloudflare Wrangler (`npm install -g wrangler`)
 *   DuckDB + Python `duckdb` package (for data scripts)
 
+### Running the tests
+
+```bash
+pytest tests/          # the whole pipeline suite, ~26s
+```
+
+Needs `pytest-xdist`. `pytest.ini` turns on `-n auto --dist worksteal`, which is
+where the speed comes from — the suite is CPU-bound, so it went from 155s serial
+to 26s on a 20-core box, and to ~45s at the 4-vCPU width of a hosted runner.
+
+| Command | What it runs | Wall time |
+| --- | --- | --- |
+| `pytest tests/` | everything (**what CI runs**) | ~26s |
+| `pytest tests/ -m "not slow"` | drops 11 multi-second tests | ~12s |
+| `pytest tests/ -n0` | everything, serially | ~155s |
+
+Use `-n0` when you want `--pdb`, live `-s` output, or an ordered failure log.
+
+`-m "not slow"` is a **local triage shortcut, not a gate**. CI applies no `-m`
+filter and always runs the entire suite, so nothing guarding a frozen contract,
+evidence hash, spec pin or fail-closed gate can be skipped on a gating run. Do
+not add a marker filter to CI.
+
+The Rust side is `cd crates && cargo test`. It is ~96% compilation: 13s to build
+from cold against 0.5s to execute.
+
 ### Build & Run Worker
 
 ```bash
