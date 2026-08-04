@@ -193,6 +193,9 @@ def test_preview_workflow_is_run_scoped_and_cleans_only_its_prefix():
     workflow = (
         ROOT / ".github" / "workflows" / "preview-v2-candidate.yml"
     ).read_text()
+    benchmark_requirements = (
+        ROOT / ".github" / "requirements-preview-v2.txt"
+    ).read_text()
     assert "smoketest-v2/${{ github.run_id }}-${{ github.run_attempt }}" in workflow
     assert 'aws s3 rm "s3://${R2_BUCKET}/${PREVIEW_PREFIX}/" --recursive' in workflow
     assert "v2/catalog.json preview/input/production-catalog.json" in workflow
@@ -200,6 +203,15 @@ def test_preview_workflow_is_run_scoped_and_cleans_only_its_prefix():
     assert "wrangler.global-v2-preview.toml" in workflow
     assert "validate_v2_preview_results.py" in workflow
     assert "cargo install worker-build --version '^0.7' --locked" in workflow
+    assert "-r .github/requirements-preview-v2.txt" in workflow
+    for pin in (
+        "requests==2.34.2",
+        "certifi==2026.7.22",
+        "charset-normalizer==3.4.9",
+        "idna==3.18",
+        "urllib3==2.7.0",
+    ):
+        assert pin in benchmark_requirements
     assert "s3://geocoder-shards/ --recursive" not in workflow
 
 
