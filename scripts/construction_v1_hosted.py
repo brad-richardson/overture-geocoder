@@ -36,6 +36,8 @@ import math
 import platform
 import sqlite3
 import sys
+import threading
+import time
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -223,6 +225,17 @@ PROMOTION = _load("construction_v1_hosted_promotion", "scripts/promote_construct
 # re-typed, so the projection and the backend can never disagree about what one
 # exact-prefix listing costs. See FINALIZE_FIXED_OPERATIONS above.
 FINALIZE_LISTING_PAGE_KEYS = REMOTE.LIST_PAGE_KEYS
+
+# Reduce-marker fan-out for `export-reductions`. Taken from the publication
+# primitives rather than re-typed: `PUBLISH_CONCURRENCY` is already asserted at
+# or below `DEFAULT_MAX_POOL_CONNECTIONS`, so the same value cannot outrun the
+# boto3 connection pool here either. Every request on this path is a read.
+EXPORT_CONCURRENCY = REMOTE.PUBLISH_CONCURRENCY
+
+# Markers between progress lines. 128 of 4,096 is ~32 lines over the phase --
+# enough that an operator can see it moving and extrapolate within the first
+# minute, few enough that the step log stays readable.
+EXPORT_PROGRESS_EVERY = 128
 
 FAMILIES = ("addresses", "places")
 
@@ -3266,23 +3279,80 @@ def cmd_export_reductions(args: argparse.Namespace) -> int:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    missing: list[int] = []
-    written = 0
-    for index in range(args.partitions):
-        marker = store.read_json(_reduce_marker_key(args.family, index))
-        if marker is None:
-            missing.append(index)
-            continue
-        reduction = marker.get("reduction")
-        if not isinstance(reduction, dict):
-            raise SystemExit(
-                f"{args.family} reduce marker {index:04d} carries no full "
-                "reduction record. It was written by a producer predating item "
-                "6; promote from that run's GitHub artifacts instead."
-            )
-        write_json(output_dir / f"{index:04d}.json", reduction)
-        written += 1
+    total = int(args.partitions)
+    concurrency = max(1, int(getattr(args, "concurrency", None) or EXPORT_CONCURRENCY))
 
+    # Each marker is an independent, immutable, create-only object at a dense
+    # index. Nothing here writes to R2 -- it is HEAD+GET only -- so reading them
+    # concurrently cannot weaken the create-only or authentication semantics.
+    # The one property the serial loop had that must survive is DETERMINISTIC
+    # failure reporting: `missing` is collected per index and sorted, so the
+    # message names the same first-missing partitions whatever order the
+    # responses arrive in. `_run_bounded` drains the pool before it re-raises.
+    found: dict[int, dict[str, Any]] = {}
+    missing_set: set[int] = set()
+    lock = threading.Lock()
+    started = time.monotonic()
+    completed = 0
+
+    def report(count: int) -> None:
+        elapsed = time.monotonic() - started
+        rate = count / elapsed if elapsed > 0 else 0.0
+        print(
+            json.dumps(
+                {
+                    "export_reductions_progress": {
+                        "family": args.family,
+                        "completed": count,
+                        "total": total,
+                        "missing_so_far": len(missing_set),
+                        "elapsed_seconds": round(elapsed, 1),
+                        "markers_per_second": round(rate, 2),
+                        "eta_seconds": (
+                            round((total - count) / rate, 1) if rate > 0 else None
+                        ),
+                        "concurrency": concurrency,
+                    }
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+
+    def fetch(_position: int, index: int) -> None:
+        nonlocal completed
+        marker = store.read_json(_reduce_marker_key(args.family, index))
+        reduction = None
+        if marker is not None:
+            reduction = marker.get("reduction")
+            if not isinstance(reduction, dict):
+                raise SystemExit(
+                    f"{args.family} reduce marker {index:04d} carries no full "
+                    "reduction record. It was written by a producer predating "
+                    "item 6; promote from that run's GitHub artifacts instead."
+                )
+            write_json(output_dir / f"{index:04d}.json", reduction)
+        with lock:
+            if reduction is None:
+                missing_set.add(index)
+            else:
+                found[index] = reduction
+            completed += 1
+            count = completed
+        # Outside the lock: a print must never serialise the fan-out.
+        if count % EXPORT_PROGRESS_EVERY == 0 or count == total:
+            report(count)
+
+    # ~4,096 serial HEAD+GET round trips took ~2 h and emitted NOTHING until
+    # they finished. GitHub returned 404 for that runner's live log, so the step
+    # was a black box that cost ~10 manual polling check-ins and repeated
+    # "should I restart?" decisions during the v4 promotion. The progress line
+    # above is the fix for the blindness; the bounded fan-out is the fix for the
+    # two hours.
+    REMOTE._run_bounded(fetch, list(range(total)), concurrency=concurrency)
+
+    missing = sorted(missing_set)
+    written = len(found)
     if missing:
         raise SystemExit(
             f"{args.family} reduction set is incomplete: {len(missing)} of "
@@ -3292,7 +3362,9 @@ def cmd_export_reductions(args: argparse.Namespace) -> int:
     print(
         json.dumps(
             {"family": args.family, "partitions": args.partitions,
-             "reductions_written": written, "source": "r2-construction-namespace"},
+             "reductions_written": written, "source": "r2-construction-namespace",
+             "elapsed_seconds": round(time.monotonic() - started, 1),
+             "concurrency": concurrency},
             sort_keys=True,
         )
     )
@@ -3519,6 +3591,16 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("--partitions", type=int, required=True)
     export.add_argument("--output-dir", type=Path, required=True)
     export.add_argument("--store-root", required=True)
+    export.add_argument(
+        "--concurrency",
+        type=int,
+        default=EXPORT_CONCURRENCY,
+        help=(
+            "Concurrent marker reads. All reads, no writes, so this cannot "
+            "affect create-only semantics; `--concurrency 1` restores the "
+            "serial loop exactly if a backend ever needs it."
+        ),
+    )
     _add_staging_arguments(export)
     export.set_defaults(func=cmd_export_reductions)
 
