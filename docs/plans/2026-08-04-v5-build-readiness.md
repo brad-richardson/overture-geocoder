@@ -92,7 +92,32 @@ the pre-fix miss list. Each item below changes the residue that v5 has to cover.
 | 3 | Locality blend + centroid-distance near-tie demotion | Worker | PENDING |
 | 4 | Exact-name small-radius assembly clustering | Worker | PENDING |
 | 5 | Division population tie-break | Worker | Implemented, unmeasured |
-| 6 | **Proximity 1101 crash fix** | Worker | In progress — prerequisite for §1.1's probe |
+| 6 | **Biased-search crash fix** | Worker | **SHIPPED 2026-08-04, verified live** |
+
+Item 6 is done and was an active production outage, not merely a blocked
+probe. `f64::clamp` panics when `min > max`, which is exactly what an
+antimeridian-crossing shard bbox yields, so `distance_to_bbox`
+(`crates/geocoder-core/src/routing.rs:190`) aborted any biased forward query
+whose longitude fell inside such a shard's wrapped span while its latitude fell
+outside its band — surfacing as Cloudflare 1101, or 1102 when the hung request
+also burned the CPU budget. Confirmed in production via `wrangler tail`:
+`min > max ... min = 19.879823684692383, max = -171.8721160888672`.
+
+Crucially the `proximity` parameter was never required to trigger it: the text
+lane builds the same bias from `CF-IPLatitude`/`CF-IPLongitude`, so ordinary
+queries were failing for users across Japan, Australia, India, Southeast Asia
+and East Africa. `/search` (v1) with `lat`/`lon` was equally affected; reverse
+geocoding was not. Latent since 2026-07-16. Fixed in `cb4deaf`, deployed, and
+verified against six previously-crashing coordinates.
+
+Two blind spots let it live that long, and both are worth closing: every
+benchmark case in both frozen sets carries no `proximity`, so the bias path had
+zero coverage; and all local verification runs from a US IP, where the
+predicate does not fire.
+
+Follow-up queued (unreachable from current data, one bad bbox away from the
+same outage): `routing.rs:174` `lat.clamp(min_lat, max_lat)` and
+`reverse_construction_v1.rs:614` share the panic shape.
 
 Items 1, 2, 4 and 5 are implemented and integrated on
 `integration/wave-worker-fixes` (225 worker tests green, wasm32 clean) but
