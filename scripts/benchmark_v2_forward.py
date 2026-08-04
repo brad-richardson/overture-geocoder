@@ -175,8 +175,13 @@ def name_tokens(value):
     are the same tokens, and `normalize_name` alone says they differ.
     """
     normalized = normalize_name(value)
+    # `\w` is Unicode-aware for str patterns, so CJK, Hangul and Cyrillic
+    # survive. An ASCII-only class silently emptied the token set for every
+    # non-Latin name -- and half the everyday-POI set is CJK -- which made the
+    # whole containment rule a no-op exactly where it was most needed.
     return frozenset(
-        token for token in re.split(r"[^0-9a-z]+", normalized) if token
+        token for token in re.split(r"[^\w]+", normalized, flags=re.UNICODE)
+        if token
     )
 
 

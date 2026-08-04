@@ -1468,3 +1468,26 @@ def test_retained_candidates_are_bounded_by_the_reported_cutoff():
         for index in range(25)
     ]
     assert len(bench.retained_candidates(case, features)) == bench.FOUND_AT
+
+
+def test_name_tokens_survive_non_latin_scripts():
+    # An ASCII-only character class emptied the token set for every CJK,
+    # Hangul and Cyrillic name, which made containment a silent no-op on half
+    # the everyday-POI set. Regression guard for that.
+    for value in ("許家蝦仁肉圓", "중앙대학교병원", "Москва"):
+        assert bench.name_tokens(value), value
+
+
+def test_containment_matches_cjk_separator_variants():
+    # Same restaurant, `/` versus a space; returned 7 m away and scored a miss
+    # under exact equality.
+    assert bench._names_contain("許家蝦仁肉圓 芋粿", "許家蝦仁肉圓/芋粿")
+
+
+def test_containment_still_blocks_a_bare_cjk_compound_against_a_longer_name():
+    # The 2-token floor is Latin-shaped and a dense single CJK compound trips
+    # it. Documented as a known limit rather than papered over: relaxing it
+    # needs a real design pass, and the measured ceiling for the whole rule on
+    # the everyday set is 5 cases, so it is not worth guessing at.
+    assert not bench._names_contain(
+        "중앙대학교병원", "중앙대학교병원 (Chung-Ang Univ. Hospital)")
