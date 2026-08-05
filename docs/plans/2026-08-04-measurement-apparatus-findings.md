@@ -219,3 +219,25 @@ speak to neither from where it sits:
 
 Candidate retention now ships on every run, so the next round can answer
 retrieval-versus-ranking from a frozen artifact instead of re-querying.
+
+---
+
+# CORRECTION: question 2 is answered, and this doc was wrong about it
+
+Both statements above about the release move — "the largest untested quality
+lever on the board" (§4) and "the only lever that adds *data* rather than
+re-ranking what is already there" (question 2) — are **measured and refuted**.
+
+`2026-07-22.0` does not add data. It carries **1,418,728 FEWER places** than
+`2026-06-17.0` (74,223,561 against 75,642,289) while emitting more distinct head
+index entries — upstream conflation, not growth. Its net effect on plain-head
+reachability is **+1 case across 206 exact-tier benchmark cases**, against five
+regressions, two of which production answers correctly today.
+
+The framing error worth keeping: a lever assumed to be additive was never
+checked for losses, so the measurement it implied would have probed misses only
+and been structurally blind to all five regressions. Probing current HITS as a
+control is what caught them.
+
+See `docs/plans/2026-08-04-release-move-recall-delta.md`. The state doc carries
+the summary and supersedes this file on the point.

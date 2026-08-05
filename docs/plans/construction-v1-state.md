@@ -87,6 +87,16 @@ provisional accepts, followed by the already-defined broadcast memory/byte
 measurement. Structured Address latency remains the next serving-performance
 gate.
 
+**2026-08-05 UPDATE.** That classification is done, and so is the question it
+opened. The Overture release move `2026-06-17.0 -> 2026-07-22.0` — previously
+recorded as "the largest untested quality lever on the board" — is **measured
+and refuted**: +1 case of plain-head reachability across 206 exact-tier
+benchmark cases, against five regressions, two of which production answers
+correctly today. It is not a recall lever and must not gate anything. See "The
+release move is not a quality lever, 2026-08-04" below. **The
+`prominence_rank = 0` phrase-lane admission change is now the sole remaining
+candidate, and it rides on the June corpus** — no release move ahead of it.
+
 The justification is measured, not aesthetic. Against the build promoted today:
 
 - `q=Seattle&limit=10` returns ten POIs at relevance 1.0 -- UPS Store, Verizon,
@@ -451,6 +461,52 @@ trying to implement it.
 
 Full measurement, and the three things the probe deliberately refuses to
 overstate, in `docs/plans/2026-08-04-head-cap-eviction-ranks.md`.
+
+### The release move is not a quality lever, 2026-08-04
+
+Two complete local planet Places builds, same machine, same driver, differing
+only in `release`. The `2026-06-17.0` head completed 2026-08-04T23:36Z in ~2h
+with **zero DuckDB spill** at `duckdb_memory_limit=40GB`; the `2026-07-22.0`
+head was already on disk. Probe
+`benchmarks/probes/2026-08-04-release-move-recall-delta.py`, evidence
+`benchmarks/2026-08-04-release-move-recall-delta-{everyday,gold}.json`.
+
+**The newer release is smaller: 74,223,561 places against 75,642,289, a loss of
+1,418,728 (-1.9%)**, while emitting 160,522 MORE distinct head index entries.
+Fewer records with more tokens is the shape of upstream conflation, and it means
+the move can lose what it does not gain. It was framed as the only change that
+adds data; it does not.
+
+Plain-head reachability, exact-name tier, per case in both releases:
+
+| set | cases | servable @06-17 | servable @07-22 | gains | losses |
+|---|---|---|---|---|---|
+| everyday-POI 200 | 174 | 54 | 55 | 3 | 5 |
+| forward gold 55 | 32 | 2 | 2 | 0 | 0 |
+| **total** | **206** | **56** | **57** | **3** | **5** |
+
+**Net +1 in 206.** On all tiers including containment it is 3 gains against 17
+losses. All eight reachability flips are CJK, and two of the losses — HK
+`沙田醫院` and KR `서울대학교치과병원` — are cases production answers correctly
+today, going `SERVABLE -> ABSENT`. Probing current HITS as a regression control,
+not just misses, is what exposed them.
+
+**The gold set does not move with vintage at all**: 31 of 45 cases are EVICTED
+in BOTH releases with zero reachability flips. That independently confirms, by a
+different instrument, that the lever is admission.
+
+Two things this measurement does NOT say. `SERVABLE` models the head
+token-intersection lane only, so it is a LOWER BOUND on what production serves —
+only 2 of 27 exact-tier gold production hits register as servable, the rest
+being answered by the phrase lane or the prefix-head fallback. The delta is
+sound because both sides run the identical function in one process and the
+unmodelled lanes cancel; the LEVEL is not, and must never be quoted as
+"the system reaches only 2 gold cases". Second, it does not diagnose the CJK
+losses — five HK/KR hospital names degraded between releases is a bounded
+follow-up, not a finding.
+
+Full evidence and limits in
+`docs/plans/2026-08-04-release-move-recall-delta.md`.
 
 ### If the head cap is ever raised, it is contract-bound
 
@@ -2277,6 +2333,8 @@ These remain useful but do not block the next measured milestone:
 
 ## Evidence and history
 
+- `docs/plans/2026-08-04-release-move-recall-delta.md` — the refutation of the
+  Overture release move as a quality lever, and the CJK regressions it exposed.
 - `docs/plans/2026-08-04-head-cap-eviction-ranks.md` — what actually loses an
   indexed place in the global head, and the refutation of the cap-eviction
   hypothesis.

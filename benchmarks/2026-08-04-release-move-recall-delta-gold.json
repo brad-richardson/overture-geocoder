@@ -1,0 +1,3060 @@
+{
+  "by_country_exact_tier": {
+    "?": {
+      "cases": 32,
+      "gain": 0,
+      "loss": 0,
+      "same": 32,
+      "servable_a": 2,
+      "servable_b": 2
+    }
+  },
+  "cases": [
+    {
+      "a": {
+        "corpus_rows_near": 90150,
+        "features_near": 54096,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "monument",
+          "confidence_rank": 233,
+          "feature_uuid": "d3f9c28fb2db4d08a2ab3f68c1ecee5b",
+          "primary_name": "Eiffel tower",
+          "prominence_rank": 255
+        },
+        "tokens": [
+          {
+            "contenders": 541,
+            "rank": 5,
+            "reason": null,
+            "survives": true,
+            "token": "eiffel"
+          },
+          {
+            "contenders": 890,
+            "rank": 105,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "tower"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "b": {
+        "corpus_rows_near": 85472,
+        "features_near": 52308,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "monument",
+          "confidence_rank": 217,
+          "feature_uuid": "d1ec4ca14c004b03b0f6ace7738b639b",
+          "primary_name": "Eiffel Tower",
+          "prominence_rank": 255
+        },
+        "tokens": [
+          {
+            "contenders": 505,
+            "rank": 18,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "eiffel"
+          },
+          {
+            "contenders": 880,
+            "rank": 167,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "tower"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "case_id": "gold:name:eiffel-tower",
+      "direction": "SAME",
+      "exact_tier": true,
+      "expected_name": "Eiffel Tower",
+      "production_hit": true,
+      "query": "Eiffel Tower",
+      "strata": {},
+      "transition": "EVICTED->EVICTED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 90150,
+        "features_near": 54096,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "monument",
+          "confidence_rank": 233,
+          "feature_uuid": "d3f9c28fb2db4d08a2ab3f68c1ecee5b",
+          "primary_name": "Eiffel tower",
+          "prominence_rank": 255
+        },
+        "tokens": [
+          {
+            "contenders": 541,
+            "rank": 5,
+            "reason": null,
+            "survives": true,
+            "token": "eiffel"
+          },
+          {
+            "contenders": 890,
+            "rank": 105,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "tower"
+          },
+          {
+            "contenders": 890,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "paris"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "b": {
+        "corpus_rows_near": 85472,
+        "features_near": 52308,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "monument",
+          "confidence_rank": 217,
+          "feature_uuid": "d1ec4ca14c004b03b0f6ace7738b639b",
+          "primary_name": "Eiffel Tower",
+          "prominence_rank": 255
+        },
+        "tokens": [
+          {
+            "contenders": 505,
+            "rank": 18,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "eiffel"
+          },
+          {
+            "contenders": 880,
+            "rank": 167,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "tower"
+          },
+          {
+            "contenders": 880,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "paris"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "case_id": "gold:name_locality:eiffel-tower",
+      "direction": "SAME",
+      "exact_tier": true,
+      "expected_name": "Eiffel Tower",
+      "production_hit": true,
+      "query": "Eiffel Tower Paris",
+      "strata": {},
+      "transition": "EVICTED->EVICTED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 28595,
+        "features_near": 17119,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "landmark_and_historical_building",
+          "confidence_rank": 159,
+          "feature_uuid": "9c40e3466b8c4a2187c90c0f3b813a1b",
+          "primary_name": "Statue of Liberty",
+          "prominence_rank": 128
+        },
+        "tokens": [
+          {
+            "contenders": 793,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "statue"
+          },
+          {
+            "contenders": 890,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "of"
+          },
+          {
+            "contenders": 890,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "liberty"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "b": {
+        "corpus_rows_near": 28475,
+        "features_near": 17233,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "monument",
+          "confidence_rank": 167,
+          "feature_uuid": "9c40e3466b8c4a2187c90c0f3b813a1b",
+          "primary_name": "Statue of Liberty",
+          "prominence_rank": 255
+        },
+        "tokens": [
+          {
+            "contenders": 776,
+            "rank": 379,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "statue"
+          },
+          {
+            "contenders": 880,
+            "rank": 597,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "of"
+          },
+          {
+            "contenders": 880,
+            "rank": 28,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "liberty"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "case_id": "gold:name:statue-of-liberty",
+      "direction": "SAME",
+      "exact_tier": true,
+      "expected_name": "Statue of Liberty",
+      "production_hit": true,
+      "query": "Statue of Liberty",
+      "strata": {},
+      "transition": "EVICTED->EVICTED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 28595,
+        "features_near": 17119,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "landmark_and_historical_building",
+          "confidence_rank": 159,
+          "feature_uuid": "9c40e3466b8c4a2187c90c0f3b813a1b",
+          "primary_name": "Statue of Liberty",
+          "prominence_rank": 128
+        },
+        "tokens": [],
+        "verdict": "QUERY_REFUSED"
+      },
+      "b": {
+        "corpus_rows_near": 28475,
+        "features_near": 17233,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "monument",
+          "confidence_rank": 167,
+          "feature_uuid": "9c40e3466b8c4a2187c90c0f3b813a1b",
+          "primary_name": "Statue of Liberty",
+          "prominence_rank": 255
+        },
+        "tokens": [],
+        "verdict": "QUERY_REFUSED"
+      },
+      "case_id": "gold:name_locality:statue-of-liberty",
+      "direction": "SAME",
+      "exact_tier": true,
+      "expected_name": "Statue of Liberty",
+      "production_hit": true,
+      "query": "Statue of Liberty New York",
+      "strata": {},
+      "transition": "QUERY_REFUSED->QUERY_REFUSED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 59832,
+        "features_near": 34789,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "arts_and_entertainment",
+          "confidence_rank": 159,
+          "feature_uuid": "84657dc6a93444db99b039f630d957ea",
+          "primary_name": "Colosseum",
+          "prominence_rank": 128
+        },
+        "tokens": [
+          {
+            "contenders": 374,
+            "rank": 7,
+            "reason": null,
+            "survives": true,
+            "token": "colosseum"
+          }
+        ],
+        "verdict": "SERVABLE"
+      },
+      "b": {
+        "corpus_rows_near": 56716,
+        "features_near": 33142,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "arts_and_entertainment",
+          "confidence_rank": 171,
+          "feature_uuid": "84657dc6a93444db99b039f630d957ea",
+          "primary_name": "Colosseum",
+          "prominence_rank": 128
+        },
+        "tokens": [
+          {
+            "contenders": 352,
+            "rank": 8,
+            "reason": null,
+            "survives": true,
+            "token": "colosseum"
+          }
+        ],
+        "verdict": "SERVABLE"
+      },
+      "case_id": "gold:name:colosseum",
+      "direction": "SAME",
+      "exact_tier": true,
+      "expected_name": "Colosseum",
+      "production_hit": true,
+      "query": "Colosseum",
+      "strata": {},
+      "transition": "SERVABLE->SERVABLE"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 59832,
+        "features_near": 34789,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "arts_and_entertainment",
+          "confidence_rank": 159,
+          "feature_uuid": "84657dc6a93444db99b039f630d957ea",
+          "primary_name": "Colosseum",
+          "prominence_rank": 128
+        },
+        "tokens": [
+          {
+            "contenders": 374,
+            "rank": 7,
+            "reason": null,
+            "survives": true,
+            "token": "colosseum"
+          },
+          {
+            "contenders": 708,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "rome"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "b": {
+        "corpus_rows_near": 56716,
+        "features_near": 33142,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "arts_and_entertainment",
+          "confidence_rank": 171,
+          "feature_uuid": "84657dc6a93444db99b039f630d957ea",
+          "primary_name": "Colosseum",
+          "prominence_rank": 128
+        },
+        "tokens": [
+          {
+            "contenders": 352,
+            "rank": 8,
+            "reason": null,
+            "survives": true,
+            "token": "colosseum"
+          },
+          {
+            "contenders": 675,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "rome"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "case_id": "gold:name_locality:colosseum",
+      "direction": "SAME",
+      "exact_tier": true,
+      "expected_name": "Colosseum",
+      "production_hit": true,
+      "query": "Colosseum Rome",
+      "strata": {},
+      "transition": "EVICTED->EVICTED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 52213,
+        "features_near": 32101,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "fountain",
+          "confidence_rank": 174,
+          "feature_uuid": "3a0ff840a3a541719f7324fab2ece25b",
+          "primary_name": "Big Ben",
+          "prominence_rank": 128
+        },
+        "tokens": [
+          {
+            "contenders": 890,
+            "rank": 459,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "big"
+          },
+          {
+            "contenders": 890,
+            "rank": 210,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "ben"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "b": {
+        "corpus_rows_near": 47658,
+        "features_near": 26599,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "travel_services",
+          "confidence_rank": 227,
+          "feature_uuid": "2c05ba0d955946d5bfb3ae8aaab1538d",
+          "primary_name": "Big Ben",
+          "prominence_rank": 128
+        },
+        "tokens": [
+          {
+            "contenders": 880,
+            "rank": 401,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "big"
+          },
+          {
+            "contenders": 879,
+            "rank": 180,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "ben"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "case_id": "gold:name:big-ben",
+      "direction": "SAME",
+      "exact_tier": true,
+      "expected_name": "Big Ben",
+      "production_hit": true,
+      "query": "Big Ben",
+      "strata": {},
+      "transition": "EVICTED->EVICTED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 52213,
+        "features_near": 32101,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "fountain",
+          "confidence_rank": 174,
+          "feature_uuid": "3a0ff840a3a541719f7324fab2ece25b",
+          "primary_name": "Big Ben",
+          "prominence_rank": 128
+        },
+        "tokens": [
+          {
+            "contenders": 890,
+            "rank": 459,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "big"
+          },
+          {
+            "contenders": 890,
+            "rank": 210,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "ben"
+          },
+          {
+            "contenders": 890,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "london"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "b": {
+        "corpus_rows_near": 47658,
+        "features_near": 26599,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "travel_services",
+          "confidence_rank": 227,
+          "feature_uuid": "2c05ba0d955946d5bfb3ae8aaab1538d",
+          "primary_name": "Big Ben",
+          "prominence_rank": 128
+        },
+        "tokens": [
+          {
+            "contenders": 880,
+            "rank": 401,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "big"
+          },
+          {
+            "contenders": 879,
+            "rank": 180,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "ben"
+          },
+          {
+            "contenders": 878,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "london"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "case_id": "gold:name_locality:big-ben",
+      "direction": "SAME",
+      "exact_tier": true,
+      "expected_name": "Big Ben",
+      "production_hit": true,
+      "query": "Big Ben London",
+      "strata": {},
+      "transition": "EVICTED->EVICTED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 7986,
+        "features_near": 3192,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "monument",
+          "confidence_rank": 171,
+          "feature_uuid": "ef0563848934404d8a3c3cd95c858bbb",
+          "primary_name": "Taj Mahal",
+          "prominence_rank": 255
+        },
+        "tokens": [
+          {
+            "contenders": 880,
+            "rank": 10,
+            "reason": null,
+            "survives": true,
+            "token": "taj"
+          },
+          {
+            "contenders": 820,
+            "rank": 20,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "mahal"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "b": {
+        "corpus_rows_near": 8265,
+        "features_near": 3376,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "monument",
+          "confidence_rank": 178,
+          "feature_uuid": "ef0563848934404d8a3c3cd95c858bbb",
+          "primary_name": "Taj Mahal",
+          "prominence_rank": 255
+        },
+        "tokens": [
+          {
+            "contenders": 866,
+            "rank": 11,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "taj"
+          },
+          {
+            "contenders": 807,
+            "rank": 19,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "mahal"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "case_id": "gold:name:taj-mahal",
+      "direction": "SAME",
+      "exact_tier": true,
+      "expected_name": "Taj Mahal",
+      "production_hit": true,
+      "query": "Taj Mahal",
+      "strata": {},
+      "transition": "EVICTED->EVICTED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 7986,
+        "features_near": 3192,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "monument",
+          "confidence_rank": 171,
+          "feature_uuid": "ef0563848934404d8a3c3cd95c858bbb",
+          "primary_name": "Taj Mahal",
+          "prominence_rank": 255
+        },
+        "tokens": [
+          {
+            "contenders": 880,
+            "rank": 10,
+            "reason": null,
+            "survives": true,
+            "token": "taj"
+          },
+          {
+            "contenders": 820,
+            "rank": 20,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "mahal"
+          },
+          {
+            "contenders": 530,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "agra"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "b": {
+        "corpus_rows_near": 8265,
+        "features_near": 3376,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "monument",
+          "confidence_rank": 178,
+          "feature_uuid": "ef0563848934404d8a3c3cd95c858bbb",
+          "primary_name": "Taj Mahal",
+          "prominence_rank": 255
+        },
+        "tokens": [
+          {
+            "contenders": 866,
+            "rank": 11,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "taj"
+          },
+          {
+            "contenders": 807,
+            "rank": 19,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "mahal"
+          },
+          {
+            "contenders": 521,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "agra"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "case_id": "gold:name_locality:taj-mahal",
+      "direction": "SAME",
+      "exact_tier": true,
+      "expected_name": "Taj Mahal",
+      "production_hit": true,
+      "query": "Taj Mahal Agra",
+      "strata": {},
+      "transition": "EVICTED->EVICTED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 598,
+        "features_near": 361,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "monument",
+          "confidence_rank": 219,
+          "feature_uuid": "487cc09369044102b932d31c32fcd471",
+          "primary_name": "Machu Picchu",
+          "prominence_rank": 255
+        },
+        "tokens": [
+          {
+            "contenders": 224,
+            "rank": 2,
+            "reason": null,
+            "survives": true,
+            "token": "machu"
+          },
+          {
+            "contenders": 164,
+            "rank": 2,
+            "reason": null,
+            "survives": true,
+            "token": "picchu"
+          }
+        ],
+        "verdict": "SERVABLE"
+      },
+      "b": {
+        "corpus_rows_near": 580,
+        "features_near": 357,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "monument",
+          "confidence_rank": 233,
+          "feature_uuid": "487cc09369044102b932d31c32fcd471",
+          "primary_name": "Machu Picchu",
+          "prominence_rank": 255
+        },
+        "tokens": [
+          {
+            "contenders": 204,
+            "rank": 1,
+            "reason": null,
+            "survives": true,
+            "token": "machu"
+          },
+          {
+            "contenders": 151,
+            "rank": 1,
+            "reason": null,
+            "survives": true,
+            "token": "picchu"
+          }
+        ],
+        "verdict": "SERVABLE"
+      },
+      "case_id": "gold:name:machu-picchu",
+      "direction": "SAME",
+      "exact_tier": true,
+      "expected_name": "Machu Picchu",
+      "production_hit": true,
+      "query": "Machu Picchu",
+      "strata": {},
+      "transition": "SERVABLE->SERVABLE"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 547,
+        "features_near": 333,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "monument",
+          "confidence_rank": 219,
+          "feature_uuid": "487cc09369044102b932d31c32fcd471",
+          "primary_name": "Machu Picchu",
+          "prominence_rank": 255
+        },
+        "tokens": [
+          {
+            "contenders": 224,
+            "rank": 2,
+            "reason": null,
+            "survives": true,
+            "token": "machu"
+          },
+          {
+            "contenders": 164,
+            "rank": 2,
+            "reason": null,
+            "survives": true,
+            "token": "picchu"
+          },
+          {
+            "contenders": 124,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "cusco"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "b": {
+        "corpus_rows_near": 530,
+        "features_near": 329,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "monument",
+          "confidence_rank": 233,
+          "feature_uuid": "487cc09369044102b932d31c32fcd471",
+          "primary_name": "Machu Picchu",
+          "prominence_rank": 255
+        },
+        "tokens": [
+          {
+            "contenders": 204,
+            "rank": 1,
+            "reason": null,
+            "survives": true,
+            "token": "machu"
+          },
+          {
+            "contenders": 151,
+            "rank": 1,
+            "reason": null,
+            "survives": true,
+            "token": "picchu"
+          },
+          {
+            "contenders": 115,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "cusco"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "case_id": "gold:name_locality:machu-picchu",
+      "direction": "SAME",
+      "exact_tier": true,
+      "expected_name": "Machu Picchu",
+      "production_hit": false,
+      "query": "Machu Picchu Cusco",
+      "strata": {},
+      "transition": "EVICTED->EVICTED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 72351,
+        "features_near": 49272,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "catholic_church",
+          "confidence_rank": 134,
+          "feature_uuid": "812454fdf4cc40c6b579d526e4a8d1d3",
+          "primary_name": "sagrada familia",
+          "prominence_rank": 153
+        },
+        "tokens": [
+          {
+            "contenders": 356,
+            "rank": 207,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "sagrada"
+          },
+          {
+            "contenders": 841,
+            "rank": 216,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "familia"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "b": {
+        "corpus_rows_near": 68603,
+        "features_near": 47864,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "catholic_church",
+          "confidence_rank": 249,
+          "feature_uuid": "6ca535f91b7140bdb3a5045f320123b8",
+          "primary_name": "Sagrada Familia",
+          "prominence_rank": 153
+        },
+        "tokens": [
+          {
+            "contenders": 348,
+            "rank": 101,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "sagrada"
+          },
+          {
+            "contenders": 828,
+            "rank": 121,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "familia"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "case_id": "gold:name:sagrada-familia",
+      "direction": "SAME",
+      "exact_tier": true,
+      "expected_name": "Sagrada Familia",
+      "production_hit": true,
+      "query": "Sagrada Familia",
+      "strata": {},
+      "transition": "EVICTED->EVICTED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 72351,
+        "features_near": 49272,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "catholic_church",
+          "confidence_rank": 134,
+          "feature_uuid": "812454fdf4cc40c6b579d526e4a8d1d3",
+          "primary_name": "sagrada familia",
+          "prominence_rank": 153
+        },
+        "tokens": [
+          {
+            "contenders": 356,
+            "rank": 207,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "sagrada"
+          },
+          {
+            "contenders": 841,
+            "rank": 216,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "familia"
+          },
+          {
+            "contenders": 740,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "barcelona"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "b": {
+        "corpus_rows_near": 68603,
+        "features_near": 47864,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "catholic_church",
+          "confidence_rank": 249,
+          "feature_uuid": "6ca535f91b7140bdb3a5045f320123b8",
+          "primary_name": "Sagrada Familia",
+          "prominence_rank": 153
+        },
+        "tokens": [
+          {
+            "contenders": 348,
+            "rank": 101,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "sagrada"
+          },
+          {
+            "contenders": 828,
+            "rank": 121,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "familia"
+          },
+          {
+            "contenders": 693,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "barcelona"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "case_id": "gold:name_locality:sagrada-familia",
+      "direction": "SAME",
+      "exact_tier": true,
+      "expected_name": "Sagrada Familia",
+      "production_hit": true,
+      "query": "Sagrada Familia Barcelona",
+      "strata": {},
+      "transition": "EVICTED->EVICTED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 137491,
+        "features_near": 83058,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "landmark_and_historical_building",
+          "confidence_rank": 248,
+          "feature_uuid": "58cebdfceba54c46a86d57bc05aca28b",
+          "primary_name": "Empire State Building",
+          "prominence_rank": 128
+        },
+        "tokens": [
+          {
+            "contenders": 880,
+            "rank": 72,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "empire"
+          },
+          {
+            "contenders": 882,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "state"
+          },
+          {
+            "contenders": 890,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "building"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "b": {
+        "corpus_rows_near": 134633,
+        "features_near": 80238,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "landmark_and_historical_building",
+          "confidence_rank": 248,
+          "feature_uuid": "58cebdfceba54c46a86d57bc05aca28b",
+          "primary_name": "Empire State Building",
+          "prominence_rank": 128
+        },
+        "tokens": [
+          {
+            "contenders": 868,
+            "rank": 76,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "empire"
+          },
+          {
+            "contenders": 868,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "state"
+          },
+          {
+            "contenders": 880,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "building"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "case_id": "gold:name:empire-state-building",
+      "direction": "SAME",
+      "exact_tier": true,
+      "expected_name": "Empire State Building",
+      "production_hit": true,
+      "query": "Empire State Building",
+      "strata": {},
+      "transition": "EVICTED->EVICTED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 137491,
+        "features_near": 83058,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "landmark_and_historical_building",
+          "confidence_rank": 248,
+          "feature_uuid": "58cebdfceba54c46a86d57bc05aca28b",
+          "primary_name": "Empire State Building",
+          "prominence_rank": 128
+        },
+        "tokens": [],
+        "verdict": "QUERY_REFUSED"
+      },
+      "b": {
+        "corpus_rows_near": 134633,
+        "features_near": 80238,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "landmark_and_historical_building",
+          "confidence_rank": 248,
+          "feature_uuid": "58cebdfceba54c46a86d57bc05aca28b",
+          "primary_name": "Empire State Building",
+          "prominence_rank": 128
+        },
+        "tokens": [],
+        "verdict": "QUERY_REFUSED"
+      },
+      "case_id": "gold:name_locality:empire-state-building",
+      "direction": "SAME",
+      "exact_tier": true,
+      "expected_name": "Empire State Building",
+      "production_hit": true,
+      "query": "Empire State Building New York",
+      "strata": {},
+      "transition": "QUERY_REFUSED->QUERY_REFUSED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 122269,
+        "features_near": 72759,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "palace",
+          "confidence_rank": 251,
+          "feature_uuid": "7a9efff753ad4b629ed5d661d36d4160",
+          "primary_name": "Buckingham Palace",
+          "prominence_rank": 217
+        },
+        "tokens": [
+          {
+            "contenders": 492,
+            "rank": 4,
+            "reason": null,
+            "survives": true,
+            "token": "buckingham"
+          },
+          {
+            "contenders": 890,
+            "rank": 155,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "palace"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "b": {
+        "corpus_rows_near": 111598,
+        "features_near": 61480,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "museum",
+          "confidence_rank": 176,
+          "feature_uuid": "13935c58a1d349949c0f8ec400006306",
+          "primary_name": "Buckingham Palace",
+          "prominence_rank": 217
+        },
+        "tokens": [
+          {
+            "contenders": 502,
+            "rank": 14,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "buckingham"
+          },
+          {
+            "contenders": 880,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "palace"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "case_id": "gold:name:buckingham-palace",
+      "direction": "SAME",
+      "exact_tier": true,
+      "expected_name": "Buckingham Palace",
+      "production_hit": true,
+      "query": "Buckingham Palace",
+      "strata": {},
+      "transition": "EVICTED->EVICTED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 122269,
+        "features_near": 72759,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "palace",
+          "confidence_rank": 251,
+          "feature_uuid": "7a9efff753ad4b629ed5d661d36d4160",
+          "primary_name": "Buckingham Palace",
+          "prominence_rank": 217
+        },
+        "tokens": [
+          {
+            "contenders": 492,
+            "rank": 4,
+            "reason": null,
+            "survives": true,
+            "token": "buckingham"
+          },
+          {
+            "contenders": 890,
+            "rank": 155,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "palace"
+          },
+          {
+            "contenders": 890,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "london"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "b": {
+        "corpus_rows_near": 111598,
+        "features_near": 61480,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "museum",
+          "confidence_rank": 176,
+          "feature_uuid": "13935c58a1d349949c0f8ec400006306",
+          "primary_name": "Buckingham Palace",
+          "prominence_rank": 217
+        },
+        "tokens": [
+          {
+            "contenders": 502,
+            "rank": 14,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "buckingham"
+          },
+          {
+            "contenders": 880,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "palace"
+          },
+          {
+            "contenders": 878,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "london"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "case_id": "gold:name_locality:buckingham-palace",
+      "direction": "SAME",
+      "exact_tier": true,
+      "expected_name": "Buckingham Palace",
+      "production_hit": true,
+      "query": "Buckingham Palace London",
+      "strata": {},
+      "transition": "EVICTED->EVICTED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 56211,
+        "features_near": 43448,
+        "match_strength": "CONTAINMENT_ONLY",
+        "target": {
+          "category": "landmark_and_historical_building",
+          "confidence_rank": 254,
+          "feature_uuid": "07b1e6594ecd441caf4de40bb9fc13ac",
+          "primary_name": "Apartments at Brandenburg Gate",
+          "prominence_rank": 89
+        },
+        "tokens": [
+          {
+            "contenders": 217,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "brandenburg"
+          },
+          {
+            "contenders": 890,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "gate"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "b": {
+        "corpus_rows_near": 50898,
+        "features_near": 39611,
+        "match_strength": "CONTAINMENT_ONLY",
+        "target": {
+          "category": "landmark_and_historical_building",
+          "confidence_rank": 254,
+          "feature_uuid": "07b1e6594ecd441caf4de40bb9fc13ac",
+          "primary_name": "Apartments at Brandenburg Gate",
+          "prominence_rank": 89
+        },
+        "tokens": [
+          {
+            "contenders": 202,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "brandenburg"
+          },
+          {
+            "contenders": 880,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "gate"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "case_id": "gold:name:brandenburg-gate",
+      "direction": "SAME",
+      "exact_tier": false,
+      "expected_name": "Brandenburg Gate",
+      "production_hit": false,
+      "query": "Brandenburg Gate",
+      "strata": {},
+      "transition": "EVICTED->EVICTED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 56211,
+        "features_near": 43448,
+        "match_strength": "CONTAINMENT_ONLY",
+        "target": {
+          "category": "landmark_and_historical_building",
+          "confidence_rank": 254,
+          "feature_uuid": "07b1e6594ecd441caf4de40bb9fc13ac",
+          "primary_name": "Apartments at Brandenburg Gate",
+          "prominence_rank": 89
+        },
+        "tokens": [
+          {
+            "contenders": 217,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "brandenburg"
+          },
+          {
+            "contenders": 890,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "gate"
+          },
+          {
+            "contenders": 845,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "berlin"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "b": {
+        "corpus_rows_near": 50898,
+        "features_near": 39611,
+        "match_strength": "CONTAINMENT_ONLY",
+        "target": {
+          "category": "landmark_and_historical_building",
+          "confidence_rank": 254,
+          "feature_uuid": "07b1e6594ecd441caf4de40bb9fc13ac",
+          "primary_name": "Apartments at Brandenburg Gate",
+          "prominence_rank": 89
+        },
+        "tokens": [
+          {
+            "contenders": 202,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "brandenburg"
+          },
+          {
+            "contenders": 880,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "gate"
+          },
+          {
+            "contenders": 821,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "berlin"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "case_id": "gold:name_locality:brandenburg-gate",
+      "direction": "SAME",
+      "exact_tier": false,
+      "expected_name": "Brandenburg Gate",
+      "production_hit": false,
+      "query": "Brandenburg Gate Berlin",
+      "strata": {},
+      "transition": "EVICTED->EVICTED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 15277,
+        "features_near": 9100,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "seafood_restaurant",
+          "confidence_rank": 253,
+          "feature_uuid": "5466e2fa9b5643df9bd2c585755f9049",
+          "primary_name": "Pike Place Chowder",
+          "prominence_rank": 0
+        },
+        "tokens": [],
+        "verdict": "QUERY_REFUSED"
+      },
+      "b": {
+        "corpus_rows_near": 14199,
+        "features_near": 8332,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "seafood_restaurant",
+          "confidence_rank": 253,
+          "feature_uuid": "5466e2fa9b5643df9bd2c585755f9049",
+          "primary_name": "Pike Place Chowder",
+          "prominence_rank": 0
+        },
+        "tokens": [],
+        "verdict": "QUERY_REFUSED"
+      },
+      "case_id": "gold:named_poi:pike-place-chowder",
+      "direction": "SAME",
+      "exact_tier": true,
+      "expected_name": "Pike Place Chowder",
+      "production_hit": true,
+      "query": "Pike Place Chowder Seattle",
+      "strata": {
+        "poi_family": "food_drink",
+        "scope": "independent"
+      },
+      "transition": "QUERY_REFUSED->QUERY_REFUSED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 7017,
+        "features_near": 5535,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "restaurant",
+          "confidence_rank": 252,
+          "feature_uuid": "8a39e1210c834a7082f44cf5558b8a7d",
+          "primary_name": "Noma",
+          "prominence_rank": 0
+        },
+        "tokens": [
+          {
+            "contenders": 398,
+            "rank": 61,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "noma"
+          },
+          {
+            "contenders": 514,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "copenhagen"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "b": {
+        "corpus_rows_near": 6692,
+        "features_near": 5234,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "restaurant",
+          "confidence_rank": 254,
+          "feature_uuid": "8a39e1210c834a7082f44cf5558b8a7d",
+          "primary_name": "Noma",
+          "prominence_rank": 0
+        },
+        "tokens": [
+          {
+            "contenders": 389,
+            "rank": 38,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "noma"
+          },
+          {
+            "contenders": 482,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "copenhagen"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "case_id": "gold:named_poi:noma",
+      "direction": "SAME",
+      "exact_tier": true,
+      "expected_name": "Noma",
+      "production_hit": true,
+      "query": "Noma Copenhagen",
+      "strata": {
+        "poi_family": "food_drink",
+        "scope": "independent"
+      },
+      "transition": "EVICTED->EVICTED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 32205,
+        "features_near": 29939,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "chinese_restaurant",
+          "confidence_rank": 235,
+          "feature_uuid": "5605a6da7f6248e6ae4c3450bf4581f6",
+          "primary_name": "Din Tai Fung",
+          "prominence_rank": 0
+        },
+        "tokens": [],
+        "verdict": "QUERY_REFUSED"
+      },
+      "b": {
+        "corpus_rows_near": 31513,
+        "features_near": 29443,
+        "match_strength": "ALT_NAME_ONLY",
+        "target": {
+          "category": "chinese_restaurant",
+          "confidence_rank": 254,
+          "feature_uuid": "7d77d2a9638f49c6be4b77ef93919534",
+          "primary_name": "\u9f0e\u6cf0\u8c50",
+          "prominence_rank": 0
+        },
+        "tokens": [],
+        "verdict": "QUERY_REFUSED"
+      },
+      "case_id": "gold:brand_branch:din-tai-fung-xinyi",
+      "direction": "SAME",
+      "exact_tier": false,
+      "expected_name": "Din Tai Fung",
+      "production_hit": false,
+      "query": "Din Tai Fung Xinyi",
+      "strata": {
+        "poi_family": "food_drink",
+        "scope": "brand_branch"
+      },
+      "transition": "QUERY_REFUSED->QUERY_REFUSED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 39917,
+        "features_near": 24906,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "cafe",
+          "confidence_rank": 254,
+          "feature_uuid": "17ddb220ee084f7f9d8d8fd7c7c5953b",
+          "primary_name": "Caf\u00e9 de Flore",
+          "prominence_rank": 0
+        },
+        "tokens": [],
+        "verdict": "QUERY_REFUSED"
+      },
+      "b": {
+        "corpus_rows_near": 37548,
+        "features_near": 23950,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "cafe",
+          "confidence_rank": 254,
+          "feature_uuid": "17ddb220ee084f7f9d8d8fd7c7c5953b",
+          "primary_name": "Caf\u00e9 de Flore",
+          "prominence_rank": 0
+        },
+        "tokens": [],
+        "verdict": "QUERY_REFUSED"
+      },
+      "case_id": "gold:named_poi:cafe-de-flore",
+      "direction": "SAME",
+      "exact_tier": true,
+      "expected_name": "Cafe de Flore",
+      "production_hit": true,
+      "query": "Cafe de Flore Paris",
+      "strata": {
+        "poi_family": "food_drink",
+        "scope": "independent"
+      },
+      "transition": "QUERY_REFUSED->QUERY_REFUSED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 32616,
+        "features_near": 19038,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "department_store",
+          "confidence_rank": 255,
+          "feature_uuid": "fe52c66c9aed4158b4c0f161758cd156",
+          "primary_name": "Harrods",
+          "prominence_rank": 0
+        },
+        "tokens": [
+          {
+            "contenders": 81,
+            "rank": 20,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "harrods"
+          },
+          {
+            "contenders": 890,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "london"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "b": {
+        "corpus_rows_near": 29344,
+        "features_near": 16026,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "department_store",
+          "confidence_rank": 255,
+          "feature_uuid": "fe52c66c9aed4158b4c0f161758cd156",
+          "primary_name": "Harrods",
+          "prominence_rank": 0
+        },
+        "tokens": [
+          {
+            "contenders": 69,
+            "rank": 22,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "harrods"
+          },
+          {
+            "contenders": 878,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "london"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "case_id": "gold:named_poi:harrods",
+      "direction": "SAME",
+      "exact_tier": true,
+      "expected_name": "Harrods",
+      "production_hit": false,
+      "query": "Harrods London",
+      "strata": {
+        "poi_family": "retail",
+        "scope": "independent"
+      },
+      "transition": "EVICTED->EVICTED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 15850,
+        "features_near": 12337,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "department_store",
+          "confidence_rank": 255,
+          "feature_uuid": "f5906d0f91e2410180ad3ac775091884",
+          "primary_name": "KaDeWe",
+          "prominence_rank": 0
+        },
+        "tokens": [
+          {
+            "contenders": 12,
+            "rank": 3,
+            "reason": null,
+            "survives": true,
+            "token": "kadewe"
+          },
+          {
+            "contenders": 845,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "berlin"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "b": {
+        "corpus_rows_near": 14283,
+        "features_near": 11201,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "department_store",
+          "confidence_rank": 255,
+          "feature_uuid": "f5906d0f91e2410180ad3ac775091884",
+          "primary_name": "KaDeWe",
+          "prominence_rank": 0
+        },
+        "tokens": [
+          {
+            "contenders": 13,
+            "rank": 4,
+            "reason": null,
+            "survives": true,
+            "token": "kadewe"
+          },
+          {
+            "contenders": 821,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "berlin"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "case_id": "gold:named_poi:kadewe",
+      "direction": "SAME",
+      "exact_tier": true,
+      "expected_name": "KaDeWe",
+      "production_hit": true,
+      "query": "KaDeWe Berlin",
+      "strata": {
+        "poi_family": "retail",
+        "scope": "independent"
+      },
+      "transition": "EVICTED->EVICTED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 5833,
+        "features_near": 3880,
+        "match_strength": "ALT_NAME_CONTAINMENT",
+        "target": {
+          "category": "trailer_rentals",
+          "confidence_rank": 255,
+          "feature_uuid": "39d686fdd6a74b2aadb0772a9d6d8f96",
+          "primary_name": "Freetrailer PKW Anh\u00e4ngervermietung - IKEA Berlin-Lichtenberg",
+          "prominence_rank": 0
+        },
+        "tokens": [
+          {
+            "contenders": 751,
+            "rank": 86,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "ikea"
+          },
+          {
+            "contenders": 105,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "lichtenberg"
+          },
+          {
+            "contenders": 845,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "berlin"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "b": {
+        "corpus_rows_near": 5279,
+        "features_near": 3597,
+        "match_strength": "ALT_NAME_CONTAINMENT",
+        "target": {
+          "category": "trailer_rentals",
+          "confidence_rank": 255,
+          "feature_uuid": "39d686fdd6a74b2aadb0772a9d6d8f96",
+          "primary_name": "Freetrailer PKW Anh\u00e4ngervermietung - IKEA Berlin-Lichtenberg",
+          "prominence_rank": 0
+        },
+        "tokens": [
+          {
+            "contenders": 694,
+            "rank": 90,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "ikea"
+          },
+          {
+            "contenders": 85,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "lichtenberg"
+          },
+          {
+            "contenders": 821,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "berlin"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "case_id": "gold:brand_branch:ikea-berlin-lichtenberg",
+      "direction": "SAME",
+      "exact_tier": false,
+      "expected_name": "IKEA",
+      "production_hit": false,
+      "query": "IKEA Lichtenberg Berlin",
+      "strata": {
+        "poi_family": "retail",
+        "scope": "brand_branch"
+      },
+      "transition": "EVICTED->EVICTED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 52980,
+        "features_near": 48317,
+        "match_strength": "ALT_NAME_ONLY",
+        "target": null,
+        "tokens": [],
+        "verdict": "NOT_ADMITTED"
+      },
+      "b": {
+        "corpus_rows_near": 47832,
+        "features_near": 43734,
+        "match_strength": "NONE",
+        "target": null,
+        "tokens": [],
+        "verdict": "ABSENT"
+      },
+      "case_id": "gold:brand_branch:apple-marunouchi",
+      "direction": "LOSS",
+      "exact_tier": false,
+      "expected_name": "Apple Marunouchi",
+      "production_hit": false,
+      "query": "Apple Marunouchi Tokyo",
+      "strata": {
+        "poi_family": "retail",
+        "scope": "brand_branch"
+      },
+      "transition": "NOT_ADMITTED->ABSENT"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 33582,
+        "features_near": 21893,
+        "match_strength": "ALT_NAME_ONLY",
+        "target": {
+          "category": "hotel",
+          "confidence_rank": 208,
+          "feature_uuid": "8b3965e2d891414ea56c56edffa4e419",
+          "primary_name": "\u840a\u4f5b\u58eb\u9152\u5e97",
+          "prominence_rank": 0
+        },
+        "tokens": [
+          {
+            "contenders": 291,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "raffles"
+          },
+          {
+            "contenders": 890,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "hotel"
+          },
+          {
+            "contenders": 796,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "singapore"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "b": {
+        "corpus_rows_near": 31934,
+        "features_near": 20943,
+        "match_strength": "CONTAINMENT_ONLY",
+        "target": {
+          "category": "museum",
+          "confidence_rank": 236,
+          "feature_uuid": "18a227474763419da6779db781ef19f7",
+          "primary_name": "Raffles Hotel Museum",
+          "prominence_rank": 217
+        },
+        "tokens": [
+          {
+            "contenders": 250,
+            "rank": 4,
+            "reason": null,
+            "survives": true,
+            "token": "raffles"
+          },
+          {
+            "contenders": 880,
+            "rank": 124,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "hotel"
+          },
+          {
+            "contenders": 623,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "singapore"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "case_id": "gold:named_poi:raffles-singapore",
+      "direction": "SAME",
+      "exact_tier": false,
+      "expected_name": "Raffles Hotel",
+      "production_hit": true,
+      "query": "Raffles Hotel Singapore",
+      "strata": {
+        "poi_family": "lodging",
+        "scope": "independent"
+      },
+      "transition": "EVICTED->EVICTED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 24669,
+        "features_near": 18933,
+        "match_strength": "CONTAINMENT_ONLY",
+        "target": {
+          "category": "hotel",
+          "confidence_rank": 255,
+          "feature_uuid": "823c67c2222e4629abf9e23ce74c676f",
+          "primary_name": "Hotel Sacher Vienna",
+          "prominence_rank": 0
+        },
+        "tokens": [
+          {
+            "contenders": 890,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "hotel"
+          },
+          {
+            "contenders": 100,
+            "rank": 8,
+            "reason": null,
+            "survives": true,
+            "token": "sacher"
+          },
+          {
+            "contenders": 747,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "vienna"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "b": {
+        "corpus_rows_near": 22589,
+        "features_near": 17732,
+        "match_strength": "EXACT",
+        "target": null,
+        "tokens": [],
+        "verdict": "NOT_ADMITTED"
+      },
+      "case_id": "gold:named_poi:hotel-sacher-vienna",
+      "direction": "LOSS",
+      "exact_tier": false,
+      "expected_name": "Hotel Sacher",
+      "production_hit": true,
+      "query": "Hotel Sacher Vienna",
+      "strata": {
+        "poi_family": "lodging",
+        "scope": "independent"
+      },
+      "transition": "EVICTED->NOT_ADMITTED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 68317,
+        "features_near": 41613,
+        "match_strength": "CONTAINMENT_ONLY",
+        "target": {
+          "category": "landmark_and_historical_building",
+          "confidence_rank": 254,
+          "feature_uuid": "270ab019ad194e4ea936dbc3ca72c9ae",
+          "primary_name": "The Ritz Plaza",
+          "prominence_rank": 89
+        },
+        "tokens": [],
+        "verdict": "QUERY_REFUSED"
+      },
+      "b": {
+        "corpus_rows_near": 66533,
+        "features_near": 39888,
+        "match_strength": "CONTAINMENT_ONLY",
+        "target": {
+          "category": "landmark_and_historical_building",
+          "confidence_rank": 253,
+          "feature_uuid": "270ab019ad194e4ea936dbc3ca72c9ae",
+          "primary_name": "The Ritz Plaza",
+          "prominence_rank": 89
+        },
+        "tokens": [],
+        "verdict": "QUERY_REFUSED"
+      },
+      "case_id": "gold:named_poi:plaza-hotel",
+      "direction": "SAME",
+      "exact_tier": false,
+      "expected_name": "The Plaza",
+      "production_hit": true,
+      "query": "Plaza Hotel New York",
+      "strata": {
+        "poi_family": "lodging",
+        "scope": "independent"
+      },
+      "transition": "QUERY_REFUSED->QUERY_REFUSED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 3437,
+        "features_near": 2023,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "hotel",
+          "confidence_rank": 255,
+          "feature_uuid": "3aa4b82a919b4969940ec41bffbb0775",
+          "primary_name": "Novotel Monte Carlo",
+          "prominence_rank": 0
+        },
+        "tokens": [
+          {
+            "contenders": 545,
+            "rank": 93,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "novotel"
+          },
+          {
+            "contenders": 888,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "monte"
+          },
+          {
+            "contenders": 838,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "carlo"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "b": {
+        "corpus_rows_near": 3283,
+        "features_near": 2014,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "hotel",
+          "confidence_rank": 255,
+          "feature_uuid": "3aa4b82a919b4969940ec41bffbb0775",
+          "primary_name": "Novotel Monte Carlo",
+          "prominence_rank": 0
+        },
+        "tokens": [
+          {
+            "contenders": 500,
+            "rank": 91,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "novotel"
+          },
+          {
+            "contenders": 876,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "monte"
+          },
+          {
+            "contenders": 818,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "carlo"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "case_id": "gold:named_poi:novotel-monte-carlo",
+      "direction": "SAME",
+      "exact_tier": true,
+      "expected_name": "Novotel Monte Carlo",
+      "production_hit": false,
+      "query": "Novotel Monte Carlo",
+      "strata": {
+        "poi_family": "lodging",
+        "scope": "brand_branch"
+      },
+      "transition": "EVICTED->EVICTED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 4360,
+        "features_near": 2140,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "medical_center",
+          "confidence_rank": 250,
+          "feature_uuid": "711284b154144aaf922a37f40d1f61e4",
+          "primary_name": "Mayo Clinic",
+          "prominence_rank": 51
+        },
+        "tokens": [
+          {
+            "contenders": 778,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "mayo"
+          },
+          {
+            "contenders": 890,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "clinic"
+          },
+          {
+            "contenders": 437,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "rochester"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "b": {
+        "corpus_rows_near": 3937,
+        "features_near": 1951,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "hospital",
+          "confidence_rank": 250,
+          "feature_uuid": "711284b154144aaf922a37f40d1f61e4",
+          "primary_name": "Mayo Clinic",
+          "prominence_rank": 102
+        },
+        "tokens": [
+          {
+            "contenders": 753,
+            "rank": 213,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "mayo"
+          },
+          {
+            "contenders": 880,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "clinic"
+          },
+          {
+            "contenders": 414,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "rochester"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "case_id": "gold:named_poi:mayo-clinic-rochester",
+      "direction": "SAME",
+      "exact_tier": true,
+      "expected_name": "Mayo Clinic",
+      "production_hit": false,
+      "query": "Mayo Clinic Rochester",
+      "strata": {
+        "poi_family": "healthcare",
+        "scope": "brand_branch"
+      },
+      "transition": "EVICTED->EVICTED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 30757,
+        "features_near": 19166,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "hospital",
+          "confidence_rank": 221,
+          "feature_uuid": "eae349ef31d1437cb77f464a7400fe00",
+          "primary_name": "SickKids",
+          "prominence_rank": 102
+        },
+        "tokens": [
+          {
+            "contenders": 12,
+            "rank": 3,
+            "reason": null,
+            "survives": true,
+            "token": "sickkids"
+          },
+          {
+            "contenders": 516,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "toronto"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "b": {
+        "corpus_rows_near": 28507,
+        "features_near": 17233,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "hospital",
+          "confidence_rank": 254,
+          "feature_uuid": "eae349ef31d1437cb77f464a7400fe00",
+          "primary_name": "SickKids",
+          "prominence_rank": 102
+        },
+        "tokens": [
+          {
+            "contenders": 9,
+            "rank": 1,
+            "reason": null,
+            "survives": true,
+            "token": "sickkids"
+          },
+          {
+            "contenders": 430,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "toronto"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "case_id": "gold:named_poi:sickkids-toronto",
+      "direction": "SAME",
+      "exact_tier": true,
+      "expected_name": "SickKids",
+      "production_hit": true,
+      "query": "SickKids Toronto",
+      "strata": {
+        "poi_family": "healthcare",
+        "scope": "independent"
+      },
+      "transition": "EVICTED->EVICTED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 8320,
+        "features_near": 4518,
+        "match_strength": "ALT_NAME_CONTAINMENT",
+        "target": {
+          "category": "hospital",
+          "confidence_rank": 193,
+          "feature_uuid": "3259791c6a5a4930854706ae724342d6",
+          "primary_name": "Kelpie Ward, Royal Childrens Hospital",
+          "prominence_rank": 102
+        },
+        "tokens": [],
+        "verdict": "QUERY_REFUSED"
+      },
+      "b": {
+        "corpus_rows_near": 7792,
+        "features_near": 4130,
+        "match_strength": "ALT_NAME_CONTAINMENT",
+        "target": {
+          "category": "hospital",
+          "confidence_rank": 214,
+          "feature_uuid": "3259791c6a5a4930854706ae724342d6",
+          "primary_name": "Kelpie Ward, Royal Childrens Hospital",
+          "prominence_rank": 102
+        },
+        "tokens": [],
+        "verdict": "QUERY_REFUSED"
+      },
+      "case_id": "gold:named_poi:royal-childrens-melbourne",
+      "direction": "SAME",
+      "exact_tier": false,
+      "expected_name": "The Royal Children's Hospital",
+      "production_hit": false,
+      "query": "Royal Childrens Hospital Melbourne",
+      "strata": {
+        "poi_family": "healthcare",
+        "scope": "independent"
+      },
+      "transition": "QUERY_REFUSED->QUERY_REFUSED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 42258,
+        "features_near": 27306,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "hospital",
+          "confidence_rank": 254,
+          "feature_uuid": "96e65ac81430419eac643f7405b04c29",
+          "primary_name": "Singapore General Hospital",
+          "prominence_rank": 102
+        },
+        "tokens": [
+          {
+            "contenders": 796,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "singapore"
+          },
+          {
+            "contenders": 890,
+            "rank": 716,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "general"
+          },
+          {
+            "contenders": 890,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "hospital"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "b": {
+        "corpus_rows_near": 39974,
+        "features_near": 26087,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "hospital",
+          "confidence_rank": 254,
+          "feature_uuid": "96e65ac81430419eac643f7405b04c29",
+          "primary_name": "Singapore General Hospital",
+          "prominence_rank": 102
+        },
+        "tokens": [
+          {
+            "contenders": 623,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "singapore"
+          },
+          {
+            "contenders": 880,
+            "rank": 687,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "general"
+          },
+          {
+            "contenders": 880,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "hospital"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "case_id": "gold:named_poi:singapore-general-hospital",
+      "direction": "SAME",
+      "exact_tier": true,
+      "expected_name": "Singapore General Hospital",
+      "production_hit": true,
+      "query": "Singapore General Hospital",
+      "strata": {
+        "poi_family": "healthcare",
+        "scope": "independent"
+      },
+      "transition": "EVICTED->EVICTED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 15773,
+        "features_near": 9404,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "library",
+          "confidence_rank": 204,
+          "feature_uuid": "62106118b51f4c4eb84ca645320cc1b9",
+          "primary_name": "Seattle Central library",
+          "prominence_rank": 102
+        },
+        "tokens": [
+          {
+            "contenders": 495,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "seattle"
+          },
+          {
+            "contenders": 890,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "central"
+          },
+          {
+            "contenders": 890,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "library"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "b": {
+        "corpus_rows_near": 14708,
+        "features_near": 8633,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "library",
+          "confidence_rank": 185,
+          "feature_uuid": "62106118b51f4c4eb84ca645320cc1b9",
+          "primary_name": "Seattle Central library",
+          "prominence_rank": 102
+        },
+        "tokens": [
+          {
+            "contenders": 389,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "seattle"
+          },
+          {
+            "contenders": 880,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "central"
+          },
+          {
+            "contenders": 880,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "library"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "case_id": "gold:named_poi:seattle-central-library",
+      "direction": "SAME",
+      "exact_tier": true,
+      "expected_name": "Seattle Central Library",
+      "production_hit": true,
+      "query": "Seattle Central Library",
+      "strata": {
+        "poi_family": "civic_transit",
+        "scope": "independent"
+      },
+      "transition": "EVICTED->EVICTED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 14230,
+        "features_near": 8626,
+        "match_strength": "EXACT",
+        "target": null,
+        "tokens": [],
+        "verdict": "NOT_ADMITTED"
+      },
+      "b": {
+        "corpus_rows_near": 13442,
+        "features_near": 8214,
+        "match_strength": "CONTAINMENT_ONLY",
+        "target": null,
+        "tokens": [],
+        "verdict": "NOT_ADMITTED"
+      },
+      "case_id": "gold:named_poi:gpo-dublin",
+      "direction": "SAME",
+      "exact_tier": false,
+      "expected_name": "General Post Office",
+      "production_hit": false,
+      "query": "GPO Dublin",
+      "strata": {
+        "poi_family": "civic_transit",
+        "scope": "independent"
+      },
+      "transition": "NOT_ADMITTED->NOT_ADMITTED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 5511,
+        "features_near": 3087,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "library",
+          "confidence_rank": 233,
+          "feature_uuid": "214b232e0b9c4804aa1d9264e57018b7",
+          "primary_name": "Burton Barr Central Library",
+          "prominence_rank": 102
+        },
+        "tokens": [],
+        "verdict": "QUERY_REFUSED"
+      },
+      "b": {
+        "corpus_rows_near": 5116,
+        "features_near": 2898,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "library",
+          "confidence_rank": 233,
+          "feature_uuid": "214b232e0b9c4804aa1d9264e57018b7",
+          "primary_name": "Burton Barr Central Library",
+          "prominence_rank": 102
+        },
+        "tokens": [],
+        "verdict": "QUERY_REFUSED"
+      },
+      "case_id": "gold:named_poi:burton-barr-library",
+      "direction": "SAME",
+      "exact_tier": true,
+      "expected_name": "Burton Barr Central Library",
+      "production_hit": true,
+      "query": "Burton Barr Library Phoenix",
+      "strata": {
+        "poi_family": "civic_transit",
+        "scope": "independent"
+      },
+      "transition": "QUERY_REFUSED->QUERY_REFUSED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 23819,
+        "features_near": 14849,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "train_station",
+          "confidence_rank": 251,
+          "feature_uuid": "018a7bb9d35349d1a5623007b7b2a6dd",
+          "primary_name": "Union Station",
+          "prominence_rank": 140
+        },
+        "tokens": [
+          {
+            "contenders": 890,
+            "rank": 314,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "union"
+          },
+          {
+            "contenders": 890,
+            "rank": 686,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "station"
+          },
+          {
+            "contenders": 516,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "toronto"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "b": {
+        "corpus_rows_near": 22180,
+        "features_near": 13437,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "train_station",
+          "confidence_rank": 255,
+          "feature_uuid": "018a7bb9d35349d1a5623007b7b2a6dd",
+          "primary_name": "Union Station",
+          "prominence_rank": 140
+        },
+        "tokens": [
+          {
+            "contenders": 880,
+            "rank": 163,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "union"
+          },
+          {
+            "contenders": 880,
+            "rank": 567,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "station"
+          },
+          {
+            "contenders": 430,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "toronto"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "case_id": "gold:named_poi:union-station-toronto",
+      "direction": "SAME",
+      "exact_tier": true,
+      "expected_name": "Union Station",
+      "production_hit": true,
+      "query": "Union Station Toronto",
+      "strata": {
+        "poi_family": "civic_transit",
+        "scope": "independent"
+      },
+      "transition": "EVICTED->EVICTED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 52449,
+        "features_near": 30303,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "opera_and_ballet",
+          "confidence_rank": 255,
+          "feature_uuid": "49a93fe0f3e447398a91be57f4a411b5",
+          "primary_name": "Sydney Opera House",
+          "prominence_rank": 115
+        },
+        "tokens": [
+          {
+            "contenders": 776,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "sydney"
+          },
+          {
+            "contenders": 890,
+            "rank": 121,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "opera"
+          },
+          {
+            "contenders": 890,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "house"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "b": {
+        "corpus_rows_near": 49100,
+        "features_near": 25839,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "theatre",
+          "confidence_rank": 255,
+          "feature_uuid": "49a93fe0f3e447398a91be57f4a411b5",
+          "primary_name": "Sydney Opera House",
+          "prominence_rank": 115
+        },
+        "tokens": [
+          {
+            "contenders": 677,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "sydney"
+          },
+          {
+            "contenders": 876,
+            "rank": 100,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "opera"
+          },
+          {
+            "contenders": 880,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "house"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "case_id": "gold:inverse_seam:sydney-opera-house",
+      "direction": "SAME",
+      "exact_tier": true,
+      "expected_name": "Sydney Opera House",
+      "production_hit": true,
+      "query": "Sydney Opera House",
+      "strata": {},
+      "transition": "EVICTED->EVICTED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 4069,
+        "features_near": 2505,
+        "match_strength": "CONTAINMENT_ONLY",
+        "target": {
+          "category": "landmark_and_historical_building",
+          "confidence_rank": 248,
+          "feature_uuid": "c4cd7046ff984f148003efec6f9f308f",
+          "primary_name": "Golden Gate Bridge Observation Deck",
+          "prominence_rank": 128
+        },
+        "tokens": [
+          {
+            "contenders": 890,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "golden"
+          },
+          {
+            "contenders": 890,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "gate"
+          },
+          {
+            "contenders": 890,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "bridge"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "b": {
+        "corpus_rows_near": 3825,
+        "features_near": 2296,
+        "match_strength": "CONTAINMENT_ONLY",
+        "target": {
+          "category": "landmark_and_historical_building",
+          "confidence_rank": 248,
+          "feature_uuid": "c4cd7046ff984f148003efec6f9f308f",
+          "primary_name": "Golden Gate Bridge Observation Deck",
+          "prominence_rank": 128
+        },
+        "tokens": [
+          {
+            "contenders": 880,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "golden"
+          },
+          {
+            "contenders": 880,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "gate"
+          },
+          {
+            "contenders": 880,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "bridge"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "case_id": "gold:inverse_seam:golden-gate-bridge",
+      "direction": "SAME",
+      "exact_tier": false,
+      "expected_name": "Golden Gate Bridge",
+      "production_hit": false,
+      "query": "Golden Gate Bridge",
+      "strata": {},
+      "transition": "EVICTED->EVICTED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 3696,
+        "features_near": 2177,
+        "match_strength": "CONTAINMENT_ONLY",
+        "target": {
+          "category": "casino",
+          "confidence_rank": 157,
+          "feature_uuid": "16fcca67e062435eb1dba2daffa08b60",
+          "primary_name": "Monte Carlo Casino",
+          "prominence_rank": 0
+        },
+        "tokens": [],
+        "verdict": "QUERY_REFUSED"
+      },
+      "b": {
+        "corpus_rows_near": 3531,
+        "features_near": 2173,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "casino",
+          "confidence_rank": 254,
+          "feature_uuid": "bfb928782ecd422ba0ad80acf17e36e8",
+          "primary_name": "Casino de Monte-Carlo",
+          "prominence_rank": 45
+        },
+        "tokens": [],
+        "verdict": "QUERY_REFUSED"
+      },
+      "case_id": "gold:inverse_seam:casino-de-monte-carlo",
+      "direction": "SAME",
+      "exact_tier": false,
+      "expected_name": "Casino de Monte-Carlo",
+      "production_hit": false,
+      "query": "Casino de Monte-Carlo",
+      "strata": {},
+      "transition": "QUERY_REFUSED->QUERY_REFUSED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 125348,
+        "features_near": 75203,
+        "match_strength": "CONTAINMENT_ONLY",
+        "target": {
+          "category": "indian_restaurant",
+          "confidence_rank": 254,
+          "feature_uuid": "1254cc94b39841da99fc2bf4ce46eda7",
+          "primary_name": "Spice Symphony Times Square",
+          "prominence_rank": 0
+        },
+        "tokens": [
+          {
+            "contenders": 890,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "times"
+          },
+          {
+            "contenders": 890,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "square"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "b": {
+        "corpus_rows_near": 122173,
+        "features_near": 72226,
+        "match_strength": "CONTAINMENT_ONLY",
+        "target": {
+          "category": "history_museum",
+          "confidence_rank": 235,
+          "feature_uuid": "cf6cd9ddb4cc4a05aa5e63a4de3c9b35",
+          "primary_name": "Discovery Times Square",
+          "prominence_rank": 217
+        },
+        "tokens": [
+          {
+            "contenders": 880,
+            "rank": 11,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "times"
+          },
+          {
+            "contenders": 880,
+            "rank": 128,
+            "reason": "EVICTED_BY_RANK",
+            "survives": false,
+            "token": "square"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "case_id": "gold:inverse_seam:times-square",
+      "direction": "SAME",
+      "exact_tier": false,
+      "expected_name": "Times Square",
+      "production_hit": false,
+      "query": "Times Square",
+      "strata": {},
+      "transition": "EVICTED->EVICTED"
+    },
+    {
+      "a": {
+        "corpus_rows_near": 119525,
+        "features_near": 72410,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "art_museum",
+          "confidence_rank": 240,
+          "feature_uuid": "60f4fa7f6eec43628bc7fcb07d56d1a6",
+          "primary_name": "Louvre Museum",
+          "prominence_rank": 217
+        },
+        "tokens": [
+          {
+            "contenders": 334,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "louvre"
+          },
+          {
+            "contenders": 890,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "museum"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "b": {
+        "corpus_rows_near": 113857,
+        "features_near": 70267,
+        "match_strength": "EXACT",
+        "target": {
+          "category": "art_museum",
+          "confidence_rank": 247,
+          "feature_uuid": "60f4fa7f6eec43628bc7fcb07d56d1a6",
+          "primary_name": "Louvre Museum",
+          "prominence_rank": 217
+        },
+        "tokens": [
+          {
+            "contenders": 329,
+            "rank": 9,
+            "reason": null,
+            "survives": true,
+            "token": "louvre"
+          },
+          {
+            "contenders": 880,
+            "rank": null,
+            "reason": "ABSENT_FROM_TOKEN",
+            "survives": false,
+            "token": "museum"
+          }
+        ],
+        "verdict": "EVICTED"
+      },
+      "case_id": "gold:inverse_seam:louvre-museum",
+      "direction": "SAME",
+      "exact_tier": true,
+      "expected_name": "Louvre Museum",
+      "production_hit": false,
+      "query": "Louvre Museum",
+      "strata": {},
+      "transition": "EVICTED->EVICTED"
+    }
+  ],
+  "cases_file": "benchmarks/v2-forward-gold-cases-v1.json",
+  "head_query_token_cap": 3,
+  "head_result_cap": 10,
+  "limitations": [
+    "Models the HEAD TOKEN-INTERSECTION lane only. The entity-phrase lane (e2:/e3:) and the prefix-head fallback can serve a record this probe calls EVICTED, so SERVABLE means 'reachable by the plain head path', not 'the deployed Worker returns it'.",
+    "Candidate packs are ALREADY capped per map task, so rank <= HEAD_RESULT_CAP is exact while a rank above it is a LOWER BOUND. The SERVABLE/EVICTED split only tests rank <= cap, so the split is sound; the printed rank magnitudes are not.",
+    "QUERY_REFUSED is release-invariant by construction and can never produce a delta; it is reported so it cannot masquerade as one.",
+    "ABSENT means absent near the expected point under a matching name. A badly geocoded gold coordinate looks identical.",
+    "Weak (containment / alt-name) tiers are carried but excluded from the headline delta."
+  ],
+  "release_a": "2026-06-17.0",
+  "release_b": "2026-07-22.0",
+  "run_file": "benchmarks/2026-08-04-forward-gold-post-additive-wave.json",
+  "schema": "overture-places-release-move-recall-delta-v1",
+  "summary": {
+    "all_cases": {
+      "cases": 45,
+      "gain": 0,
+      "loss": 2,
+      "same": 43,
+      "servable_a": 2,
+      "servable_b": 2
+    },
+    "exact_tier_only": {
+      "cases": 32,
+      "gain": 0,
+      "loss": 0,
+      "same": 32,
+      "servable_a": 2,
+      "servable_b": 2
+    },
+    "production_hits": {
+      "cases": 27,
+      "gain": 0,
+      "loss": 0,
+      "same": 27,
+      "servable_a": 2,
+      "servable_b": 2
+    },
+    "production_misses": {
+      "cases": 5,
+      "gain": 0,
+      "loss": 0,
+      "same": 5,
+      "servable_a": 0,
+      "servable_b": 0
+    }
+  },
+  "transition_matrix": {
+    "EVICTED->EVICTED": 31,
+    "EVICTED->NOT_ADMITTED": 1,
+    "NOT_ADMITTED->ABSENT": 1,
+    "NOT_ADMITTED->NOT_ADMITTED": 1,
+    "QUERY_REFUSED->QUERY_REFUSED": 9,
+    "SERVABLE->SERVABLE": 2
+  }
+}
