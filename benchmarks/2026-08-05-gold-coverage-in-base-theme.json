@@ -1,0 +1,757 @@
+{
+  "cases": [
+    {
+      "base": {
+        "class": "information",
+        "distance_km": 0.039,
+        "match_strength": "EXACT",
+        "name": "Tour Eiffel",
+        "names_common": 7,
+        "subtype": "pedestrian",
+        "type": "base/infrastructure",
+        "wikidata": null
+      },
+      "case_id": "gold:name:eiffel-tower",
+      "expected_name": "Eiffel Tower",
+      "places": {
+        "a": "EVICTED",
+        "production_hit": true
+      },
+      "tolerance_km": 2.0
+    },
+    {
+      "base": {
+        "class": "information",
+        "distance_km": 0.039,
+        "match_strength": "EXACT",
+        "name": "Tour Eiffel",
+        "names_common": 7,
+        "subtype": "pedestrian",
+        "type": "base/infrastructure",
+        "wikidata": null
+      },
+      "case_id": "gold:name_locality:eiffel-tower",
+      "expected_name": "Eiffel Tower",
+      "places": {
+        "a": "EVICTED",
+        "production_hit": true
+      },
+      "tolerance_km": 2.0
+    },
+    {
+      "base": {
+        "class": "national_park",
+        "distance_km": 0.64,
+        "match_strength": "EXACT",
+        "name": "Statue of Liberty National Monument",
+        "names_common": 1,
+        "subtype": "protected",
+        "type": "base/land_use",
+        "wikidata": "Q359939"
+      },
+      "case_id": "gold:name:statue-of-liberty",
+      "expected_name": "Statue of Liberty",
+      "places": {
+        "a": "EVICTED",
+        "production_hit": true
+      },
+      "tolerance_km": 2.0
+    },
+    {
+      "base": {
+        "class": "national_park",
+        "distance_km": 0.64,
+        "match_strength": "EXACT",
+        "name": "Statue of Liberty National Monument",
+        "names_common": 1,
+        "subtype": "protected",
+        "type": "base/land_use",
+        "wikidata": "Q359939"
+      },
+      "case_id": "gold:name_locality:statue-of-liberty",
+      "expected_name": "Statue of Liberty",
+      "places": {
+        "a": "QUERY_REFUSED",
+        "production_hit": true
+      },
+      "tolerance_km": 2.0
+    },
+    {
+      "base": {
+        "class": "subway_station",
+        "distance_km": 0.14,
+        "match_strength": "EXACT",
+        "name": "Colosseo",
+        "names_common": 0,
+        "subtype": "transit",
+        "type": "base/infrastructure",
+        "wikidata": "Q1229235"
+      },
+      "case_id": "gold:name:colosseum",
+      "expected_name": "Colosseum",
+      "places": {
+        "a": "SERVABLE",
+        "production_hit": true
+      },
+      "tolerance_km": 2.0
+    },
+    {
+      "base": {
+        "class": "subway_station",
+        "distance_km": 0.14,
+        "match_strength": "EXACT",
+        "name": "Colosseo",
+        "names_common": 0,
+        "subtype": "transit",
+        "type": "base/infrastructure",
+        "wikidata": "Q1229235"
+      },
+      "case_id": "gold:name_locality:colosseum",
+      "expected_name": "Colosseum",
+      "places": {
+        "a": "EVICTED",
+        "production_hit": true
+      },
+      "tolerance_km": 2.0
+    },
+    {
+      "base": {
+        "class": "bell_tower",
+        "distance_km": 0.002,
+        "match_strength": "EXACT",
+        "name": "Big Ben",
+        "names_common": 5,
+        "subtype": "tower",
+        "type": "base/infrastructure",
+        "wikidata": "Q37733713"
+      },
+      "case_id": "gold:name:big-ben",
+      "expected_name": "Big Ben",
+      "places": {
+        "a": "EVICTED",
+        "production_hit": true
+      },
+      "tolerance_km": 0.25
+    },
+    {
+      "base": {
+        "class": "bell_tower",
+        "distance_km": 0.002,
+        "match_strength": "EXACT",
+        "name": "Big Ben",
+        "names_common": 5,
+        "subtype": "tower",
+        "type": "base/infrastructure",
+        "wikidata": "Q37733713"
+      },
+      "case_id": "gold:name_locality:big-ben",
+      "expected_name": "Big Ben",
+      "places": {
+        "a": "EVICTED",
+        "production_hit": true
+      },
+      "tolerance_km": 0.25
+    },
+    {
+      "base": {
+        "class": "subway_station",
+        "distance_km": 0.984,
+        "match_strength": "EXACT",
+        "name": "Taj Mahal",
+        "names_common": 1,
+        "subtype": "transit",
+        "type": "base/infrastructure",
+        "wikidata": "Q124759440"
+      },
+      "case_id": "gold:name:taj-mahal",
+      "expected_name": "Taj Mahal",
+      "places": {
+        "a": "EVICTED",
+        "production_hit": true
+      },
+      "tolerance_km": 2.0
+    },
+    {
+      "base": {
+        "class": "subway_station",
+        "distance_km": 0.984,
+        "match_strength": "EXACT",
+        "name": "Taj Mahal",
+        "names_common": 1,
+        "subtype": "transit",
+        "type": "base/infrastructure",
+        "wikidata": "Q124759440"
+      },
+      "case_id": "gold:name_locality:taj-mahal",
+      "expected_name": "Taj Mahal",
+      "places": {
+        "a": "EVICTED",
+        "production_hit": true
+      },
+      "tolerance_km": 2.0
+    },
+    {
+      "base": {
+        "class": "railway_station",
+        "distance_km": 2.416,
+        "match_strength": "CONTAINMENT",
+        "name": "Machu Picchu Pueblo",
+        "names_common": 0,
+        "subtype": "transit",
+        "type": "base/infrastructure",
+        "wikidata": "Q21082666"
+      },
+      "case_id": "gold:name:machu-picchu",
+      "expected_name": "Machu Picchu",
+      "places": {
+        "a": "SERVABLE",
+        "production_hit": true
+      },
+      "tolerance_km": 3.0
+    },
+    {
+      "base": {
+        "class": "railway_station",
+        "distance_km": 2.416,
+        "match_strength": "CONTAINMENT",
+        "name": "Machu Picchu Pueblo",
+        "names_common": 0,
+        "subtype": "transit",
+        "type": "base/infrastructure",
+        "wikidata": "Q21082666"
+      },
+      "case_id": "gold:name_locality:machu-picchu",
+      "expected_name": "Machu Picchu",
+      "places": {
+        "a": "EVICTED",
+        "production_hit": false
+      },
+      "tolerance_km": 2.0
+    },
+    {
+      "base": {
+        "class": "stop_position",
+        "distance_km": 0.063,
+        "match_strength": "EXACT",
+        "name": "Sagrada Fam\u00edlia",
+        "names_common": 5,
+        "subtype": "transit",
+        "type": "base/infrastructure",
+        "wikidata": "Q2548808"
+      },
+      "case_id": "gold:name:sagrada-familia",
+      "expected_name": "Sagrada Familia",
+      "places": {
+        "a": "EVICTED",
+        "production_hit": true
+      },
+      "tolerance_km": 2.0
+    },
+    {
+      "base": {
+        "class": "stop_position",
+        "distance_km": 0.063,
+        "match_strength": "EXACT",
+        "name": "Sagrada Fam\u00edlia",
+        "names_common": 5,
+        "subtype": "transit",
+        "type": "base/infrastructure",
+        "wikidata": "Q2548808"
+      },
+      "case_id": "gold:name_locality:sagrada-familia",
+      "expected_name": "Sagrada Familia",
+      "places": {
+        "a": "EVICTED",
+        "production_hit": true
+      },
+      "tolerance_km": 2.0
+    },
+    {
+      "base": null,
+      "case_id": "gold:name:empire-state-building",
+      "expected_name": "Empire State Building",
+      "places": {
+        "a": "EVICTED",
+        "production_hit": true
+      },
+      "tolerance_km": 2.0
+    },
+    {
+      "base": null,
+      "case_id": "gold:name_locality:empire-state-building",
+      "expected_name": "Empire State Building",
+      "places": {
+        "a": "QUERY_REFUSED",
+        "production_hit": true
+      },
+      "tolerance_km": 2.0
+    },
+    {
+      "base": {
+        "class": "information",
+        "distance_km": 0.183,
+        "match_strength": "EXACT",
+        "name": "Buckingham Palace",
+        "names_common": 0,
+        "subtype": "pedestrian",
+        "type": "base/infrastructure",
+        "wikidata": null
+      },
+      "case_id": "gold:name:buckingham-palace",
+      "expected_name": "Buckingham Palace",
+      "places": {
+        "a": "EVICTED",
+        "production_hit": true
+      },
+      "tolerance_km": 2.0
+    },
+    {
+      "base": {
+        "class": "information",
+        "distance_km": 0.183,
+        "match_strength": "EXACT",
+        "name": "Buckingham Palace",
+        "names_common": 0,
+        "subtype": "pedestrian",
+        "type": "base/infrastructure",
+        "wikidata": null
+      },
+      "case_id": "gold:name_locality:buckingham-palace",
+      "expected_name": "Buckingham Palace",
+      "places": {
+        "a": "EVICTED",
+        "production_hit": true
+      },
+      "tolerance_km": 2.0
+    },
+    {
+      "base": {
+        "class": "subway_station",
+        "distance_km": 0.225,
+        "match_strength": "EXACT",
+        "name": "Brandenburger Tor",
+        "names_common": 0,
+        "subtype": "transit",
+        "type": "base/infrastructure",
+        "wikidata": "Q477185"
+      },
+      "case_id": "gold:name:brandenburg-gate",
+      "expected_name": "Brandenburg Gate",
+      "places": {
+        "a": "EVICTED",
+        "production_hit": false
+      },
+      "tolerance_km": 2.0
+    },
+    {
+      "base": {
+        "class": "subway_station",
+        "distance_km": 0.225,
+        "match_strength": "EXACT",
+        "name": "Brandenburger Tor",
+        "names_common": 0,
+        "subtype": "transit",
+        "type": "base/infrastructure",
+        "wikidata": "Q477185"
+      },
+      "case_id": "gold:name_locality:brandenburg-gate",
+      "expected_name": "Brandenburg Gate",
+      "places": {
+        "a": "EVICTED",
+        "production_hit": false
+      },
+      "tolerance_km": 2.0
+    },
+    {
+      "base": null,
+      "case_id": "gold:named_poi:pike-place-chowder",
+      "expected_name": "Pike Place Chowder",
+      "places": {
+        "a": "QUERY_REFUSED",
+        "production_hit": true
+      },
+      "tolerance_km": 1.0
+    },
+    {
+      "base": null,
+      "case_id": "gold:named_poi:noma",
+      "expected_name": "Noma",
+      "places": {
+        "a": "EVICTED",
+        "production_hit": true
+      },
+      "tolerance_km": 1.0
+    },
+    {
+      "base": null,
+      "case_id": "gold:brand_branch:din-tai-fung-xinyi",
+      "expected_name": "Din Tai Fung",
+      "places": {
+        "a": "QUERY_REFUSED",
+        "production_hit": false
+      },
+      "tolerance_km": 1.0
+    },
+    {
+      "base": null,
+      "case_id": "gold:named_poi:cafe-de-flore",
+      "expected_name": "Cafe de Flore",
+      "places": {
+        "a": "QUERY_REFUSED",
+        "production_hit": true
+      },
+      "tolerance_km": 1.0
+    },
+    {
+      "base": {
+        "class": "bus_stop",
+        "distance_km": 0.05,
+        "match_strength": "EXACT",
+        "name": "Harrods",
+        "names_common": 0,
+        "subtype": "transit",
+        "type": "base/infrastructure",
+        "wikidata": null
+      },
+      "case_id": "gold:named_poi:harrods",
+      "expected_name": "Harrods",
+      "places": {
+        "a": "EVICTED",
+        "production_hit": false
+      },
+      "tolerance_km": 1.0
+    },
+    {
+      "base": null,
+      "case_id": "gold:named_poi:kadewe",
+      "expected_name": "KaDeWe",
+      "places": {
+        "a": "EVICTED",
+        "production_hit": true
+      },
+      "tolerance_km": 1.0
+    },
+    {
+      "base": {
+        "class": "railway_station",
+        "distance_km": 2.008,
+        "match_strength": "CONTAINMENT",
+        "name": "Berlin-Lichtenberg",
+        "names_common": 0,
+        "subtype": "transit",
+        "type": "base/infrastructure",
+        "wikidata": "Q634247"
+      },
+      "case_id": "gold:brand_branch:ikea-berlin-lichtenberg",
+      "expected_name": "IKEA",
+      "places": {
+        "a": "EVICTED",
+        "production_hit": false
+      },
+      "tolerance_km": 1.5
+    },
+    {
+      "base": null,
+      "case_id": "gold:brand_branch:apple-marunouchi",
+      "expected_name": "Apple Marunouchi",
+      "places": {
+        "a": "NOT_ADMITTED",
+        "production_hit": false
+      },
+      "tolerance_km": 1.0
+    },
+    {
+      "base": {
+        "class": "bus_stop",
+        "distance_km": 0.065,
+        "match_strength": "EXACT",
+        "name": "Raffles Hotel",
+        "names_common": 0,
+        "subtype": "transit",
+        "type": "base/infrastructure",
+        "wikidata": null
+      },
+      "case_id": "gold:named_poi:raffles-singapore",
+      "expected_name": "Raffles Hotel",
+      "places": {
+        "a": "EVICTED",
+        "production_hit": true
+      },
+      "tolerance_km": 1.0
+    },
+    {
+      "base": null,
+      "case_id": "gold:named_poi:hotel-sacher-vienna",
+      "expected_name": "Hotel Sacher",
+      "places": {
+        "a": "EVICTED",
+        "production_hit": true
+      },
+      "tolerance_km": 1.0
+    },
+    {
+      "base": null,
+      "case_id": "gold:named_poi:plaza-hotel",
+      "expected_name": "The Plaza",
+      "places": {
+        "a": "QUERY_REFUSED",
+        "production_hit": true
+      },
+      "tolerance_km": 1.0
+    },
+    {
+      "base": {
+        "class": "stop_position",
+        "distance_km": 0.343,
+        "match_strength": "CONTAINMENT",
+        "name": "Monte-Carlo",
+        "names_common": 0,
+        "subtype": "transit",
+        "type": "base/infrastructure",
+        "wikidata": "Q25411109"
+      },
+      "case_id": "gold:named_poi:novotel-monte-carlo",
+      "expected_name": "Novotel Monte Carlo",
+      "places": {
+        "a": "EVICTED",
+        "production_hit": false
+      },
+      "tolerance_km": 1.0
+    },
+    {
+      "base": {
+        "class": "clinic",
+        "distance_km": 0.049,
+        "match_strength": "EXACT",
+        "name": "Mayo Clinic",
+        "names_common": 0,
+        "subtype": "medical",
+        "type": "base/land_use",
+        "wikidata": null
+      },
+      "case_id": "gold:named_poi:mayo-clinic-rochester",
+      "expected_name": "Mayo Clinic",
+      "places": {
+        "a": "EVICTED",
+        "production_hit": false
+      },
+      "tolerance_km": 2.0
+    },
+    {
+      "base": {
+        "class": "hospital",
+        "distance_km": 0.09,
+        "match_strength": "EXACT",
+        "name": "Hospital for Sick Children",
+        "names_common": 0,
+        "subtype": "medical",
+        "type": "base/land_use",
+        "wikidata": "Q3140964"
+      },
+      "case_id": "gold:named_poi:sickkids-toronto",
+      "expected_name": "SickKids",
+      "places": {
+        "a": "EVICTED",
+        "production_hit": true
+      },
+      "tolerance_km": 1.0
+    },
+    {
+      "base": {
+        "class": "hospital",
+        "distance_km": 0.011,
+        "match_strength": "EXACT",
+        "name": "Royal Children's Hospital",
+        "names_common": 1,
+        "subtype": "medical",
+        "type": "base/land_use",
+        "wikidata": "Q7373942"
+      },
+      "case_id": "gold:named_poi:royal-childrens-melbourne",
+      "expected_name": "The Royal Children's Hospital",
+      "places": {
+        "a": "QUERY_REFUSED",
+        "production_hit": false
+      },
+      "tolerance_km": 1.0
+    },
+    {
+      "base": {
+        "class": "hospital",
+        "distance_km": 0.137,
+        "match_strength": "EXACT",
+        "name": "Singapore General Hospital",
+        "names_common": 5,
+        "subtype": "medical",
+        "type": "base/land_use",
+        "wikidata": "Q7522983"
+      },
+      "case_id": "gold:named_poi:singapore-general-hospital",
+      "expected_name": "Singapore General Hospital",
+      "places": {
+        "a": "EVICTED",
+        "production_hit": true
+      },
+      "tolerance_km": 1.5
+    },
+    {
+      "base": null,
+      "case_id": "gold:named_poi:seattle-central-library",
+      "expected_name": "Seattle Central Library",
+      "places": {
+        "a": "EVICTED",
+        "production_hit": true
+      },
+      "tolerance_km": 1.0
+    },
+    {
+      "base": null,
+      "case_id": "gold:named_poi:gpo-dublin",
+      "expected_name": "General Post Office",
+      "places": {
+        "a": "NOT_ADMITTED",
+        "production_hit": false
+      },
+      "tolerance_km": 1.0
+    },
+    {
+      "base": null,
+      "case_id": "gold:named_poi:burton-barr-library",
+      "expected_name": "Burton Barr Central Library",
+      "places": {
+        "a": "QUERY_REFUSED",
+        "production_hit": true
+      },
+      "tolerance_km": 1.0
+    },
+    {
+      "base": {
+        "class": "bicycle_rental",
+        "distance_km": 0.07,
+        "match_strength": "EXACT",
+        "name": "Union Station",
+        "names_common": 0,
+        "subtype": "transit",
+        "type": "base/infrastructure",
+        "wikidata": null
+      },
+      "case_id": "gold:named_poi:union-station-toronto",
+      "expected_name": "Union Station",
+      "places": {
+        "a": "EVICTED",
+        "production_hit": true
+      },
+      "tolerance_km": 1.0
+    },
+    {
+      "base": null,
+      "case_id": "gold:inverse_seam:sydney-opera-house",
+      "expected_name": "Sydney Opera House",
+      "places": {
+        "a": "EVICTED",
+        "production_hit": true
+      },
+      "tolerance_km": 2.0
+    },
+    {
+      "base": {
+        "class": "bridge",
+        "distance_km": 0.046,
+        "match_strength": "EXACT",
+        "name": "Golden Gate Bridge",
+        "names_common": 11,
+        "subtype": "bridge",
+        "type": "base/infrastructure",
+        "wikidata": "Q44440"
+      },
+      "case_id": "gold:inverse_seam:golden-gate-bridge",
+      "expected_name": "Golden Gate Bridge",
+      "places": {
+        "a": "EVICTED",
+        "production_hit": false
+      },
+      "tolerance_km": 2.0
+    },
+    {
+      "base": {
+        "class": "stop_position",
+        "distance_km": 0.283,
+        "match_strength": "CONTAINMENT",
+        "name": "Monte-Carlo",
+        "names_common": 0,
+        "subtype": "transit",
+        "type": "base/infrastructure",
+        "wikidata": "Q25411109"
+      },
+      "case_id": "gold:inverse_seam:casino-de-monte-carlo",
+      "expected_name": "Casino de Monte-Carlo",
+      "places": {
+        "a": "QUERY_REFUSED",
+        "production_hit": false
+      },
+      "tolerance_km": 2.0
+    },
+    {
+      "base": {
+        "class": "plaza",
+        "distance_km": 0.092,
+        "match_strength": "EXACT",
+        "name": "Times Square",
+        "names_common": 9,
+        "subtype": "pedestrian",
+        "type": "base/land_use",
+        "wikidata": "Q11259"
+      },
+      "case_id": "gold:inverse_seam:times-square",
+      "expected_name": "Times Square",
+      "places": {
+        "a": "EVICTED",
+        "production_hit": false
+      },
+      "tolerance_km": 2.0
+    },
+    {
+      "base": {
+        "class": "ferry_terminal",
+        "distance_km": 0.441,
+        "match_strength": "EXACT",
+        "name": "Louvre",
+        "names_common": 0,
+        "subtype": "transit",
+        "type": "base/infrastructure",
+        "wikidata": "Q2891586"
+      },
+      "case_id": "gold:inverse_seam:louvre-museum",
+      "expected_name": "Louvre Museum",
+      "places": {
+        "a": "EVICTED",
+        "production_hit": false
+      },
+      "tolerance_km": 2.0
+    }
+  ],
+  "cases_file": "benchmarks/v2-forward-gold-cases-v1.json",
+  "limitations": [
+    "theme=buildings (276 GB) was NOT scanned. Several gold landmarks are plausibly buildings, so an absent verdict means 'not in the three scanned base types', never 'not in Overture'.",
+    "base/water and base/land_cover were not scanned: no gold case is a water or land-cover feature.",
+    "A `transit` match is almost always a station or stop NAMED AFTER the landmark rather than the landmark itself (Colosseo metro, the Louvre metro station, a Harrods bus stop). Those are counted in a separate tier, never in the landmark headline -- this is the same failure mode that forced the Discovery Times Square retraction. Union Station is the case where a transit match is the RIGHT answer, so the tier is reported, not dropped.",
+    "Coordinates are bbox centroids. For a long feature like a bridge the centroid is the right point; for a sprawling land_use polygon it may sit far from the entrance a user means.",
+    "Presence in base is not servability: nothing here indexes base, and the producer changes to do so are not scoped by this probe."
+  ],
+  "release": "2026-06-17.0",
+  "schema": "overture-gold-coverage-in-base-theme-v1",
+  "summary": {
+    "exact_but_transit_named_after": 12,
+    "exact_not_servable_from_places": 14,
+    "exact_with_names_common": 10,
+    "exact_with_wikidata_qid": 9,
+    "found_in_base_any": 31,
+    "found_in_base_exact_name": 14,
+    "gold_poi_cases": 45,
+    "scanned_types": [
+      "base/infrastructure",
+      "base/land_use",
+      "base/land"
+    ]
+  }
+}

@@ -527,6 +527,23 @@ Golden Gate Bridge is `base/infrastructure` `bridge` `Q44440`; Times Square is
 the explore-site case — the QID is already in the data and needs no matcher, no
 ledger and no hand adjudication.**
 
+**Measured reach, 2026-08-05:** of 45 gold POI cases, **14 case rows (10
+distinct entities) have an exact-name, non-transit match in base, and all 14
+are cases the Places head cannot serve** (12 EVICTED, 2 QUERY_REFUSED) — about
+31% of the gold POI set in pure addition. 9 of the 14 carry a QID and 10 carry
+`names.common`. A further 12 exact-name matches are transit stops NAMED AFTER
+the landmark and are excluded from that count (Union Station is the one case
+where the transit match is correct). 14 cases were not found, but
+`theme=buildings` (276 GB) was not scanned and several of those are plainly
+buildings — that bucket means "not in the three scanned base types", never "not
+in Overture". Detail and the two probe defects corrected before publishing:
+`docs/plans/2026-08-05-gold-coverage-in-base-theme.md`.
+
+Not scoped by that measurement, and required before any of it serves: base
+features are polygons and lines where the places path assumes a point, and they
+carry `subtype`/`class` rather than Overture place categories, so
+`prominence_rank` needs a mapping for them.
+
 Three things settled on the way, so they are not re-litigated:
 
 - **Circularity refuted.** The worry was Wikidata -> Foursquare -> Overture ->
@@ -2399,6 +2416,8 @@ These remain useful but do not block the next measured milestone:
 
 ## Evidence and history
 
+- `docs/plans/2026-08-05-gold-coverage-in-base-theme.md` — how much of the gold
+  set lives in `theme=base`, and the QID/`names.common` it carries there.
 - `docs/plans/2026-08-05-sidecar-p1968-dead-end.md` — why the GERS-to-QID
   sidecar is closed for Places, the refuted circularity hypothesis, and where
   entity fame actually lives.
