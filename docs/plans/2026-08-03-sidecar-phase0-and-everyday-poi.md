@@ -352,3 +352,26 @@ python3 -m venv /tmp/everyday-poi-pyproj-venv
   --output benchmarks/everyday-poi-tripwire-cases-v1.json \
   --report benchmarks/everyday-poi-selection-report-v1.json
 ```
+
+---
+
+# CLOSED 2026-08-05: the sidecar half of this plan is a dead end
+
+The sidecar decision recorded above ("Proceed with sidecar Phase 0") is
+**withdrawn for the places theme**. The everyday-POI tripwire half of this
+document stands.
+
+Planet-wide there are **7,234** Wikidata items carrying `P1968`, against
+75,642,289 Overture places — 0.0096%. The candidate generation here used a
+`LIMIT 1000` SPARQL query joined to the Foursquare bridge, so the 200-decision
+audit was sizing a path whose entire ceiling is 7,234 entities.
+
+The durable identity model above (GERS ledger, QID fame table, release-attested
+membership) is not wrong, and the GERS stability measurement it rests on stays
+valid. It is simply aimed at a route that cannot carry enough entities to matter.
+`theme=base` carries `wikidata` natively on `infrastructure`, `land_use` and
+`land`, which is where the landmark fame this was meant to supply actually lives.
+
+The 200-decision audit is stopped at 57/200 and is not resumed. See
+`docs/plans/2026-08-05-sidecar-p1968-dead-end.md`; the state doc carries the
+summary and supersedes this file on the point.

@@ -81,11 +81,11 @@ build `2026-08-03.0`; its production acceptance and exact identities are in
 failure-mode classification of the 134 everyday-POI cases still missed at
 rank 10 by the accepted candidate, using the frozen authority gold and OSM
 presence control before choosing another admission or routing mechanism. Do
-not widen the phrase lane from the existing result. Sidecar Phase 0 remains a
+not widen the phrase lane from the existing result. ~~Sidecar Phase 0 remains a
 separate queued gate: 200 independently hand-checked decisions with zero false
-provisional accepts, followed by the already-defined broadcast memory/byte
-measurement. Structured Address latency remains the next serving-performance
-gate.
+provisional accepts~~ **— CLOSED 2026-08-05, see "The P1968 sidecar is a dead
+end for Places" below; the audit is stopped at 57/200 and is not resumed.**
+Structured Address latency remains the next serving-performance gate.
 
 **2026-08-05 UPDATE.** That classification is done, and so is the question it
 opened. The Overture release move `2026-06-17.0 -> 2026-07-22.0` — previously
@@ -507,6 +507,72 @@ follow-up, not a finding.
 
 Full evidence and limits in
 `docs/plans/2026-08-04-release-move-recall-delta.md`.
+
+### The P1968 sidecar is a dead end for Places, 2026-08-05 — DO NOT REOPEN
+
+**Planet-wide there are 7,234 Wikidata items carrying `P1968`** (Foursquare
+venue id), against 75,642,289 Overture places — 0.0096%. Counted directly at the
+Wikidata SPARQL endpoint. The Phase 0 candidate set was a `LIMIT 1000` query
+joined to the Foursquare bridge, so the 200-decision audit was sizing a path
+whose entire planet ceiling is 7,234 entities. No amount of review makes that a
+fame signal.
+
+**The need was real; only the route is dead.** Overture has no ENTITY fame —
+`prominence_rank` is a per-category prior, so nothing distinguishes *the* Times
+Square from *a* Times Square, which is the homonym failure dominating the gold
+set. But `theme=base` carries `wikidata` as a first-class column on
+`infrastructure`, `land_use` AND `land` (verified by DESCRIBE on all three).
+Golden Gate Bridge is `base/infrastructure` `bridge` `Q44440`; Times Square is
+`base/land_use` `plaza` `Q11259`. Neither exists in `places`. **For landmarks —
+the explore-site case — the QID is already in the data and needs no matcher, no
+ledger and no hand adjudication.**
+
+Three things settled on the way, so they are not re-litigated:
+
+- **Circularity refuted.** The worry was Wikidata -> Foursquare -> Overture ->
+  join back to origin. Foursquare venue ids are ObjectIds, so they carry a
+  creation timestamp: the venue is older than its Wikidata item in **98 of 100**
+  pairs, median lead **7.2 years**, and **28 of 28** on the Thai subset at
+  10.0 years. Foursquare cannot have sourced items that did not yet exist.
+- **There is no matcher.** `match_method` is `direct_source_wikidata_id` on all
+  200 — an equality join — and every P1968 claim sampled carries zero
+  references. A precision number here would not transfer to fuzzy matching.
+- **The gate was over-specified.** A wrong link mis-ranks one POI; that is
+  bounded and reversible, not corruption. Any revival should gate
+  *fame-weighted*, since a false link to a top-tier QID is the only real risk.
+
+Audit stopped at 57/200, `integrity_ok: true`, nothing marked eligible for
+prominence. Full evidence and the two instrument defects found (single-language
+label scoping; whole-string name-overlap flag) in
+`docs/plans/2026-08-05-sidecar-p1968-dead-end.md`.
+
+### `names.common` is identically empty across all Places, 2026-08-05
+
+Measured on the local 2026-06-17.0 planet corpus, and it explains several
+otherwise confusing results.
+
+| theme | `names.common` populated |
+|---|---|
+| divisions / division | 1,526,014 of 4,655,003 — **32.78%** |
+| divisions / division_area | 432,403 of 1,073,093 — **40.30%** |
+| base / infrastructure | populated (Golden Gate Bridge carries 11 languages) |
+| **places** | **0 of 75,642,289 — exactly 0.0000%** |
+
+`names.rules` on places IS populated (455,111, 0.60%), so the struct is not
+inert; only `common` is empty, and it is empty at exactly zero. Same release,
+same publisher, same field, populated in two other themes.
+
+**Consequences already paid.** This is why a CJK query cannot reach an
+English-named record, why `Brandenburger Tor` cannot match "Brandenburg Gate",
+and why the alt-name rescoring workstream measured a ceiling of 5 cases: there
+were no alternates to score. Any future plan that assumes Places alternate names
+exist is unfounded — check this number first.
+
+Not established: whether Foursquare's own venue objects carry locale variants.
+What is known is that Foursquare stores local-script names as the primary (the
+Thai venues are natively `วัดลาดบัวหลวง`). Whether Overture drops localization in
+the Places path or no source supplies it is unresolved, but "no source supplies a
+single alternate for any of 75.6M records" is not a plausible data outcome.
 
 ### If the head cap is ever raised, it is contract-bound
 
@@ -2333,6 +2399,9 @@ These remain useful but do not block the next measured milestone:
 
 ## Evidence and history
 
+- `docs/plans/2026-08-05-sidecar-p1968-dead-end.md` — why the GERS-to-QID
+  sidecar is closed for Places, the refuted circularity hypothesis, and where
+  entity fame actually lives.
 - `docs/plans/2026-08-04-release-move-recall-delta.md` — the refutation of the
   Overture release move as a quality lever, and the CJK regressions it exposed.
 - `docs/plans/2026-08-04-head-cap-eviction-ranks.md` — what actually loses an
