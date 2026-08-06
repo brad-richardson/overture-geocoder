@@ -1,20 +1,99 @@
 {
  "schema": "proximity-variant-baseline-v1",
  "meta": {
-  "timestamp": "2026-08-06T14:25:42+00:00",
+  "timestamp": "2026-08-06T18:40:54+00:00",
   "base_url": "https://geocoder.bradr.dev",
-  "git_sha": "479d46c",
+  "initial_run_git_sha": "ed9b7770437e09cd19da8d1dbe9a4f0903a62364",
+  "extension_run_base_git_sha": "479d46c4f1d4e35a21d4c56f80e5c1eb1fae4787",
+  "provenance_note": "The four extension requests ran from a worktree based on extension_run_base_git_sha. Exact reusable request and score inputs are bound by case_fingerprints; final probe and case-file bytes are bound by content_sha256.",
   "data_version": "2026-08-03.0",
   "overture_places_vintage": "2026-06-17.0",
+  "overture_divisions_vintage": "2026-07-22.0",
   "interval_s": 0.4,
   "cases": [
    "benchmarks/proximity-chain-cases-v1.json",
    "benchmarks/variant-typing-cases-v1.json"
   ],
   "requests": 84,
-  "requests_added": 4,
+  "initial_requests": 80,
+  "extension_requests": 4,
+  "requests_this_run": 0,
   "initial_timestamp": "2026-08-06T07:45:08+00:00",
   "transient_retries_used": 0,
+  "case_fingerprints": {
+   "algorithm": "sha256-canonical-request-score-projection-v1",
+   "proximity": {
+    "prox:seattle:starbucks": "a47a0943ede3de1a96088d75efccd8d268fe0c63896fe72c17f73f1b815d0567",
+    "prox:seattle:7-eleven": "239064c587740ada1b37e6c6502a9d57c2f32bb485d8fa5c2a997ffa07287eb2",
+    "prox:toronto:tim-hortons": "1859d1d998d4927b74bba053eb067dc88dd0631d71aa11405c009f5dd7b2f851",
+    "prox:toronto:starbucks": "70afb6fdd0c077e92231d8f981be32caafb4e5f1b6329f989d009af3d46982b7",
+    "prox:mexico_city:oxxo": "e58930448e68192664b100f6b2a6c49a0e3c912481f92aa0b3eeb1c2634bde83",
+    "prox:mexico_city:7-eleven": "398670c0d8f7870cdb1017ce29705d1f01d8ac40743129d5272f46f3ce5d954b",
+    "prox:sao_paulo:drogasil": "f945ad6a9ef0166bfc8b5943fa798e21b62c2612c9c4926cacf2bed572d281cb",
+    "prox:sao_paulo:mcdonald-s": "0520f9681d38c2ea373a3571876e02de507081a575f27edf67e0f47b7286cb9c",
+    "prox:london:costa-coffee": "7f3e9318cd74202b3b81dfaca41f1cc894a08243436fc01defa130f9ad14e3fb",
+    "prox:london:pret-a-manger": "72e76b69ef9ec3068df2d5ff25e5d8ac37b97d3f8237927b49557b10971fe37b",
+    "prox:london:starbucks": "8ab529000a07dc0375630547e34a6d714632281f1f4606afcfd0fe1868d66b5d",
+    "prox:paris:carrefour-city": "8b3b013dd07554fe8bf457a1f2b8b104a56ef02bb8ae96077a56a13152db9ab0",
+    "prox:paris:monoprix": "9f5c161774f1c39e03d5670f65f7ae59e269d720e637b982ba14f69f1f810dd5",
+    "prox:paris:mcdonald-s": "2590aa27f5b84dc34f1c5e7080bcb79c9346a30594a4ff6ced645d6b112ba94b",
+    "prox:berlin:rewe": "4f05d31f6f9cbb2bfdd6764d4971b0f818e218a541c7c3d964039df178183176",
+    "prox:berlin:lidl": "5f527c0f513af1ecf78fac5423497f067b561493437b8d09e7c7df1ead598bde",
+    "prox:madrid:mercadona": "c5cd7adb8b7ec1a12a43c47ed7024799fdb60db3dfad99d70be2e47bb7655826",
+    "prox:madrid:burger-king": "81dfaa525e42c37417acc090b817c388b46c3208289a466335cc42c8ccda0515",
+    "prox:stockholm:pressbyran": "d9973071cfa9702f82188d13ba2d3f46d60c4a4bd8feb31ef93c75d367754f9d",
+    "prox:stockholm:7-eleven": "6d3d3d33554699c1e7d69523c30c9aa3442f54de8a735b5bd107644586244fb2",
+    "prox:warsaw:zabka": "c25db61c35dababefe524ce09893602fe8f1f9701cedb1c1b2102d80ac0775b1",
+    "prox:warsaw:costa-coffee": "a6ccbe575e4e99391fcc3af31a3d79ad61905a2c26d4715f2c6b4fac83fcad23",
+    "prox:istanbul:sok": "4fd093d5b209717731f885e6b9afb56c981589a0d780b06f1b1ed7296afd11cb",
+    "prox:istanbul:migros": "1348501916d44bf6aab686ddab6f8375e1bba6ec100401bb169a77c25d877a9d",
+    "prox:tokyo:967962": "7bde4aa76ee959a338928980502af83a63709326683e49b64a8fdf53091f4fe5",
+    "prox:tokyo:starbucks": "e71889637d06c2b02ccc38349121520db64db04230fea76cd651998ad2f84d90",
+    "prox:bangkok:7-eleven": "0be44fe012664b081320859412fd7e7a821adcf1c7ad45cf7dd2c63a4e69fb12",
+    "prox:bangkok:kfc": "b7727a5e7c61b1fe608d45de20ac13c8454a1c8849b362d5556c7c650d068176",
+    "prox:singapore:7-eleven": "f42c467dab3560527241001a61d3d5e8f6f2cb357e56d2717b00e406bcfdadb6",
+    "prox:singapore:subway": "da46be155d99870a3c102b17b1a32ebc4d78029c2b3e9b735faf456be57aa872",
+    "prox:sydney:woolworths": "be313ad481c70bafc7e5d5abc362c8e01bdd519558ac37f2fd47beacff024f0b",
+    "prox:sydney:7-eleven": "654298933b83237682a8c5de41a321063867ad35aebbda96ce5beaf611af6541",
+    "prox:johannesburg:kfc": "19916a367bd36a0642e98941c904ec003b97186f0f6f352004734afac163aca7",
+    "prox:johannesburg:pick-n-pay": "c80490b2977d8e7101534785777446cce3ff66cff55c637809f78e167da68512",
+    "prox:mumbai:subway": "d850de2b06cee48a4024caa72840bdc92bff5b7c8a77e669ccc73a8cf549d287",
+    "prox:mumbai:starbucks": "45b16f2e89249a85a16b5fbd6add7f0149fc346f3cbc7a36c96434f807d6f9e0",
+    "prox:jakarta:indomaret": "435a198de9e7d9bf0fe87097b8f1e002715e67f362a92c49d9b1d8886ccf60de",
+    "prox:jakarta:kfc": "257aba288b0f345853a93a257800d75dc900d9431e1bf03137db20d964aa0cf3",
+    "prox:manila:jollibee": "8b690188c8dc1efea3eb66df3a79210bcce5abd7edf626dd05ff5692ad582be6",
+    "prox:manila:7-eleven": "023ddaa932a0b78c1565dfc5228e2ae1f57d2ad0716a037f842a992043ea5b96"
+   },
+   "variant": {
+    "variant:apostrophe:2097a8b6-881b-49dd-8ae0-3146f0a0ff83": "478c9d39d980610c79430bb0d78ae8e4413d24f67c402c9ea637e3511af2d2d7",
+    "variant:apostrophe:efe83e6c-0345-4991-ab35-0c30c48f4276": "736e30ef48bfe22b3a7a48242cab1394edde74ec0009a75ebf3de675b2ef6080",
+    "variant:apostrophe:839c614b-cf2c-4cfb-9a15-256c3ab5ee4b": "b1ac58b14ee8ced33f40b26f7f8d9e8278ad00fd46f916384c7d3f3a31e51ce7",
+    "variant:apostrophe:71ec4b26-847e-4d64-b1a7-33546ad4583e": "8f8aaf0d494dce9ab2f9301f0ef5a421aab2bd48a61a065c461d8b152f6373a3",
+    "variant:apostrophe:205bc0cb-6897-4ea3-84fc-351e0eb425d5": "3f85684c23e6a1b6f5b53705037c3b9ebbb62b6a1ace79ffa6b41ba5d91dfae8",
+    "variant:ampersand:02ec7d15-4548-4ed3-8366-abf9f145e159": "cd37da55da43cc01c6eb2dfc9472209121a4a333630de3ec5198f55ceaca237e",
+    "variant:ampersand:726ab33e-cbf8-43dc-818d-bf7f9d0d129a": "01179c222df08b69c25efb6999dfc59539decd1d35c5c15c8c9fea2219fef4ab",
+    "variant:ampersand:f04b96c1-8cce-4d12-9b02-e075a33b4fef": "43aa97f6751d170e71878ceb12f50e6946db400aa98a2e30c074fa01118841a0",
+    "variant:ampersand:c871e236-a875-4653-ba5e-6b836b9c82b1": "df7b38f9f058283601b21af4b7cb7001864fc0b820734909fdc9ba4ba953532d",
+    "variant:ampersand:dad3fab8-39e1-43d5-a2cc-f90fbabd318f": "a9c9e3e353a83246b664ce831fcc1eae66fe71cd570d5da4aea20a3e4672ebbf",
+    "variant:nonascii_latin:7687bbd4-c339-40b3-9c98-34d65377b977": "6611ca16d4644e98ff2e902a2cbce140ec64f7fb02fc7dda7065a07a8c87d5fb",
+    "variant:nonascii_latin:3ec74e78-a1ce-42e0-afb2-6da8063343a3": "44fe31004db135c896173fda2a4be5045c01c231a3b958acdcbea96df114cb83",
+    "variant:nonascii_latin:7ca1dcd1-4041-4455-982c-36c1fe9f3d77": "13e01a7a0e883f464ca80e4837dc8c2d881d00cf95bb1f9db5b59818f33f0add",
+    "variant:nonascii_latin:a8716f55-f78a-4f53-9d79-559c0f82504a": "73417d37c85dd691f09049148a8bea582b498ecea143596ae0b2966fa2a2317d",
+    "variant:nonascii_latin:949175db-36c1-4460-ab50-59a2b8a244db": "e2517ecb0626a84dd27c7b2c46410884e9801a00112c60b2321eff03f58c2948",
+    "variant:hyphen_locality:aeac6baa-905c-42f4-a93c-75187879bc15": "e16fd0fda14a34e0068edd753ce427b909128587aebdd311b62a6ab52c88c84c",
+    "variant:hyphen_locality:c351bc37-c2cd-4bb3-a4a3-5f79e69a13ac": "97e088cbb6d22d04998b30bab75e4c7245b9235f0a5deccfbf455ade75998406",
+    "variant:hyphen_locality:3e1c941b-074d-45d5-ba91-10cb91c6d9b6": "de1f545a00f7d82b1cf88e20797f622aa9d5ff8c2aadc3760435b1a4063ede46",
+    "variant:hyphen_locality:936fca1e-05d4-45fe-b25b-badcec3bdb18": "a98bf6852252d8fbfb94b7904ee7eff66518c9577625ca38b6884bf107b117fb",
+    "variant:hyphen_locality:1da687c4-b419-40dd-9089-ca6f32a32d17": "14429bef9a874bb6e0ab49285fc567bcd68afdf855b0e6079555d40a6746fbfa",
+    "variant:hyphen_locality:0a067856-c822-4b38-bdbd-4abbb24cacca": "a228da9eebd768f255036d954f4efb0346f464280d4e1d679699084354968e36",
+    "variant:hyphen_locality:8248f197-ef50-4588-a32c-ccad1abe72ba": "f19264b650d21ac1cca9399bf9236959045b5a07b2159840dc1a554ffb399854"
+   }
+  },
+  "content_sha256": {
+   "probe": "8b79ae19395087c1d3e1fba7091d9c156e59469c7acc3cf9b30f55b6b4222f5f",
+   "proximity_cases": "adfd83ee019cfc7bc006e5b5a3f1ea92eac37dcbc306d68e74698b2f0467adb6",
+   "variant_cases": "0c5797a9a1967cf5f90c5825bd0953f3c8ba9e3ea8c7609cb1d0dc017e1ad0db"
+  },
   "interpretation_notes": [
    "chain_name_matches is permissive; Sydney credits Woolworths Riley Street Car Park, so the proximity rate is flattering",
    "four of five apostrophe controls return zero candidates, so that class has weak discriminating power; retrieval is broken under both spellings for four of five, not five of five",
@@ -347,9 +426,6 @@
  "proximity_results": [
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:seattle:starbucks",
    "kind": "place",
    "query": "Starbucks",
@@ -357,15 +433,6 @@
    "status": 200,
    "ms": 3334.6,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 40.024,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -467,13 +534,11 @@
    "proximity": [
     -122.351902,
     47.607112
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:seattle:7-eleven",
    "kind": "place",
    "query": "7-Eleven",
@@ -481,15 +546,6 @@
    "status": 200,
    "ms": 479.6,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 24.716,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -591,13 +647,11 @@
    "proximity": [
     -122.321996,
     47.613593
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:toronto:tim-hortons",
    "kind": "place",
    "query": "Tim Hortons",
@@ -605,15 +659,6 @@
    "status": 200,
    "ms": 490.5,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 52.008,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -715,13 +760,11 @@
    "proximity": [
     -79.387042,
     43.659295
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:toronto:starbucks",
    "kind": "place",
    "query": "Starbucks",
@@ -729,15 +772,6 @@
    "status": 200,
    "ms": 164.0,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 18.383,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -839,13 +873,11 @@
    "proximity": [
     -79.370061,
     43.662728
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:mexico_city:oxxo",
    "kind": "place",
    "query": "OXXO",
@@ -853,15 +885,6 @@
    "status": 200,
    "ms": 456.0,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 5.692,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -963,13 +986,11 @@
    "proximity": [
     -99.140301,
     19.42764
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:mexico_city:7-eleven",
    "kind": "place",
    "query": "7-Eleven",
@@ -977,15 +998,6 @@
    "status": 200,
    "ms": 479.2,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 2.326,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -1087,13 +1099,11 @@
    "proximity": [
     -99.15844,
     19.427954
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:sao_paulo:drogasil",
    "kind": "place",
    "query": "Drogasil",
@@ -1101,15 +1111,6 @@
    "status": 200,
    "ms": 1471.0,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 12.311,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -1211,13 +1212,11 @@
    "proximity": [
     -46.638151,
     -23.55178
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:sao_paulo:mcdonald-s",
    "kind": "place",
    "query": "McDonald's",
@@ -1225,15 +1224,6 @@
    "status": 200,
    "ms": 1039.4,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 8355.22,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -1335,13 +1325,11 @@
    "proximity": [
     -46.635417,
     -23.575741
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:london:costa-coffee",
    "kind": "place",
    "query": "Costa Coffee",
@@ -1349,15 +1337,6 @@
    "status": 200,
    "ms": 1181.1,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 2.069,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -1459,13 +1438,11 @@
    "proximity": [
     -0.094597,
     51.518563
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:london:pret-a-manger",
    "kind": "place",
    "query": "Pret A Manger",
@@ -1473,15 +1450,6 @@
    "status": 200,
    "ms": 549.5,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 6.863,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -1583,13 +1551,11 @@
    "proximity": [
     -0.085322,
     51.513818
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:london:starbucks",
    "kind": "place",
    "query": "Starbucks",
@@ -1597,15 +1563,6 @@
    "status": 200,
    "ms": 255.8,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 11.614,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -1707,13 +1664,11 @@
    "proximity": [
     -0.089061,
     51.505855
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:paris:carrefour-city",
    "kind": "place",
    "query": "Carrefour City",
@@ -1721,15 +1676,6 @@
    "status": 200,
    "ms": 718.3,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 3.195,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -1831,13 +1777,11 @@
    "proximity": [
     2.364803,
     48.853607
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:paris:monoprix",
    "kind": "place",
    "query": "Monoprix",
@@ -1845,15 +1789,6 @@
    "status": 200,
    "ms": 245.7,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 1.153,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -1955,13 +1890,11 @@
    "proximity": [
     2.365568,
     48.856818
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:paris:mcdonald-s",
    "kind": "place",
    "query": "McDonald's",
@@ -1969,15 +1902,6 @@
    "status": 200,
    "ms": 562.0,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 7471.138,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -2079,13 +2003,11 @@
    "proximity": [
     2.342189,
     48.858639
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:berlin:rewe",
    "kind": "place",
    "query": "REWE",
@@ -2093,15 +2015,6 @@
    "status": 200,
    "ms": 975.6,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 3.723,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -2203,13 +2116,11 @@
    "proximity": [
     13.392914,
     52.518185
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:berlin:lidl",
    "kind": "place",
    "query": "Lidl",
@@ -2217,15 +2128,6 @@
    "status": 200,
    "ms": 303.7,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 6.033,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -2327,13 +2229,11 @@
    "proximity": [
     13.395354,
     52.498476
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:madrid:mercadona",
    "kind": "place",
    "query": "Mercadona",
@@ -2341,15 +2241,6 @@
    "status": 200,
    "ms": 1204.5,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 30.932,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -2451,13 +2342,11 @@
    "proximity": [
     -3.706229,
     40.409387
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:madrid:burger-king",
    "kind": "place",
    "query": "Burger King",
@@ -2465,15 +2354,6 @@
    "status": 200,
    "ms": 377.3,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 6.624,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -2575,13 +2455,11 @@
    "proximity": [
     -3.710251,
     40.410356
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:stockholm:pressbyran",
    "kind": "place",
    "query": "Pressbyrån",
@@ -2589,15 +2467,6 @@
    "status": 200,
    "ms": 725.4,
    "error": null,
-   "rank": 9,
-   "found_at_1": false,
-   "found_at_10": true,
-   "matched_distance_km": 0.001,
-   "top1_distance_km": 2.263,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -2699,13 +2568,11 @@
    "proximity": [
     18.082734,
     59.344305
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:stockholm:7-eleven",
    "kind": "place",
    "query": "7-Eleven",
@@ -2713,15 +2580,6 @@
    "status": 200,
    "ms": 270.0,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 3.021,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -2823,13 +2681,11 @@
    "proximity": [
     18.110314,
     59.335684
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:warsaw:zabka",
    "kind": "place",
    "query": "Żabka",
@@ -2837,15 +2693,6 @@
    "status": 200,
    "ms": 945.7,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 4.28,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -2947,13 +2794,11 @@
    "proximity": [
     20.979945,
     52.240255
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:warsaw:costa-coffee",
    "kind": "place",
    "query": "Costa Coffee",
@@ -2961,15 +2806,6 @@
    "status": 200,
    "ms": 736.7,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 5.957,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -3071,13 +2907,11 @@
    "proximity": [
     21.002546,
     52.209433
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:istanbul:sok",
    "kind": "place",
    "query": "Şok",
@@ -3085,15 +2919,6 @@
    "status": 200,
    "ms": 1233.0,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 11.019,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -3195,13 +3020,11 @@
    "proximity": [
     29.011188,
     41.027148
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:istanbul:migros",
    "kind": "place",
    "query": "Migros",
@@ -3209,15 +3032,6 @@
    "status": 200,
    "ms": 554.3,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 25.551,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -3319,13 +3133,11 @@
    "proximity": [
     28.986729,
     41.043295
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:tokyo:967962",
    "kind": "place",
    "query": "ローソン",
@@ -3333,15 +3145,6 @@
    "status": 200,
    "ms": 923.9,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 23.885,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -3443,13 +3246,11 @@
    "proximity": [
     139.764904,
     35.694258
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:tokyo:starbucks",
    "kind": "place",
    "query": "Starbucks",
@@ -3457,15 +3258,6 @@
    "status": 200,
    "ms": 202.4,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 16.435,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -3567,13 +3359,11 @@
    "proximity": [
     139.762361,
     35.683675
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:bangkok:7-eleven",
    "kind": "place",
    "query": "7-Eleven",
@@ -3581,15 +3371,6 @@
    "status": 200,
    "ms": 2027.7,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 8.057,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -3691,13 +3472,11 @@
    "proximity": [
     100.548563,
     13.743364
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:bangkok:kfc",
    "kind": "place",
    "query": "KFC",
@@ -3705,15 +3484,6 @@
    "status": 200,
    "ms": 928.6,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 28.483,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -3815,13 +3585,11 @@
    "proximity": [
     100.542457,
     13.740445
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:singapore:7-eleven",
    "kind": "place",
    "query": "7-Eleven",
@@ -3829,15 +3597,6 @@
    "status": 200,
    "ms": 470.1,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 4.069,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -3939,13 +3698,11 @@
    "proximity": [
     103.861889,
     1.319535
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:singapore:subway",
    "kind": "place",
    "query": "Subway",
@@ -3953,15 +3710,6 @@
    "status": 200,
    "ms": 453.3,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 2.094,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -4063,13 +3811,11 @@
    "proximity": [
     103.852418,
     1.333902
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:sydney:woolworths",
    "kind": "place",
    "query": "Woolworths",
@@ -4077,15 +3823,6 @@
    "status": 200,
    "ms": 664.1,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 1.165,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -4187,13 +3924,11 @@
    "proximity": [
     151.215615,
     -33.862579
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:sydney:7-eleven",
    "kind": "place",
    "query": "7-Eleven",
@@ -4201,15 +3936,6 @@
    "status": 200,
    "ms": 537.0,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 19.562,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -4311,13 +4037,11 @@
    "proximity": [
     151.192785,
     -33.881042
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:johannesburg:kfc",
    "kind": "place",
    "query": "KFC",
@@ -4325,15 +4049,6 @@
    "status": 200,
    "ms": 800.2,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 29.114,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -4435,13 +4150,11 @@
    "proximity": [
     28.053467,
     -26.205421
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:johannesburg:pick-n-pay",
    "kind": "place",
    "query": "Pick n Pay",
@@ -4449,15 +4162,6 @@
    "status": 200,
    "ms": 554.5,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 16.92,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -4559,13 +4263,11 @@
    "proximity": [
     28.041703,
     -26.206254
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:mumbai:subway",
    "kind": "place",
    "query": "Subway",
@@ -4573,15 +4275,6 @@
    "status": 200,
    "ms": 837.0,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 8.726,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -4683,13 +4376,11 @@
    "proximity": [
     72.882626,
     19.048099
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:mumbai:starbucks",
    "kind": "place",
    "query": "Starbucks",
@@ -4697,15 +4388,6 @@
    "status": 200,
    "ms": 305.9,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 7.601,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -4807,13 +4489,11 @@
    "proximity": [
     72.887511,
     19.038399
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:jakarta:indomaret",
    "kind": "place",
    "query": "Indomaret",
@@ -4821,15 +4501,6 @@
    "status": 200,
    "ms": 1166.9,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 11.566,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -4931,13 +4602,11 @@
    "proximity": [
     106.868743,
     -6.204499
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:jakarta:kfc",
    "kind": "place",
    "query": "KFC",
@@ -4945,15 +4614,6 @@
    "status": 200,
    "ms": 453.2,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 17.069,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -5055,13 +4715,11 @@
    "proximity": [
     106.84477,
     -6.213716
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:manila:jollibee",
    "kind": "place",
    "query": "Jollibee",
@@ -5069,15 +4727,6 @@
    "status": 200,
    "ms": 1318.8,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 1.791,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -5179,13 +4828,11 @@
    "proximity": [
     121.018664,
     14.596363
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   },
   {
    "provider": "overture",
-   "scoring_mode": "exact_gers_id",
-   "capability": "supported",
-   "capability_reason": null,
    "case_id": "prox:manila:7-eleven",
    "kind": "place",
    "query": "7-Eleven",
@@ -5193,15 +4840,6 @@
    "status": 200,
    "ms": 363.1,
    "error": null,
-   "rank": null,
-   "found_at_1": false,
-   "found_at_10": false,
-   "matched_distance_km": null,
-   "top1_distance_km": 9.133,
-   "expected_feature_type": null,
-   "top1_feature_type": null,
-   "type_at_1": null,
-   "type_present": null,
    "transient_retries": 0,
    "transient_retry_reasons": [],
    "candidates": [
@@ -5303,7 +4941,8 @@
    "proximity": [
     121.035117,
     14.601196
-   ]
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
   }
  ],
  "variant_results": [

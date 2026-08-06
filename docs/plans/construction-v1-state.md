@@ -119,6 +119,9 @@ lever (~7.5% of everyday misses), not the strategy.
 **2026-08-06 INSTRUMENT FOLLOW-UP.** The first two missing strata are now
 frozen against production build `2026-08-03.0`; see
 `benchmarks/2026-08-06-proximity-variant-baseline-v1.json` and its case files.
+Proximity and POI-variant gold uses Places `2026-06-17.0`; the seven
+hyphenated-division cases use the locally available Divisions `2026-07-22.0`
+mirror, and each affected case records that vintage mismatch.
 The proximity baseline is **3/40 at rank 1 and 22/40 at rank 10** for a
 permissive chain-name match within 2 km; a chain appears somewhere in the top
 10 for 40/40. The 3/40 is conservative/flattering as an entity metric because
@@ -132,9 +135,12 @@ The everyday denominator re-baseline is also frozen in
 92 `ABSENT AND production-miss` cases changes 0.345/0.350 (n=200) to
 **0.639/0.648 (n=108), but those figures are upper bounds, not a simple
 denominator correction**. The ABSENT probe was wrong for 2/70 production hits;
-applying that observed rate to the quarantine gives a sensitivity estimate of
-about **0.622/0.631 (n=111)**. Quarantine is not missing at random: CO falls
-20->0 cases, AU 25->7, and KR 20->7, while 94/108 kept cases are from HK, TW,
+an illustrative equal-blind-rate scenario applies that observed rate to the
+quarantine and gives about **0.622/0.631 (n=111)**.
+That scenario is not an empirical false-quarantine estimate: it extrapolates a
+rate observed among production hits to misses. Quarantine is not missing at
+random: CO falls 20->0 cases, AU 25->7, and KR 20->7, while 94/108 kept cases
+are from HK, TW,
 SG, MX, or JP. Any headline must carry both the probe-blindness and population
 shift caveats.
 

@@ -6,9 +6,11 @@ reimplementing transport: requests are sequential, paced, retried only on
 definite transients, and every response's candidate list is retained so this
 run stays re-scorable offline.
 
-On top of the stock exact-GERS scoring this probe adds the two measurements
-recommendation 1 of docs/plans/2026-08-06-places-failure-mode-review.md asks
-for and the stock scorer cannot express:
+This probe retains the stock runner's transport and candidate evidence while
+adding the two measurements recommendation 1 of
+docs/plans/2026-08-06-places-failure-mode-review.md asks for and the stock
+scorer cannot express. Proximity rows discard the stock exact-anchor score
+because the deliberately displaced construction anchor is not the gold:
 
 - proximity cases ("chain near me"): the rank of any candidate whose name
   permissively contains the chain tokens
@@ -35,10 +37,11 @@ Usage:
 """
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import statistics
-import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -46,6 +49,28 @@ REPO = Path(__file__).resolve().parents[2]
 PROXIMITY_CASES = REPO / "benchmarks/proximity-chain-cases-v1.json"
 VARIANT_CASES = REPO / "benchmarks/variant-typing-cases-v1.json"
 DEFAULT_OUTPUT = REPO / "benchmarks/2026-08-06-proximity-variant-baseline-v1.json"
+INITIAL_RUN_GIT_SHA = "ed9b7770437e09cd19da8d1dbe9a4f0903a62364"
+EXTENSION_RUN_BASE_GIT_SHA = "479d46c4f1d4e35a21d4c56f80e5c1eb1fae4787"
+
+# Only fields that can change the request or custom score belong in this
+# digest. Descriptive provenance/strata may be corrected without pretending a
+# request was rerun; query, point, gold, tolerance, and scorer inputs may not.
+CASE_FINGERPRINT_FIELDS = (
+    "id", "kind", "query", "query_style", "expected_name", "alt_names",
+    "expected_gers_id", "expected_lat", "expected_lon", "tolerance_km",
+    "expected_feature_type", "control_query", "proximity",
+    "proximity_assert",
+)
+
+# The stock Runner scores proximity cases against the displaced construction
+# anchor. That anchor is non-nearest in 38/40 and the case contract forbids
+# retaining or comparing this score. Keep transport/candidates, custom `prox`,
+# and request metadata; remove every stock score/type derivative.
+STOCK_SCORE_FIELDS = {
+    "scoring_mode", "capability", "capability_reason", "rank", "found_at_1",
+    "found_at_10", "matched_distance_km", "top1_distance_km",
+    "expected_feature_type", "top1_feature_type", "type_at_1", "type_present",
+}
 
 spec = importlib.util.spec_from_file_location(
     "benchmark_v2_forward", REPO / "scripts/benchmark_v2_forward.py")
@@ -132,6 +157,87 @@ def score_variant(case, result):
 
 def rate(part, whole):
     return round(part / whole, 3) if whole else None
+
+
+def sha256_bytes(value):
+    return hashlib.sha256(value).hexdigest()
+
+
+def file_sha256(path):
+    return sha256_bytes(path.read_bytes())
+
+
+def case_fingerprint(case):
+    projection = {
+        key: case[key] for key in CASE_FINGERPRINT_FIELDS if key in case
+    }
+    encoded = json.dumps(
+        projection, sort_keys=True, separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return sha256_bytes(encoded)
+
+
+def fingerprint_block(proximity_cases, variant_cases):
+    return {
+        "algorithm": "sha256-canonical-request-score-projection-v1",
+        "proximity": {
+            case["id"]: case_fingerprint(case) for case in proximity_cases
+        },
+        "variant": {
+            case["id"]: case_fingerprint(case) for case in variant_cases
+        },
+    }
+
+
+def scrub_stock_proximity_score(row):
+    for field in STOCK_SCORE_FIELDS:
+        row.pop(field, None)
+    row["scoring_authority"] = "custom_chain_within_proximity_v1"
+
+
+def validate_frozen_rows(proximity_cases, proximity_rows,
+                         variant_cases, variant_pairs):
+    proximity_by_id = {case["id"]: case for case in proximity_cases}
+    for row in proximity_rows:
+        case = proximity_by_id[row["case_id"]]
+        if row.get("query") != case["query"]:
+            raise ValueError(f"stale proximity query for {case['id']}")
+        if row.get("proximity") != case["proximity"]:
+            raise ValueError(f"stale proximity point for {case['id']}")
+        rescored = score_proximity(case, row)
+        if rescored != row.get("prox"):
+            raise ValueError(f"stale proximity score for {case['id']}")
+
+    variants_by_id = {case["id"]: case for case in variant_cases}
+    for pair in variant_pairs:
+        case = variants_by_id[pair["case_id"]]
+        if pair.get("query") != case["query"]:
+            raise ValueError(f"stale variant query for {case['id']}")
+        if pair.get("control_query") != case["control_query"]:
+            raise ValueError(f"stale control query for {case['id']}")
+        for side in ("variant", "control"):
+            rescored = score_variant(case, pair[side])
+            if rescored != pair[side].get("variant_score"):
+                raise ValueError(f"stale {side} score for {case['id']}")
+
+
+def atomic_write_json(path, payload):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent,
+            prefix=f".{path.name}.", suffix=".tmp", delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            json.dump(payload, handle, indent=1, ensure_ascii=False)
+            handle.write("\n")
+            handle.flush()
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def summarize_proximity(rows):
@@ -249,7 +355,16 @@ def main():
         "--append-missing", action="store_true",
         help="preserve frozen rows and execute only newly added variant pairs",
     )
+    parser.add_argument(
+        "--migrate-frozen", action="store_true",
+        help=(
+            "offline one-time migration: rescore all frozen rows, bind case "
+            "fingerprints, and scrub forbidden stock proximity scores"
+        ),
+    )
     args = parser.parse_args()
+    if args.migrate_frozen and not args.append_missing:
+        parser.error("--migrate-frozen requires --append-missing")
 
     proximity_cases = json.loads(PROXIMITY_CASES.read_text())["cases"]
     variant_cases = json.loads(VARIANT_CASES.read_text())["cases"]
@@ -283,6 +398,54 @@ def main():
             parser.error(
                 f"variant case file removed frozen ids: {sorted(stale_ids)}"
             )
+        current_fingerprints = fingerprint_block(
+            proximity_cases, variant_cases)
+        prior_fingerprints = prior_meta.get("case_fingerprints")
+        if prior_fingerprints is None:
+            if not args.migrate_frozen:
+                parser.error(
+                    "frozen output has no case fingerprints; audit it once "
+                    "with --append-missing --migrate-frozen"
+                )
+            if missing_cases:
+                parser.error(
+                    "--migrate-frozen is offline-only and requires every "
+                    "current case to have a frozen response"
+                )
+            try:
+                validate_frozen_rows(
+                    proximity_cases, proximity_rows,
+                    variant_cases, variant_pairs,
+                )
+            except ValueError as error:
+                parser.error(str(error))
+        else:
+            if (
+                prior_fingerprints.get("algorithm")
+                != current_fingerprints["algorithm"]
+            ):
+                parser.error("unsupported frozen case-fingerprint algorithm")
+            for case_id in frozen_proximity_ids:
+                if (
+                    prior_fingerprints["proximity"].get(case_id)
+                    != current_fingerprints["proximity"][case_id]
+                ):
+                    parser.error(f"proximity case changed under id {case_id}")
+            for case_id in completed_ids:
+                if (
+                    prior_fingerprints["variant"].get(case_id)
+                    != current_fingerprints["variant"][case_id]
+                ):
+                    parser.error(f"variant case changed under id {case_id}")
+            try:
+                validate_frozen_rows(
+                    proximity_cases, proximity_rows,
+                    variant_cases, variant_pairs,
+                )
+            except ValueError as error:
+                parser.error(str(error))
+        for row in proximity_rows:
+            scrub_stock_proximity_score(row)
         print(
             f"=== append variant stratum ({len(missing_cases)} new cases x 2) ==="
         )
@@ -296,6 +459,7 @@ def main():
             result = runner.execute(case)
             result["prox"] = score_proximity(case, result)
             result["proximity"] = case["proximity"]
+            scrub_stock_proximity_score(result)
             proximity_rows.append(result)
 
         print(f"\n=== variant stratum ({len(variant_cases)} cases x 2) ===")
@@ -304,6 +468,17 @@ def main():
 
     proximity_summary = summarize_proximity(proximity_rows)
     variant_summary = summarize_variants(variant_pairs)
+    prior_extension_requests = prior_meta.get(
+        "extension_requests", prior_meta.get("requests_added", 0))
+    prior_extension_sha = prior_meta.get(
+        "extension_run_base_git_sha", prior_meta.get("git_sha"))
+    if prior_extension_sha == EXTENSION_RUN_BASE_GIT_SHA[:7]:
+        prior_extension_sha = EXTENSION_RUN_BASE_GIT_SHA
+    initial_requests = prior_meta.get(
+        "initial_requests",
+        prior_meta.get("requests", 0) - prior_extension_requests
+        if args.append_missing else len(proximity_rows) + 2 * len(variant_pairs),
+    )
 
     payload = {
         "schema": "proximity-variant-baseline-v1",
@@ -311,20 +486,42 @@ def main():
             "timestamp": datetime.now(timezone.utc).isoformat(
                 timespec="seconds"),
             "base_url": args.base_url,
-            "git_sha": bvf.git_sha(),
+            "initial_run_git_sha": prior_meta.get(
+                "initial_run_git_sha",
+                INITIAL_RUN_GIT_SHA if args.append_missing else bvf.git_sha(),
+            ),
+            "extension_run_base_git_sha": (
+                prior_extension_sha if args.append_missing else None),
+            "provenance_note": (
+                "The four extension requests ran from a worktree based on "
+                "extension_run_base_git_sha. Exact reusable request and "
+                "score inputs are bound by case_fingerprints; final probe and "
+                "case-file bytes are bound by content_sha256."
+                if args.append_missing else None
+            ),
             "data_version": (
                 runner.data_version or prior_meta.get("data_version")
             ),
             "overture_places_vintage": "2026-06-17.0",
+            "overture_divisions_vintage": "2026-07-22.0",
             "interval_s": args.interval,
             "cases": [str(PROXIMITY_CASES.relative_to(REPO)),
                       str(VARIANT_CASES.relative_to(REPO))],
             "requests": len(proximity_rows) + 2 * len(variant_pairs),
-            "requests_added": len(runner.results),
+            "initial_requests": initial_requests,
+            "extension_requests": prior_extension_requests + len(runner.results),
+            "requests_this_run": len(runner.results),
             "initial_timestamp": prior_meta.get("initial_timestamp",
                                                 prior_meta.get("timestamp")),
             "transient_retries_used": prior_retries + sum(
                 row.get("transient_retries") or 0 for row in runner.results),
+            "case_fingerprints": fingerprint_block(
+                proximity_cases, variant_cases),
+            "content_sha256": {
+                "probe": file_sha256(Path(__file__)),
+                "proximity_cases": file_sha256(PROXIMITY_CASES),
+                "variant_cases": file_sha256(VARIANT_CASES),
+            },
             "interpretation_notes": [
                 "chain_name_matches is permissive; Sydney credits Woolworths "
                 "Riley Street Car Park, so the proximity rate is flattering",
@@ -341,8 +538,7 @@ def main():
         "proximity_results": proximity_rows,
         "variant_results": variant_pairs,
     }
-    args.output.write_text(
-        json.dumps(payload, indent=1, ensure_ascii=False) + "\n")
+    atomic_write_json(args.output, payload)
 
     print("\n=== proximity summary ===")
     print(json.dumps(proximity_summary["overall"], indent=1))

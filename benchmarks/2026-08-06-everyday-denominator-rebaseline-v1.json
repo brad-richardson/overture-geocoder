@@ -6,19 +6,20 @@
   "build": "2026-08-03.0"
  },
  "quarantine_rule": "verdict == ABSENT (no name-matching Overture record within 2x tolerance of the gold point, min 1 km, on the production 2026-06-17.0 corpus) AND production did not hit the case; a production hit proves existence and overrides ABSENT",
- "upper_bound_note": "The corrected 0.639/0.648 rates are upper bounds, not a simple denominator correction: ABSENT is a bounded name probe and was wrong for 2 of the 70 production hits (2.9%). Applying that observed rate to 92 quarantines restores about 3 misses; the sensitivity estimate is approximately 0.622/0.631 (n=111).",
- "absent_probe_sensitivity": {
+ "upper_bound_note": "The corrected 0.639/0.648 rates are upper bounds, not a simple denominator correction: ABSENT is a bounded name probe and was wrong for 2 of the 70 production hits (2.9%). Applying that observed rate to 92 quarantines restores about 3 misses; the illustrative equal-blind-rate scenario is approximately 0.622/0.631 (n=111). This is not an empirical false-quarantine estimate: it extrapolates a rate observed among hits to misses.",
+ "absent_probe_equal_blind_rate_scenario": {
   "absent_verdict_hits": 2,
   "production_hits_at_10": 70,
   "observed_false_absent_rate_among_hits": 0.029,
-  "estimated_false_quarantines": 3,
-  "estimated_scoreboard": {
+  "scenario_false_quarantines": 3,
+  "scenario_scoreboard": {
    "n": 111,
    "found_at_1": 69,
    "found_at_10": 70,
    "recall_at_1": 0.622,
    "recall_at_10": 0.631
-  }
+  },
+  "method_caveat": "Illustrative only: assumes the ABSENT-probe blind rate among production misses equals the 2/70 rate observed among hits."
  },
  "population_shift_note": "Quarantine is not missing at random. CO falls 20->0 cases, AU 25->7, and KR 20->7; 94/108 kept cases (87%) are from HK, TW, SG, MX, or JP. The corrected rate therefore describes a materially different country population from the original 200.",
  "kept_concentration": {

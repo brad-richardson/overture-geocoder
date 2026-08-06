@@ -88,10 +88,10 @@ def main():
     old = scoreboard(results)
     corrected = scoreboard(kept)
     false_absent_rate = len(absent_but_hit) / old["found_at_10"]
-    estimated_false_quarantines = round(
+    scenario_false_quarantines = round(
         len(quarantined) * false_absent_rate)
-    sensitivity_rows = kept + quarantined[:estimated_false_quarantines]
-    sensitivity = scoreboard(sensitivity_rows)
+    scenario_rows = kept + quarantined[:scenario_false_quarantines]
+    scenario = scoreboard(scenario_rows)
     kept_concentration_countries = {"HK", "TW", "SG", "MX", "JP"}
     kept_concentration = sum(
         1 for row in kept
@@ -115,14 +115,20 @@ def main():
             "denominator correction: ABSENT is a bounded name probe and was "
             "wrong for 2 of the 70 production hits (2.9%). Applying that "
             "observed rate to 92 quarantines restores about 3 misses; the "
-            "sensitivity estimate is approximately 0.622/0.631 (n=111)."
+            "illustrative equal-blind-rate scenario is approximately "
+            "0.622/0.631 (n=111). This is not an empirical false-quarantine "
+            "estimate: it extrapolates a rate observed among hits to misses."
         ),
-        "absent_probe_sensitivity": {
+        "absent_probe_equal_blind_rate_scenario": {
             "absent_verdict_hits": len(absent_but_hit),
             "production_hits_at_10": old["found_at_10"],
             "observed_false_absent_rate_among_hits": round(false_absent_rate, 3),
-            "estimated_false_quarantines": estimated_false_quarantines,
-            "estimated_scoreboard": sensitivity,
+            "scenario_false_quarantines": scenario_false_quarantines,
+            "scenario_scoreboard": scenario,
+            "method_caveat": (
+                "Illustrative only: assumes the ABSENT-probe blind rate among "
+                "production misses equals the 2/70 rate observed among hits."
+            ),
         },
         "population_shift_note": (
             "Quarantine is not missing at random. CO falls 20->0 cases, AU "
