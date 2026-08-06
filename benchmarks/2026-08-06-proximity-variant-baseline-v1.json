@@ -1,0 +1,7540 @@
+{
+ "schema": "proximity-variant-baseline-v1",
+ "meta": {
+  "timestamp": "2026-08-06T18:50:38+00:00",
+  "base_url": "https://geocoder.bradr.dev",
+  "initial_run_git_sha": "ed9b7770437e09cd19da8d1dbe9a4f0903a62364",
+  "extension_run_base_git_sha": "479d46c4f1d4e35a21d4c56f80e5c1eb1fae4787",
+  "provenance_note": "The four extension requests ran from a worktree based on extension_run_base_git_sha. Exact reusable request and score inputs are bound by case_fingerprints; final probe and case-file bytes are bound by content_sha256.",
+  "data_version": "2026-08-03.0",
+  "overture_places_vintage": "2026-06-17.0",
+  "overture_divisions_vintage": "2026-07-22.0",
+  "interval_s": 0.4,
+  "cases": [
+   "benchmarks/proximity-chain-cases-v1.json",
+   "benchmarks/variant-typing-cases-v1.json"
+  ],
+  "requests": 84,
+  "initial_requests": 80,
+  "extension_requests": 4,
+  "requests_this_run": 0,
+  "initial_timestamp": "2026-08-06T07:45:08+00:00",
+  "transient_retries_used": 0,
+  "case_fingerprints": {
+   "algorithm": "sha256-canonical-request-score-projection-v1",
+   "proximity": {
+    "prox:seattle:starbucks": "a47a0943ede3de1a96088d75efccd8d268fe0c63896fe72c17f73f1b815d0567",
+    "prox:seattle:7-eleven": "239064c587740ada1b37e6c6502a9d57c2f32bb485d8fa5c2a997ffa07287eb2",
+    "prox:toronto:tim-hortons": "1859d1d998d4927b74bba053eb067dc88dd0631d71aa11405c009f5dd7b2f851",
+    "prox:toronto:starbucks": "70afb6fdd0c077e92231d8f981be32caafb4e5f1b6329f989d009af3d46982b7",
+    "prox:mexico_city:oxxo": "e58930448e68192664b100f6b2a6c49a0e3c912481f92aa0b3eeb1c2634bde83",
+    "prox:mexico_city:7-eleven": "398670c0d8f7870cdb1017ce29705d1f01d8ac40743129d5272f46f3ce5d954b",
+    "prox:sao_paulo:drogasil": "f945ad6a9ef0166bfc8b5943fa798e21b62c2612c9c4926cacf2bed572d281cb",
+    "prox:sao_paulo:mcdonald-s": "0520f9681d38c2ea373a3571876e02de507081a575f27edf67e0f47b7286cb9c",
+    "prox:london:costa-coffee": "7f3e9318cd74202b3b81dfaca41f1cc894a08243436fc01defa130f9ad14e3fb",
+    "prox:london:pret-a-manger": "72e76b69ef9ec3068df2d5ff25e5d8ac37b97d3f8237927b49557b10971fe37b",
+    "prox:london:starbucks": "8ab529000a07dc0375630547e34a6d714632281f1f4606afcfd0fe1868d66b5d",
+    "prox:paris:carrefour-city": "8b3b013dd07554fe8bf457a1f2b8b104a56ef02bb8ae96077a56a13152db9ab0",
+    "prox:paris:monoprix": "9f5c161774f1c39e03d5670f65f7ae59e269d720e637b982ba14f69f1f810dd5",
+    "prox:paris:mcdonald-s": "2590aa27f5b84dc34f1c5e7080bcb79c9346a30594a4ff6ced645d6b112ba94b",
+    "prox:berlin:rewe": "4f05d31f6f9cbb2bfdd6764d4971b0f818e218a541c7c3d964039df178183176",
+    "prox:berlin:lidl": "5f527c0f513af1ecf78fac5423497f067b561493437b8d09e7c7df1ead598bde",
+    "prox:madrid:mercadona": "c5cd7adb8b7ec1a12a43c47ed7024799fdb60db3dfad99d70be2e47bb7655826",
+    "prox:madrid:burger-king": "81dfaa525e42c37417acc090b817c388b46c3208289a466335cc42c8ccda0515",
+    "prox:stockholm:pressbyran": "d9973071cfa9702f82188d13ba2d3f46d60c4a4bd8feb31ef93c75d367754f9d",
+    "prox:stockholm:7-eleven": "6d3d3d33554699c1e7d69523c30c9aa3442f54de8a735b5bd107644586244fb2",
+    "prox:warsaw:zabka": "c25db61c35dababefe524ce09893602fe8f1f9701cedb1c1b2102d80ac0775b1",
+    "prox:warsaw:costa-coffee": "a6ccbe575e4e99391fcc3af31a3d79ad61905a2c26d4715f2c6b4fac83fcad23",
+    "prox:istanbul:sok": "4fd093d5b209717731f885e6b9afb56c981589a0d780b06f1b1ed7296afd11cb",
+    "prox:istanbul:migros": "1348501916d44bf6aab686ddab6f8375e1bba6ec100401bb169a77c25d877a9d",
+    "prox:tokyo:967962": "7bde4aa76ee959a338928980502af83a63709326683e49b64a8fdf53091f4fe5",
+    "prox:tokyo:starbucks": "e71889637d06c2b02ccc38349121520db64db04230fea76cd651998ad2f84d90",
+    "prox:bangkok:7-eleven": "0be44fe012664b081320859412fd7e7a821adcf1c7ad45cf7dd2c63a4e69fb12",
+    "prox:bangkok:kfc": "b7727a5e7c61b1fe608d45de20ac13c8454a1c8849b362d5556c7c650d068176",
+    "prox:singapore:7-eleven": "f42c467dab3560527241001a61d3d5e8f6f2cb357e56d2717b00e406bcfdadb6",
+    "prox:singapore:subway": "da46be155d99870a3c102b17b1a32ebc4d78029c2b3e9b735faf456be57aa872",
+    "prox:sydney:woolworths": "be313ad481c70bafc7e5d5abc362c8e01bdd519558ac37f2fd47beacff024f0b",
+    "prox:sydney:7-eleven": "654298933b83237682a8c5de41a321063867ad35aebbda96ce5beaf611af6541",
+    "prox:johannesburg:kfc": "19916a367bd36a0642e98941c904ec003b97186f0f6f352004734afac163aca7",
+    "prox:johannesburg:pick-n-pay": "c80490b2977d8e7101534785777446cce3ff66cff55c637809f78e167da68512",
+    "prox:mumbai:subway": "d850de2b06cee48a4024caa72840bdc92bff5b7c8a77e669ccc73a8cf549d287",
+    "prox:mumbai:starbucks": "45b16f2e89249a85a16b5fbd6add7f0149fc346f3cbc7a36c96434f807d6f9e0",
+    "prox:jakarta:indomaret": "435a198de9e7d9bf0fe87097b8f1e002715e67f362a92c49d9b1d8886ccf60de",
+    "prox:jakarta:kfc": "257aba288b0f345853a93a257800d75dc900d9431e1bf03137db20d964aa0cf3",
+    "prox:manila:jollibee": "8b690188c8dc1efea3eb66df3a79210bcce5abd7edf626dd05ff5692ad582be6",
+    "prox:manila:7-eleven": "023ddaa932a0b78c1565dfc5228e2ae1f57d2ad0716a037f842a992043ea5b96"
+   },
+   "variant": {
+    "variant:apostrophe:2097a8b6-881b-49dd-8ae0-3146f0a0ff83": "478c9d39d980610c79430bb0d78ae8e4413d24f67c402c9ea637e3511af2d2d7",
+    "variant:apostrophe:efe83e6c-0345-4991-ab35-0c30c48f4276": "736e30ef48bfe22b3a7a48242cab1394edde74ec0009a75ebf3de675b2ef6080",
+    "variant:apostrophe:839c614b-cf2c-4cfb-9a15-256c3ab5ee4b": "b1ac58b14ee8ced33f40b26f7f8d9e8278ad00fd46f916384c7d3f3a31e51ce7",
+    "variant:apostrophe:71ec4b26-847e-4d64-b1a7-33546ad4583e": "8f8aaf0d494dce9ab2f9301f0ef5a421aab2bd48a61a065c461d8b152f6373a3",
+    "variant:apostrophe:205bc0cb-6897-4ea3-84fc-351e0eb425d5": "3f85684c23e6a1b6f5b53705037c3b9ebbb62b6a1ace79ffa6b41ba5d91dfae8",
+    "variant:ampersand:02ec7d15-4548-4ed3-8366-abf9f145e159": "cd37da55da43cc01c6eb2dfc9472209121a4a333630de3ec5198f55ceaca237e",
+    "variant:ampersand:726ab33e-cbf8-43dc-818d-bf7f9d0d129a": "01179c222df08b69c25efb6999dfc59539decd1d35c5c15c8c9fea2219fef4ab",
+    "variant:ampersand:f04b96c1-8cce-4d12-9b02-e075a33b4fef": "43aa97f6751d170e71878ceb12f50e6946db400aa98a2e30c074fa01118841a0",
+    "variant:ampersand:c871e236-a875-4653-ba5e-6b836b9c82b1": "df7b38f9f058283601b21af4b7cb7001864fc0b820734909fdc9ba4ba953532d",
+    "variant:ampersand:dad3fab8-39e1-43d5-a2cc-f90fbabd318f": "a9c9e3e353a83246b664ce831fcc1eae66fe71cd570d5da4aea20a3e4672ebbf",
+    "variant:nonascii_latin:7687bbd4-c339-40b3-9c98-34d65377b977": "6611ca16d4644e98ff2e902a2cbce140ec64f7fb02fc7dda7065a07a8c87d5fb",
+    "variant:nonascii_latin:3ec74e78-a1ce-42e0-afb2-6da8063343a3": "44fe31004db135c896173fda2a4be5045c01c231a3b958acdcbea96df114cb83",
+    "variant:nonascii_latin:7ca1dcd1-4041-4455-982c-36c1fe9f3d77": "13e01a7a0e883f464ca80e4837dc8c2d881d00cf95bb1f9db5b59818f33f0add",
+    "variant:nonascii_latin:a8716f55-f78a-4f53-9d79-559c0f82504a": "73417d37c85dd691f09049148a8bea582b498ecea143596ae0b2966fa2a2317d",
+    "variant:nonascii_latin:949175db-36c1-4460-ab50-59a2b8a244db": "e2517ecb0626a84dd27c7b2c46410884e9801a00112c60b2321eff03f58c2948",
+    "variant:hyphen_locality:aeac6baa-905c-42f4-a93c-75187879bc15": "e16fd0fda14a34e0068edd753ce427b909128587aebdd311b62a6ab52c88c84c",
+    "variant:hyphen_locality:c351bc37-c2cd-4bb3-a4a3-5f79e69a13ac": "97e088cbb6d22d04998b30bab75e4c7245b9235f0a5deccfbf455ade75998406",
+    "variant:hyphen_locality:3e1c941b-074d-45d5-ba91-10cb91c6d9b6": "de1f545a00f7d82b1cf88e20797f622aa9d5ff8c2aadc3760435b1a4063ede46",
+    "variant:hyphen_locality:936fca1e-05d4-45fe-b25b-badcec3bdb18": "a98bf6852252d8fbfb94b7904ee7eff66518c9577625ca38b6884bf107b117fb",
+    "variant:hyphen_locality:1da687c4-b419-40dd-9089-ca6f32a32d17": "14429bef9a874bb6e0ab49285fc567bcd68afdf855b0e6079555d40a6746fbfa",
+    "variant:hyphen_locality:0a067856-c822-4b38-bdbd-4abbb24cacca": "a228da9eebd768f255036d954f4efb0346f464280d4e1d679699084354968e36",
+    "variant:hyphen_locality:8248f197-ef50-4588-a32c-ccad1abe72ba": "f19264b650d21ac1cca9399bf9236959045b5a07b2159840dc1a554ffb399854"
+   }
+  },
+  "content_sha256": {
+   "probe": "a3dab0303bd86461b877c6ebdd1342870d84f928f7ae44cdba35348f0694b5f1",
+   "proximity_cases": "adfd83ee019cfc7bc006e5b5a3f1ea92eac37dcbc306d68e74698b2f0467adb6",
+   "variant_cases": "0c5797a9a1967cf5f90c5825bd0953f3c8ba9e3ea8c7609cb1d0dc017e1ad0db"
+  },
+  "interpretation_notes": [
+   "chain_name_matches is permissive; Sydney credits Woolworths Riley Street Car Park, so the proximity rate is flattering",
+   "four of five apostrophe controls return zero candidates, so that class has weak discriminating power; retrieval is broken under both spellings for four of five, not five of five",
+   "the Domino's (IN, 9246 km), Søstrene Grene (DE, about 355 km), and Phương Đông (VN, 1134 km) control failures are global-homonym/distance failures, not proximity evidence"
+  ]
+ },
+ "proximity_summary": {
+  "overall": {
+   "n": 40,
+   "chain_within_2km_at_1": 3,
+   "chain_within_2km_at_10": 22,
+   "rank1_rate": 0.075,
+   "rank10_rate": 0.55,
+   "chain_anywhere_at_10": 40,
+   "top1_within_2km": 3,
+   "top1_within_2km_rate": 0.075,
+   "empty_responses": 0,
+   "median_top1_distance_km": 8.771,
+   "max_top1_distance_km": 8356.476
+  },
+  "by_country": {
+   "AU": {
+    "n": 2,
+    "chain_within_2km_at_1": 1,
+    "chain_within_2km_at_10": 1,
+    "rank1_rate": 0.5,
+    "rank10_rate": 0.5,
+    "chain_anywhere_at_10": 2,
+    "top1_within_2km": 1,
+    "top1_within_2km_rate": 0.5,
+    "empty_responses": 0,
+    "median_top1_distance_km": 9.829,
+    "max_top1_distance_km": 18.421
+   },
+   "BR": {
+    "n": 2,
+    "chain_within_2km_at_1": 0,
+    "chain_within_2km_at_10": 0,
+    "rank1_rate": 0.0,
+    "rank10_rate": 0.0,
+    "chain_anywhere_at_10": 2,
+    "top1_within_2km": 0,
+    "top1_within_2km_rate": 0.0,
+    "empty_responses": 0,
+    "median_top1_distance_km": 4184.459,
+    "max_top1_distance_km": 8356.476
+   },
+   "CA": {
+    "n": 2,
+    "chain_within_2km_at_1": 0,
+    "chain_within_2km_at_10": 1,
+    "rank1_rate": 0.0,
+    "rank10_rate": 0.5,
+    "chain_anywhere_at_10": 2,
+    "top1_within_2km": 0,
+    "top1_within_2km_rate": 0.0,
+    "empty_responses": 0,
+    "median_top1_distance_km": 36.151,
+    "max_top1_distance_km": 52.388
+   },
+   "DE": {
+    "n": 2,
+    "chain_within_2km_at_1": 0,
+    "chain_within_2km_at_10": 1,
+    "rank1_rate": 0.0,
+    "rank10_rate": 0.5,
+    "chain_anywhere_at_10": 2,
+    "top1_within_2km": 0,
+    "top1_within_2km_rate": 0.0,
+    "empty_responses": 0,
+    "median_top1_distance_km": 4.763,
+    "max_top1_distance_km": 6.187
+   },
+   "ES": {
+    "n": 2,
+    "chain_within_2km_at_1": 0,
+    "chain_within_2km_at_10": 1,
+    "rank1_rate": 0.0,
+    "rank10_rate": 0.5,
+    "chain_anywhere_at_10": 2,
+    "top1_within_2km": 0,
+    "top1_within_2km_rate": 0.0,
+    "empty_responses": 0,
+    "median_top1_distance_km": 19.184,
+    "max_top1_distance_km": 31.884
+   },
+   "FR": {
+    "n": 3,
+    "chain_within_2km_at_1": 1,
+    "chain_within_2km_at_10": 2,
+    "rank1_rate": 0.333,
+    "rank10_rate": 0.667,
+    "chain_anywhere_at_10": 3,
+    "top1_within_2km": 1,
+    "top1_within_2km_rate": 0.333,
+    "empty_responses": 0,
+    "median_top1_distance_km": 4.3,
+    "max_top1_distance_km": 7470.849
+   },
+   "GB": {
+    "n": 3,
+    "chain_within_2km_at_1": 0,
+    "chain_within_2km_at_10": 2,
+    "rank1_rate": 0.0,
+    "rank10_rate": 0.667,
+    "chain_anywhere_at_10": 3,
+    "top1_within_2km": 0,
+    "top1_within_2km_rate": 0.0,
+    "empty_responses": 0,
+    "median_top1_distance_km": 7.732,
+    "max_top1_distance_km": 12.523
+   },
+   "ID": {
+    "n": 2,
+    "chain_within_2km_at_1": 0,
+    "chain_within_2km_at_10": 1,
+    "rank1_rate": 0.0,
+    "rank10_rate": 0.5,
+    "chain_anywhere_at_10": 2,
+    "top1_within_2km": 0,
+    "top1_within_2km_rate": 0.0,
+    "empty_responses": 0,
+    "median_top1_distance_km": 14.593,
+    "max_top1_distance_km": 16.333
+   },
+   "IN": {
+    "n": 2,
+    "chain_within_2km_at_1": 0,
+    "chain_within_2km_at_10": 0,
+    "rank1_rate": 0.0,
+    "rank10_rate": 0.0,
+    "chain_anywhere_at_10": 2,
+    "top1_within_2km": 0,
+    "top1_within_2km_rate": 0.0,
+    "empty_responses": 0,
+    "median_top1_distance_km": 7.625,
+    "max_top1_distance_km": 8.035
+   },
+   "JP": {
+    "n": 2,
+    "chain_within_2km_at_1": 0,
+    "chain_within_2km_at_10": 0,
+    "rank1_rate": 0.0,
+    "rank10_rate": 0.0,
+    "chain_anywhere_at_10": 2,
+    "top1_within_2km": 0,
+    "top1_within_2km_rate": 0.0,
+    "empty_responses": 0,
+    "median_top1_distance_km": 20.396,
+    "max_top1_distance_km": 25.132
+   },
+   "MX": {
+    "n": 2,
+    "chain_within_2km_at_1": 0,
+    "chain_within_2km_at_10": 2,
+    "rank1_rate": 0.0,
+    "rank10_rate": 1.0,
+    "chain_anywhere_at_10": 2,
+    "top1_within_2km": 0,
+    "top1_within_2km_rate": 0.0,
+    "empty_responses": 0,
+    "median_top1_distance_km": 3.416,
+    "max_top1_distance_km": 4.682
+   },
+   "PH": {
+    "n": 2,
+    "chain_within_2km_at_1": 1,
+    "chain_within_2km_at_10": 2,
+    "rank1_rate": 0.5,
+    "rank10_rate": 1.0,
+    "chain_anywhere_at_10": 2,
+    "top1_within_2km": 1,
+    "top1_within_2km_rate": 0.5,
+    "empty_responses": 0,
+    "median_top1_distance_km": 5.373,
+    "max_top1_distance_km": 9.506
+   },
+   "PL": {
+    "n": 2,
+    "chain_within_2km_at_1": 0,
+    "chain_within_2km_at_10": 0,
+    "rank1_rate": 0.0,
+    "rank10_rate": 0.0,
+    "chain_anywhere_at_10": 2,
+    "top1_within_2km": 0,
+    "top1_within_2km_rate": 0.0,
+    "empty_responses": 0,
+    "median_top1_distance_km": 4.806,
+    "max_top1_distance_km": 6.875
+   },
+   "SE": {
+    "n": 2,
+    "chain_within_2km_at_1": 0,
+    "chain_within_2km_at_10": 2,
+    "rank1_rate": 0.0,
+    "rank10_rate": 1.0,
+    "chain_anywhere_at_10": 2,
+    "top1_within_2km": 0,
+    "top1_within_2km_rate": 0.0,
+    "empty_responses": 0,
+    "median_top1_distance_km": 3.019,
+    "max_top1_distance_km": 3.226
+   },
+   "SG": {
+    "n": 2,
+    "chain_within_2km_at_1": 0,
+    "chain_within_2km_at_10": 2,
+    "rank1_rate": 0.0,
+    "rank10_rate": 1.0,
+    "chain_anywhere_at_10": 2,
+    "top1_within_2km": 0,
+    "top1_within_2km_rate": 0.0,
+    "empty_responses": 0,
+    "median_top1_distance_km": 3.297,
+    "max_top1_distance_km": 4.503
+   },
+   "TH": {
+    "n": 2,
+    "chain_within_2km_at_1": 0,
+    "chain_within_2km_at_10": 1,
+    "rank1_rate": 0.0,
+    "rank10_rate": 0.5,
+    "chain_anywhere_at_10": 2,
+    "top1_within_2km": 0,
+    "top1_within_2km_rate": 0.0,
+    "empty_responses": 0,
+    "median_top1_distance_km": 18.006,
+    "max_top1_distance_km": 28.827
+   },
+   "TR": {
+    "n": 2,
+    "chain_within_2km_at_1": 0,
+    "chain_within_2km_at_10": 2,
+    "rank1_rate": 0.0,
+    "rank10_rate": 1.0,
+    "chain_anywhere_at_10": 2,
+    "top1_within_2km": 0,
+    "top1_within_2km_rate": 0.0,
+    "empty_responses": 0,
+    "median_top1_distance_km": 18.028,
+    "max_top1_distance_km": 24.281
+   },
+   "US": {
+    "n": 2,
+    "chain_within_2km_at_1": 0,
+    "chain_within_2km_at_10": 1,
+    "rank1_rate": 0.0,
+    "rank10_rate": 0.5,
+    "chain_anywhere_at_10": 2,
+    "top1_within_2km": 0,
+    "top1_within_2km_rate": 0.0,
+    "empty_responses": 0,
+    "median_top1_distance_km": 32.106,
+    "max_top1_distance_km": 39.541
+   },
+   "ZA": {
+    "n": 2,
+    "chain_within_2km_at_1": 0,
+    "chain_within_2km_at_10": 1,
+    "rank1_rate": 0.0,
+    "rank10_rate": 0.5,
+    "chain_anywhere_at_10": 2,
+    "top1_within_2km": 0,
+    "top1_within_2km_rate": 0.0,
+    "empty_responses": 0,
+    "median_top1_distance_km": 24.073,
+    "max_top1_distance_km": 30.229
+   }
+  }
+ },
+ "variant_summary": {
+  "overall": {
+   "n": 22,
+   "control_hit_at_10": 12,
+   "variant_hit_at_10": 6,
+   "both_hit": 6,
+   "control_only": 6,
+   "variant_only": 0,
+   "neither": 10,
+   "control_hit_rate": 0.545,
+   "variant_hit_rate": 0.273
+  },
+  "by_class": {
+   "ampersand": {
+    "n": 5,
+    "control_hit_at_10": 3,
+    "variant_hit_at_10": 0,
+    "both_hit": 0,
+    "control_only": 3,
+    "variant_only": 0,
+    "neither": 2,
+    "control_hit_rate": 0.6,
+    "variant_hit_rate": 0.0
+   },
+   "apostrophe": {
+    "n": 5,
+    "control_hit_at_10": 0,
+    "variant_hit_at_10": 0,
+    "both_hit": 0,
+    "control_only": 0,
+    "variant_only": 0,
+    "neither": 5,
+    "control_hit_rate": 0.0,
+    "variant_hit_rate": 0.0
+   },
+   "hyphen_locality": {
+    "n": 7,
+    "control_hit_at_10": 6,
+    "variant_hit_at_10": 6,
+    "both_hit": 6,
+    "control_only": 0,
+    "variant_only": 0,
+    "neither": 1,
+    "control_hit_rate": 0.857,
+    "variant_hit_rate": 0.857
+   },
+   "nonascii_latin": {
+    "n": 5,
+    "control_hit_at_10": 3,
+    "variant_hit_at_10": 0,
+    "both_hit": 0,
+    "control_only": 3,
+    "variant_only": 0,
+    "neither": 2,
+    "control_hit_rate": 0.6,
+    "variant_hit_rate": 0.0
+   }
+  }
+ },
+ "proximity_results": [
+  {
+   "provider": "overture",
+   "case_id": "prox:seattle:starbucks",
+   "kind": "place",
+   "query": "Starbucks",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 3334.6,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "15c56589-5d3c-4eac-b697-56ba5df0059b",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 47.269146,
+     "lon": -122.515404
+    },
+    {
+     "id": "2914fa56-fe97-4585-ae23-d53dd1d7886a",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 47.791233,
+     "lon": -122.367546
+    },
+    {
+     "id": "6d1b680c-dfed-40b2-9ce0-76663d38dddd",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 47.302135,
+     "lon": -122.575813
+    },
+    {
+     "id": "a9a68064-f395-4581-b03d-bcbb6f915381",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 47.522564,
+     "lon": -122.365623
+    },
+    {
+     "id": "ab87054e-1ca8-47fc-9f91-1a959ad2f519",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 47.737545,
+     "lon": -122.636047
+    },
+    {
+     "id": "abd8108a-0957-440e-a250-71d805f4fd66",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 47.163342,
+     "lon": -122.484352
+    },
+    {
+     "id": "cf12bb63-e8fe-456a-aa30-df408479bfef",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 47.239365,
+     "lon": -122.481285
+    },
+    {
+     "id": "d954340e-0881-4da9-a3b2-33f89f6e2c53",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 47.22155,
+     "lon": -122.539001
+    },
+    {
+     "id": "e0febdb2-32f4-41e2-add9-1299e8502435",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 47.596157,
+     "lon": -122.629883
+    },
+    {
+     "id": "ea7c1a70-0174-4702-a387-6f4d3ee16467",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 47.190327,
+     "lon": -122.407265
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "US",
+    "metro": "seattle",
+    "chain": "Starbucks"
+   },
+   "prox": {
+    "chain_rank_within_2km": null,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 39.541,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    -122.351902,
+    47.607112
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:seattle:7-eleven",
+   "kind": "place",
+   "query": "7-Eleven",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 479.6,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "0cd96a70-f3e2-4c6b-bd75-a9f88962d121",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 47.400841,
+     "lon": -122.22876
+    },
+    {
+     "id": "0fca9440-967d-46ba-b3c1-a045475d8ce1",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 47.290226,
+     "lon": -122.208366
+    },
+    {
+     "id": "165c0905-b4ba-42a5-87c2-03c573b7586d",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 47.272209,
+     "lon": -122.228363
+    },
+    {
+     "id": "3902d2da-966d-4b10-b50e-3b0aa3b4c75a",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 47.321068,
+     "lon": -122.221817
+    },
+    {
+     "id": "396f79c6-8a6d-4349-9ef1-a5708b286b61",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 47.235291,
+     "lon": -122.249283
+    },
+    {
+     "id": "3ae78652-4ff1-4038-bfc8-2951702af9ea",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 47.444599,
+     "lon": -122.300911
+    },
+    {
+     "id": "51d8cec7-dfae-491c-8cbb-0e0272f2c1b0",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 47.128139,
+     "lon": -122.173897
+    },
+    {
+     "id": "6a84f861-d976-4a7d-9b71-3b121403282d",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 47.315418,
+     "lon": -122.28315
+    },
+    {
+     "id": "7579a378-a7dd-4972-8dc3-7b2b6a636d65",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 47.387058,
+     "lon": -122.247917
+    },
+    {
+     "id": "75a3aade-c9d8-48f4-b552-1356a0db03cf",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 47.61763,
+     "lon": -122.331596
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "US",
+    "metro": "seattle",
+    "chain": "7-Eleven"
+   },
+   "prox": {
+    "chain_rank_within_2km": 10,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 24.672,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    -122.321996,
+    47.613593
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:toronto:tim-hortons",
+   "kind": "place",
+   "query": "Tim Hortons",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 490.5,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "0095ead5-f461-4d67-80fb-237a5711b466",
+     "name": "Tim Hortons",
+     "feature_type": "poi",
+     "lat": 43.981655,
+     "lon": -78.910835
+    },
+    {
+     "id": "016611aa-5702-46cf-9228-7b3869c9345a",
+     "name": "Tim Hortons",
+     "feature_type": "poi",
+     "lat": 43.76067,
+     "lon": -79.326584
+    },
+    {
+     "id": "04bb03e1-c9c0-4a44-b11d-b49f8ae42a84",
+     "name": "Tim Hortons",
+     "feature_type": "poi",
+     "lat": 43.707638,
+     "lon": -79.476761
+    },
+    {
+     "id": "061d2e6a-7d45-4c25-91b5-f3287ecf46cb",
+     "name": "Tim Hortons",
+     "feature_type": "poi",
+     "lat": 43.643875,
+     "lon": -79.419022
+    },
+    {
+     "id": "06264a89-e458-463e-9c2f-68d440512a53",
+     "name": "Tim Hortons",
+     "feature_type": "poi",
+     "lat": 44.045959,
+     "lon": -79.437576
+    },
+    {
+     "id": "065f1aca-7ef3-4809-892d-d168096398bf",
+     "name": "Tim Hortons",
+     "feature_type": "poi",
+     "lat": 43.77158,
+     "lon": -79.251892
+    },
+    {
+     "id": "0699eab7-1428-4244-9611-66e36b98f94c",
+     "name": "Tim Hortons",
+     "feature_type": "poi",
+     "lat": 43.697163,
+     "lon": -79.501503
+    },
+    {
+     "id": "0769cee2-a50e-4fb2-951b-c66a3027d206",
+     "name": "Tim Hortons",
+     "feature_type": "poi",
+     "lat": 43.681377,
+     "lon": -79.331741
+    },
+    {
+     "id": "078d205e-a61a-41a1-8ae9-603002f2a55e",
+     "name": "Tim Hortons",
+     "feature_type": "poi",
+     "lat": 43.655651,
+     "lon": -79.743996
+    },
+    {
+     "id": "08357553-81d1-443c-a8b3-13523fa4f5e1",
+     "name": "Tim Hortons",
+     "feature_type": "poi",
+     "lat": 43.891472,
+     "lon": -79.264687
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "CA",
+    "metro": "toronto",
+    "chain": "Tim Hortons"
+   },
+   "prox": {
+    "chain_rank_within_2km": null,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 52.388,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    -79.387042,
+    43.659295
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:toronto:starbucks",
+   "kind": "place",
+   "query": "Starbucks",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 164.0,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "03041f6b-b4a5-433a-84ef-1f4f7bd9e951",
+     "name": "Starbucks at Toronto Pearson International Airport",
+     "feature_type": "poi",
+     "lat": 43.679653,
+     "lon": -79.616554
+    },
+    {
+     "id": "01485d1b-8781-4d46-8827-20e22be56112",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 43.679413,
+     "lon": -79.61158
+    },
+    {
+     "id": "033df389-fec4-4968-a721-8acf29a1f3e6",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 43.735928,
+     "lon": -79.344162
+    },
+    {
+     "id": "08d02ee0-f096-472a-a1a8-74a3a12d5967",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 43.829258,
+     "lon": -79.536888
+    },
+    {
+     "id": "0984b7f1-123d-4ec7-b6a0-ed146c58b03b",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 43.785942,
+     "lon": -79.474335
+    },
+    {
+     "id": "0a3c5cec-f615-4615-87d2-8b4b59ff9890",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 43.69371,
+     "lon": -79.752037
+    },
+    {
+     "id": "0aca78e7-657f-4482-b85a-153ef188ed83",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 43.828896,
+     "lon": -79.088158
+    },
+    {
+     "id": "0bc58290-106b-427c-9c98-086fc738ad18",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 43.766338,
+     "lon": -79.476257
+    },
+    {
+     "id": "0f392337-7d7e-442c-9382-e3e6efb34fdf",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 43.653324,
+     "lon": -79.377632
+    },
+    {
+     "id": "11084540-e330-4251-b8d2-a9d71f118451",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 43.84441,
+     "lon": -79.559906
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "CA",
+    "metro": "toronto",
+    "chain": "Starbucks"
+   },
+   "prox": {
+    "chain_rank_within_2km": 9,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 19.914,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    -79.370061,
+    43.662728
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:mexico_city:oxxo",
+   "kind": "place",
+   "query": "OXXO",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 456.0,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "a47c5990-b0c6-40a3-acb4-556bb0a4d1a5",
+     "name": "Oxxo Elite Living Insurgentes",
+     "feature_type": "poi",
+     "lat": 19.46973,
+     "lon": -99.139214
+    },
+    {
+     "id": "8ef8fec8-283a-42d5-a78f-952bcf739ae4",
+     "name": "Oxxo",
+     "feature_type": "poi",
+     "lat": 19.502481,
+     "lon": -99.252327
+    },
+    {
+     "id": "e49da616-7803-48f3-9b69-21b39318d3cf",
+     "name": "OXXO",
+     "feature_type": "poi",
+     "lat": 19.473927,
+     "lon": -99.133583
+    },
+    {
+     "id": "19a0f19d-623e-4b5f-a6f3-cd5978fb76ec",
+     "name": "OXXO",
+     "feature_type": "poi",
+     "lat": 19.390621,
+     "lon": -99.163055
+    },
+    {
+     "id": "32b9c96a-9080-4eb4-a6e0-f0157975a556",
+     "name": "OXXO",
+     "feature_type": "poi",
+     "lat": 19.211409,
+     "lon": -99.155022
+    },
+    {
+     "id": "3691c7d1-00d9-43a6-ad25-69c4886f98ca",
+     "name": "OXXO",
+     "feature_type": "poi",
+     "lat": 19.466002,
+     "lon": -99.232712
+    },
+    {
+     "id": "39736120-42bd-404b-9f4a-f586e079b38f",
+     "name": "OXXO",
+     "feature_type": "poi",
+     "lat": 19.277653,
+     "lon": -99.67527
+    },
+    {
+     "id": "3b9ffcb1-b954-48d8-ba3c-935b5f994357",
+     "name": "OXXO",
+     "feature_type": "poi",
+     "lat": 19.441425,
+     "lon": -99.210304
+    },
+    {
+     "id": "43acde12-64c4-4de6-aadc-2e609a67eba8",
+     "name": "OXXO",
+     "feature_type": "poi",
+     "lat": 19.429394,
+     "lon": -99.128242
+    },
+    {
+     "id": "82ca4790-1c3d-4e84-9b1f-147b985083dc",
+     "name": "Oxxo",
+     "feature_type": "poi",
+     "lat": 19.26721,
+     "lon": -99.11985
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "MX",
+    "metro": "mexico_city",
+    "chain": "OXXO"
+   },
+   "prox": {
+    "chain_rank_within_2km": 9,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 4.682,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    -99.140301,
+    19.42764
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:mexico_city:7-eleven",
+   "kind": "place",
+   "query": "7-Eleven",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 479.2,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "0bb88996-004a-4c3c-a649-6469e9344f88",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 19.434597,
+     "lon": -99.139183
+    },
+    {
+     "id": "0d2cff63-40dd-4b78-9e5c-cefb21e7c6ae",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 19.414806,
+     "lon": -99.170418
+    },
+    {
+     "id": "12f34702-3baf-4faf-9b07-ebfb59da3ea1",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 19.42094,
+     "lon": -99.16172
+    },
+    {
+     "id": "16cc9dc4-b555-49df-b035-4bc30fe04e09",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 19.383951,
+     "lon": -99.08725
+    },
+    {
+     "id": "207bf6f6-62a9-4437-be99-44ca8d66d2ea",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 19.447754,
+     "lon": -99.15255
+    },
+    {
+     "id": "2243dc8c-ac86-4371-b50b-4c6f0051324a",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 19.491159,
+     "lon": -99.173271
+    },
+    {
+     "id": "22b35d25-172e-42a5-a699-b0032daff92f",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 19.289021,
+     "lon": -99.161575
+    },
+    {
+     "id": "38cfe514-eb99-438a-b36a-79fb3678659d",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 19.312433,
+     "lon": -99.140732
+    },
+    {
+     "id": "3b186819-56c9-4b91-bdbf-56faa969596b",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 19.530701,
+     "lon": -99.223999
+    },
+    {
+     "id": "449ce69a-17e7-4337-9d79-82dddcbbab11",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 19.318224,
+     "lon": -99.140625
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "MX",
+    "metro": "mexico_city",
+    "chain": "7-Eleven"
+   },
+   "prox": {
+    "chain_rank_within_2km": 2,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 2.15,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    -99.15844,
+    19.427954
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:sao_paulo:drogasil",
+   "kind": "place",
+   "query": "Drogasil",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 1471.0,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "40236a53-400e-4028-a90e-8235189fd8f1",
+     "name": "Drogasil",
+     "feature_type": "poi",
+     "lat": -23.610315,
+     "lon": -46.742203
+    },
+    {
+     "id": "007e4022-b2e3-48aa-86a1-48a6d801e681",
+     "name": "Drogasil",
+     "feature_type": "poi",
+     "lat": -23.493151,
+     "lon": -46.441891
+    },
+    {
+     "id": "28b1b065-ab99-4c31-b778-f17b110f5652",
+     "name": "Drogasil",
+     "feature_type": "poi",
+     "lat": -23.58934,
+     "lon": -46.734592
+    },
+    {
+     "id": "2d83ee86-bc06-4c4d-becc-9005d7597d20",
+     "name": "Drogasil",
+     "feature_type": "poi",
+     "lat": -23.646666,
+     "lon": -46.541088
+    },
+    {
+     "id": "2d94dc69-6320-409c-846d-6452c7b27272",
+     "name": "Drogasil",
+     "feature_type": "poi",
+     "lat": -23.588514,
+     "lon": -46.723446
+    },
+    {
+     "id": "33dc2d28-36c3-4e7d-b2f4-e2c19a5d728c",
+     "name": "Drogasil",
+     "feature_type": "poi",
+     "lat": -23.487099,
+     "lon": -46.606644
+    },
+    {
+     "id": "38fe0da5-2511-4c02-aac2-9a7690f18806",
+     "name": "Drogasil",
+     "feature_type": "poi",
+     "lat": -23.610123,
+     "lon": -46.686604
+    },
+    {
+     "id": "3b63826d-b12e-4897-ab33-3ebde7afd675",
+     "name": "Drogasil",
+     "feature_type": "poi",
+     "lat": -23.540529,
+     "lon": -46.70203
+    },
+    {
+     "id": "3e041b63-3cb4-4f68-82be-4a84f7857261",
+     "name": "Drogasil",
+     "feature_type": "poi",
+     "lat": -23.625685,
+     "lon": -46.580349
+    },
+    {
+     "id": "41a03d7f-6a19-4677-8f24-9324663e3b66",
+     "name": "Drogasil",
+     "feature_type": "poi",
+     "lat": -23.705301,
+     "lon": -46.551239
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "BR",
+    "metro": "sao_paulo",
+    "chain": "Drogasil"
+   },
+   "prox": {
+    "chain_rank_within_2km": null,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 12.442,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    -46.638151,
+    -23.55178
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:sao_paulo:mcdonald-s",
+   "kind": "place",
+   "query": "McDonald's",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 1039.4,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "dd43fd7b-ff5c-4530-ba65-a2fc3ddd8cdd",
+     "name": "McDonald County, MO",
+     "feature_type": "county",
+     "lat": 36.625984,
+     "lon": -94.352946
+    },
+    {
+     "id": "1b9e7969-e051-4394-ace4-5d6fbfb55cb2",
+     "name": "McDonald's",
+     "feature_type": "poi",
+     "lat": -23.545422,
+     "lon": -46.571323
+    },
+    {
+     "id": "2b0c1b20-4cb8-4a95-b141-25a7de67101a",
+     "name": "McDonald's",
+     "feature_type": "poi",
+     "lat": -23.479191,
+     "lon": -46.583797
+    },
+    {
+     "id": "61bf561b-af2d-4241-8966-2d878e1298eb",
+     "name": "McDonald's",
+     "feature_type": "poi",
+     "lat": -23.4958,
+     "lon": -47.464569
+    },
+    {
+     "id": "ba7a47d6-7d89-4cc0-a5f6-fb81141ebeb0",
+     "name": "McDonald's",
+     "feature_type": "poi",
+     "lat": -23.562452,
+     "lon": -46.561558
+    },
+    {
+     "id": "cfd38447-a9d4-4306-b1d2-5eba57f217fb",
+     "name": "McDonald's",
+     "feature_type": "poi",
+     "lat": -23.576017,
+     "lon": -46.587448
+    },
+    {
+     "id": "edfe242f-d0ab-4f71-ba94-466926e9c5a5",
+     "name": "McDonald's",
+     "feature_type": "poi",
+     "lat": -23.553385,
+     "lon": -46.707664
+    },
+    {
+     "id": "f24eb571-8773-46a0-b0da-993f302de258",
+     "name": "McDonald's",
+     "feature_type": "poi",
+     "lat": -23.620453,
+     "lon": -46.603123
+    },
+    {
+     "id": "0dd69963-5e85-4686-9d1f-c6e2b8501634",
+     "name": "McDonald's",
+     "feature_type": "poi",
+     "lat": -23.535975,
+     "lon": -47.45145
+    },
+    {
+     "id": "0ea21ef4-393a-4787-964e-dff4a0fea673",
+     "name": "McDonald's",
+     "feature_type": "poi",
+     "lat": -23.721842,
+     "lon": -46.549763
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "BR",
+    "metro": "sao_paulo",
+    "chain": "McDonald's"
+   },
+   "prox": {
+    "chain_rank_within_2km": null,
+    "chain_rank_any": 2,
+    "top1_distance_from_proximity_km": 8356.476,
+    "top1_is_chain": false,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    -46.635417,
+    -23.575741
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:london:costa-coffee",
+   "kind": "place",
+   "query": "Costa Coffee",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 1181.1,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "00c037e2-385c-469e-8007-9b2012c66024",
+     "name": "Costa Coffee",
+     "feature_type": "poi",
+     "lat": 51.494263,
+     "lon": -0.090497
+    },
+    {
+     "id": "00f22f3d-db8a-4a73-9ab8-d7a691f4a3f3",
+     "name": "Costa Coffee",
+     "feature_type": "poi",
+     "lat": 51.432434,
+     "lon": -0.545969
+    },
+    {
+     "id": "048def6a-aae2-4635-9e88-8bc62cc311cb",
+     "name": "Costa Coffee",
+     "feature_type": "poi",
+     "lat": 51.339211,
+     "lon": -0.505207
+    },
+    {
+     "id": "04c21f19-8379-4054-b773-803801730456",
+     "name": "Costa Coffee",
+     "feature_type": "poi",
+     "lat": 51.400135,
+     "lon": -0.255751
+    },
+    {
+     "id": "04c710cb-38dc-4758-908f-0973fbe2c5ea",
+     "name": "Costa Coffee",
+     "feature_type": "poi",
+     "lat": 51.423767,
+     "lon": -0.980867
+    },
+    {
+     "id": "06ca1981-9848-4531-b518-4c65ad5e580d",
+     "name": "Costa Coffee",
+     "feature_type": "poi",
+     "lat": 51.581238,
+     "lon": -0.03348
+    },
+    {
+     "id": "07cca2f9-6fb8-4257-b74b-4853b35533ae",
+     "name": "Costa Coffee",
+     "feature_type": "poi",
+     "lat": 51.510815,
+     "lon": -0.086892
+    },
+    {
+     "id": "07e30cb9-14c9-4222-ba4b-0cfb3eea42d9",
+     "name": "Costa Coffee",
+     "feature_type": "poi",
+     "lat": 51.513618,
+     "lon": -0.117935
+    },
+    {
+     "id": "07edd904-c414-4620-924a-0955b597bebd",
+     "name": "Costa Coffee",
+     "feature_type": "poi",
+     "lat": 51.892658,
+     "lon": -0.199774
+    },
+    {
+     "id": "0885ed97-ae19-4ddd-89af-1186c8ddd08e",
+     "name": "Costa Coffee",
+     "feature_type": "poi",
+     "lat": 51.544945,
+     "lon": -0.176799
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "GB",
+    "metro": "london",
+    "chain": "Costa Coffee"
+   },
+   "prox": {
+    "chain_rank_within_2km": 7,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 2.717,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    -0.094597,
+    51.518563
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:london:pret-a-manger",
+   "kind": "place",
+   "query": "Pret A Manger",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 549.5,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "01afc889-2141-4d3e-a589-0b6a842161de",
+     "name": "Pret A Manger",
+     "feature_type": "poi",
+     "lat": 51.508862,
+     "lon": -0.196762
+    },
+    {
+     "id": "050371ef-b8e7-4cab-87bf-75b74584cc4a",
+     "name": "Pret A Manger",
+     "feature_type": "poi",
+     "lat": 51.506638,
+     "lon": -0.027838
+    },
+    {
+     "id": "0744b9e7-acde-43d3-b081-ebdd96faace6",
+     "name": "Pret A Manger",
+     "feature_type": "poi",
+     "lat": 51.511204,
+     "lon": -0.1383
+    },
+    {
+     "id": "076c6ba1-2b02-4232-8085-08e282456508",
+     "name": "Pret A Manger",
+     "feature_type": "poi",
+     "lat": 51.410843,
+     "lon": -0.301916
+    },
+    {
+     "id": "07e67a8e-8ce7-4bd0-879b-ae41e6fb4289",
+     "name": "Pret A Manger",
+     "feature_type": "poi",
+     "lat": 51.534103,
+     "lon": -0.171582
+    },
+    {
+     "id": "08b5045a-93f1-4381-93b8-9c2a1ccf9aa7",
+     "name": "Pret A Manger",
+     "feature_type": "poi",
+     "lat": 51.57729,
+     "lon": -0.223961
+    },
+    {
+     "id": "0940028a-2b73-43f6-a758-46e9ce319f1a",
+     "name": "Pret A Manger",
+     "feature_type": "poi",
+     "lat": 51.486305,
+     "lon": -0.124682
+    },
+    {
+     "id": "0b45c080-74a8-458a-92e7-4a5b19bed673",
+     "name": "Pret A Manger",
+     "feature_type": "poi",
+     "lat": 51.522015,
+     "lon": -0.092514
+    },
+    {
+     "id": "0ffb128f-c940-4c4c-af52-3b4c323ef9fa",
+     "name": "Pret A Manger",
+     "feature_type": "poi",
+     "lat": 51.545956,
+     "lon": -0.103287
+    },
+    {
+     "id": "1015172d-5b65-4347-9053-63def08a4dd0",
+     "name": "Pret A Manger",
+     "feature_type": "poi",
+     "lat": 51.458187,
+     "lon": -0.972746
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "GB",
+    "metro": "london",
+    "chain": "Pret A Manger"
+   },
+   "prox": {
+    "chain_rank_within_2km": 8,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 7.732,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    -0.085322,
+    51.513818
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:london:starbucks",
+   "kind": "place",
+   "query": "Starbucks",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 255.8,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "7b113d91-0f36-467e-ac2f-fef19dcabaef",
+     "name": "Starbucks, Holland Park",
+     "feature_type": "poi",
+     "lat": 51.521545,
+     "lon": -0.268272
+    },
+    {
+     "id": "01dd8fb8-b668-4c67-bffd-e12cb043c91c",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 51.747406,
+     "lon": -0.473291
+    },
+    {
+     "id": "05116ccf-5681-46f8-ae12-e257a6077e5f",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 51.471451,
+     "lon": -0.476158
+    },
+    {
+     "id": "053b976a-f6c7-4aaf-a8f9-2110b8fee1f0",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 51.655163,
+     "lon": -0.393169
+    },
+    {
+     "id": "0acef0e9-fd94-4ba6-bcc9-f1da97bcbc29",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 51.547745,
+     "lon": -0.191111
+    },
+    {
+     "id": "0b106da3-596f-45c4-8e0b-91511e9aa16d",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 51.476883,
+     "lon": -0.042311
+    },
+    {
+     "id": "0e94f25d-8b42-4d40-b781-f599b53cee0e",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 51.757034,
+     "lon": -0.978748
+    },
+    {
+     "id": "0ead2eab-e4df-4329-a333-d38ae04ab94c",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 51.652279,
+     "lon": -0.08339
+    },
+    {
+     "id": "0efada91-4982-4f44-ad25-694df536329d",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 51.446388,
+     "lon": -0.410762
+    },
+    {
+     "id": "0f36095a-9b6a-4763-9531-c3ae31793288",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 51.514103,
+     "lon": -0.161189
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "GB",
+    "metro": "london",
+    "chain": "Starbucks"
+   },
+   "prox": {
+    "chain_rank_within_2km": null,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 12.523,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    -0.089061,
+    51.505855
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:paris:carrefour-city",
+   "kind": "place",
+   "query": "Carrefour City",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 718.3,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "288b8575-88f0-4152-8f55-c5b29a9d89e9",
+     "name": "Carrefour City",
+     "feature_type": "poi",
+     "lat": 48.854809,
+     "lon": 2.306053
+    },
+    {
+     "id": "776fad8d-88d9-4bee-a37a-a0062611c5d0",
+     "name": "Carrefour City",
+     "feature_type": "poi",
+     "lat": 48.856003,
+     "lon": 2.376049
+    },
+    {
+     "id": "94e511ca-9924-4371-b6b7-95a5fb7a2cc6",
+     "name": "Carrefour city",
+     "feature_type": "poi",
+     "lat": 48.854935,
+     "lon": 2.385913
+    },
+    {
+     "id": "ddeec9a5-1f9a-46a3-9b18-bc3cb29524d9",
+     "name": "Carrefour City",
+     "feature_type": "poi",
+     "lat": 48.722534,
+     "lon": 2.533703
+    },
+    {
+     "id": "0ecf1734-6c99-4e22-b03e-0e28e48eafc7",
+     "name": "Carrefour City",
+     "feature_type": "poi",
+     "lat": 48.884972,
+     "lon": 2.291057
+    },
+    {
+     "id": "268a85d7-5da4-4113-9922-8a7faafa381b",
+     "name": "Carrefour City",
+     "feature_type": "poi",
+     "lat": 48.846359,
+     "lon": 2.284271
+    },
+    {
+     "id": "29f92e6a-eccb-4d5d-ad25-14d007507ea2",
+     "name": "Carrefour City",
+     "feature_type": "poi",
+     "lat": 48.80566,
+     "lon": 2.135934
+    },
+    {
+     "id": "3740ad52-f6d8-4ee4-be4c-5e3e87aa7a32",
+     "name": "Carrefour City",
+     "feature_type": "poi",
+     "lat": 48.862183,
+     "lon": 2.384361
+    },
+    {
+     "id": "3be0652c-8b95-4714-bb54-257a6f924eb6",
+     "name": "Carrefour City",
+     "feature_type": "poi",
+     "lat": 48.887821,
+     "lon": 2.285496
+    },
+    {
+     "id": "4d8370c4-506e-4b57-8d97-967e6c203f99",
+     "name": "Carrefour City",
+     "feature_type": "poi",
+     "lat": 48.882179,
+     "lon": 2.321639
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "FR",
+    "metro": "paris",
+    "chain": "Carrefour City"
+   },
+   "prox": {
+    "chain_rank_within_2km": 2,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 4.3,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    2.364803,
+    48.853607
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:paris:monoprix",
+   "kind": "place",
+   "query": "Monoprix",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 245.7,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "0b700912-56bd-4d8e-afeb-3fcd96890119",
+     "name": "Monoprix",
+     "feature_type": "poi",
+     "lat": 48.866192,
+     "lon": 2.36138
+    },
+    {
+     "id": "11d8959b-d023-4c52-8700-acc661884c32",
+     "name": "Monoprix",
+     "feature_type": "poi",
+     "lat": 48.83345,
+     "lon": 2.364835
+    },
+    {
+     "id": "141c42dd-e212-4932-976c-844058e65b78",
+     "name": "Monoprix",
+     "feature_type": "poi",
+     "lat": 48.86581,
+     "lon": 2.352048
+    },
+    {
+     "id": "1a8cce54-4eee-42f6-9538-1d03c3203ffe",
+     "name": "Monoprix",
+     "feature_type": "poi",
+     "lat": 48.848232,
+     "lon": 2.283707
+    },
+    {
+     "id": "1e7acdca-7932-4d36-8d97-32c045163acd",
+     "name": "Monoprix",
+     "feature_type": "poi",
+     "lat": 48.829987,
+     "lon": 2.377629
+    },
+    {
+     "id": "27d3119e-6114-4716-a145-937095054179",
+     "name": "Monoprix",
+     "feature_type": "poi",
+     "lat": 48.82724,
+     "lon": 2.277455
+    },
+    {
+     "id": "2db64081-7b9b-4567-ac1e-bf9f49a92b94",
+     "name": "Monoprix",
+     "feature_type": "poi",
+     "lat": 48.885124,
+     "lon": 2.43374
+    },
+    {
+     "id": "3a35cb72-9b46-4122-94b2-2cb9eeecb5d0",
+     "name": "Monoprix",
+     "feature_type": "poi",
+     "lat": 48.84631,
+     "lon": 2.372404
+    },
+    {
+     "id": "3db2fb0a-3487-46bd-b737-fd7faf5d84c1",
+     "name": "MONOPRIX",
+     "feature_type": "poi",
+     "lat": 48.914444,
+     "lon": 2.379988
+    },
+    {
+     "id": "41d316a3-4197-499c-a24c-87421ea0983f",
+     "name": "Monoprix",
+     "feature_type": "poi",
+     "lat": 48.824326,
+     "lon": 2.35864
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "FR",
+    "metro": "paris",
+    "chain": "Monoprix"
+   },
+   "prox": {
+    "chain_rank_within_2km": 1,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 1.086,
+    "top1_is_chain": true,
+    "top1_within_assert": true,
+    "empty": false
+   },
+   "proximity": [
+    2.365568,
+    48.856818
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:paris:mcdonald-s",
+   "kind": "place",
+   "query": "McDonald's",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 562.0,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "dd43fd7b-ff5c-4530-ba65-a2fc3ddd8cdd",
+     "name": "McDonald County, MO",
+     "feature_type": "county",
+     "lat": 36.625984,
+     "lon": -94.352946
+    },
+    {
+     "id": "00309be7-6f8f-4e78-98aa-18eb35d016cf",
+     "name": "McDonald's",
+     "feature_type": "poi",
+     "lat": 48.566311,
+     "lon": 2.444638
+    },
+    {
+     "id": "057f6f85-e12d-4ec3-97fe-ac8315508dd1",
+     "name": "McDonald's",
+     "feature_type": "poi",
+     "lat": 48.857632,
+     "lon": 2.277873
+    },
+    {
+     "id": "06678772-c104-4a68-808b-497a469f1be5",
+     "name": "McDonald's",
+     "feature_type": "poi",
+     "lat": 48.989677,
+     "lon": 1.749391
+    },
+    {
+     "id": "068492bd-ffb8-4d35-be3b-cfeca2c1d6ff",
+     "name": "McDonald's",
+     "feature_type": "poi",
+     "lat": 48.745136,
+     "lon": 2.410329
+    },
+    {
+     "id": "08512fa9-da35-4599-b831-02cedd026535",
+     "name": "McDonald's",
+     "feature_type": "poi",
+     "lat": 48.910717,
+     "lon": 2.234545
+    },
+    {
+     "id": "0a260330-d9b3-4a87-9baa-c01d6ff52f50",
+     "name": "McDonald's",
+     "feature_type": "poi",
+     "lat": 48.677467,
+     "lon": 2.169926
+    },
+    {
+     "id": "0a7a3896-0afd-4bb6-8b0a-d5bfc6ff6d28",
+     "name": "McDonald's",
+     "feature_type": "poi",
+     "lat": 48.882275,
+     "lon": 2.370631
+    },
+    {
+     "id": "0c1c16b1-732b-41f2-80a4-12aead6b0d8c",
+     "name": "McDonald's",
+     "feature_type": "poi",
+     "lat": 48.615055,
+     "lon": 2.424806
+    },
+    {
+     "id": "0c303527-317b-4dfe-a7d8-be062fb9c256",
+     "name": "McDonald's",
+     "feature_type": "poi",
+     "lat": 48.905037,
+     "lon": 2.549798
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "FR",
+    "metro": "paris",
+    "chain": "McDonald's"
+   },
+   "prox": {
+    "chain_rank_within_2km": null,
+    "chain_rank_any": 2,
+    "top1_distance_from_proximity_km": 7470.849,
+    "top1_is_chain": false,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    2.342189,
+    48.858639
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:berlin:rewe",
+   "kind": "place",
+   "query": "REWE",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 975.6,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "6e73ed09-b797-4b29-acd0-cf9ab14b7603",
+     "name": "Rewe Am Park",
+     "feature_type": "poi",
+     "lat": 52.529324,
+     "lon": 13.438726
+    },
+    {
+     "id": "001d42d0-4c4f-4eb3-b503-04b9f543dab3",
+     "name": "REWE",
+     "feature_type": "poi",
+     "lat": 52.535526,
+     "lon": 13.496549
+    },
+    {
+     "id": "00be90bd-602d-461c-afec-e3931fc4ad94",
+     "name": "REWE",
+     "feature_type": "poi",
+     "lat": 52.632301,
+     "lon": 13.288984
+    },
+    {
+     "id": "011228d4-b2eb-4d3c-bec9-f41fb353a427",
+     "name": "REWE",
+     "feature_type": "poi",
+     "lat": 52.469791,
+     "lon": 13.33317
+    },
+    {
+     "id": "016cf983-69ae-410d-980a-d55425d2296b",
+     "name": "REWE",
+     "feature_type": "poi",
+     "lat": 52.556599,
+     "lon": 13.571337
+    },
+    {
+     "id": "03050672-79df-419b-b915-aa9cd87082f2",
+     "name": "REWE",
+     "feature_type": "poi",
+     "lat": 52.527115,
+     "lon": 13.332945
+    },
+    {
+     "id": "08383cfa-61c1-41f5-aa4b-8c5c0029c3d1",
+     "name": "REWE",
+     "feature_type": "poi",
+     "lat": 52.316372,
+     "lon": 13.221277
+    },
+    {
+     "id": "08819802-b104-42b1-8680-da30a4cf4d7c",
+     "name": "Rewe",
+     "feature_type": "poi",
+     "lat": 52.086002,
+     "lon": 13.170613
+    },
+    {
+     "id": "0b2da821-bff9-4c81-9181-b506bee7eb86",
+     "name": "REWE",
+     "feature_type": "poi",
+     "lat": 52.678173,
+     "lon": 13.164641
+    },
+    {
+     "id": "0b3300c5-da28-44e7-b84f-9bee5e8602b9",
+     "name": "REWE",
+     "feature_type": "poi",
+     "lat": 52.478439,
+     "lon": 13.429779
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "DE",
+    "metro": "berlin",
+    "chain": "REWE"
+   },
+   "prox": {
+    "chain_rank_within_2km": null,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 3.338,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    13.392914,
+    52.518185
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:berlin:lidl",
+   "kind": "place",
+   "query": "Lidl",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 303.7,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "0449ecc6-7789-463d-ac2c-a7ca1672441e",
+     "name": "Lidl",
+     "feature_type": "poi",
+     "lat": 52.509815,
+     "lon": 13.305869
+    },
+    {
+     "id": "0512d6bf-f3e1-4101-8bbe-b1976e39db5b",
+     "name": "Lidl",
+     "feature_type": "poi",
+     "lat": 52.415359,
+     "lon": 13.224398
+    },
+    {
+     "id": "05185a49-eb2a-4c95-8d4e-4c1f5afa7b4c",
+     "name": "Lidl",
+     "feature_type": "poi",
+     "lat": 52.565529,
+     "lon": 13.378386
+    },
+    {
+     "id": "0e4e8aa3-8fa6-4f1f-8b2b-260632f39386",
+     "name": "Lidl",
+     "feature_type": "poi",
+     "lat": 52.586235,
+     "lon": 13.34167
+    },
+    {
+     "id": "0f73635f-d61d-4703-9ea7-e2292724a31e",
+     "name": "Lidl",
+     "feature_type": "poi",
+     "lat": 52.60281,
+     "lon": 12.880069
+    },
+    {
+     "id": "0fd3ad92-1c95-41de-babd-b4662eaaf7ae",
+     "name": "Lidl",
+     "feature_type": "poi",
+     "lat": 52.505219,
+     "lon": 13.392859
+    },
+    {
+     "id": "10c9802f-0815-45e8-a038-8ea813bb3bad",
+     "name": "Lidl",
+     "feature_type": "poi",
+     "lat": 52.380409,
+     "lon": 13.131117
+    },
+    {
+     "id": "13e98c0a-99f4-4d5d-9ce9-efb8282624f0",
+     "name": "Lidl",
+     "feature_type": "poi",
+     "lat": 52.564503,
+     "lon": 13.470855
+    },
+    {
+     "id": "175f51c8-adb5-4dda-8d53-b1b142dcb7e8",
+     "name": "Lidl",
+     "feature_type": "poi",
+     "lat": 52.407768,
+     "lon": 13.074838
+    },
+    {
+     "id": "18653a18-c7d9-4e43-ae8a-be78f1ce90b7",
+     "name": "Lidl",
+     "feature_type": "poi",
+     "lat": 52.504681,
+     "lon": 13.449592
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "DE",
+    "metro": "berlin",
+    "chain": "Lidl"
+   },
+   "prox": {
+    "chain_rank_within_2km": 6,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 6.187,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    13.395354,
+    52.498476
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:madrid:mercadona",
+   "kind": "place",
+   "query": "Mercadona",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 1204.5,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "013f9e5d-e3ab-43a0-9364-a077af7ece45",
+     "name": "Mercadona",
+     "feature_type": "poi",
+     "lat": 40.508945,
+     "lon": -3.352821
+    },
+    {
+     "id": "0559e020-fac0-486c-ad5a-ad964c14446e",
+     "name": "Mercadona",
+     "feature_type": "poi",
+     "lat": 40.373978,
+     "lon": -3.628202
+    },
+    {
+     "id": "0c369f36-4945-4990-8a68-a047c3a2d058",
+     "name": "Mercadona",
+     "feature_type": "poi",
+     "lat": 40.236397,
+     "lon": -3.752114
+    },
+    {
+     "id": "0e4caa79-bf27-4004-8100-62f4b276e073",
+     "name": "Mercadona",
+     "feature_type": "poi",
+     "lat": 40.399925,
+     "lon": -3.897229
+    },
+    {
+     "id": "10c3e8df-38ac-45bc-af6f-5d6576e9de92",
+     "name": "Mercadona",
+     "feature_type": "poi",
+     "lat": 40.381134,
+     "lon": -3.661247
+    },
+    {
+     "id": "11515155-f643-40d1-b724-a6ce0e3e80cd",
+     "name": "Mercadona",
+     "feature_type": "poi",
+     "lat": 40.191734,
+     "lon": -3.67842
+    },
+    {
+     "id": "1a78e299-4ba7-4bde-a929-f86c7c757f0d",
+     "name": "Mercadona",
+     "feature_type": "poi",
+     "lat": 40.395447,
+     "lon": -3.667984
+    },
+    {
+     "id": "21c41891-9a5a-49f7-afe6-e6ab5911c9cd",
+     "name": "Mercadona",
+     "feature_type": "poi",
+     "lat": 40.680351,
+     "lon": -3.620904
+    },
+    {
+     "id": "24220080-fd43-4f2e-9d5d-749b9ec7afd4",
+     "name": "Mercadona",
+     "feature_type": "poi",
+     "lat": 40.498325,
+     "lon": -3.37064
+    },
+    {
+     "id": "2a9c9888-f6d7-401c-81da-a850fc8f36b4",
+     "name": "Mercadona",
+     "feature_type": "poi",
+     "lat": 40.59911,
+     "lon": -3.715876
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "ES",
+    "metro": "madrid",
+    "chain": "Mercadona"
+   },
+   "prox": {
+    "chain_rank_within_2km": null,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 31.884,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    -3.706229,
+    40.409387
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:madrid:burger-king",
+   "kind": "place",
+   "query": "Burger King",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 377.3,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "0001d215-897b-45f8-a05d-75438c8e2d7c",
+     "name": "Burger King",
+     "feature_type": "poi",
+     "lat": 40.387142,
+     "lon": -3.640015
+    },
+    {
+     "id": "00fe82ab-4775-49a6-9aa2-8edc908782d7",
+     "name": "Burger King",
+     "feature_type": "poi",
+     "lat": 40.150822,
+     "lon": -3.824421
+    },
+    {
+     "id": "02f87123-42e8-4bb3-9e36-802d778454dd",
+     "name": "Burger King",
+     "feature_type": "poi",
+     "lat": 40.348431,
+     "lon": -3.849864
+    },
+    {
+     "id": "034718e3-9eb9-45bd-82b6-dc1d543c4bfb",
+     "name": "Burger King",
+     "feature_type": "poi",
+     "lat": 40.424541,
+     "lon": -3.544469
+    },
+    {
+     "id": "0352c8e7-9c99-4056-9213-9d7093e05c3e",
+     "name": "Burger King",
+     "feature_type": "poi",
+     "lat": 40.408039,
+     "lon": -3.630738
+    },
+    {
+     "id": "036cf483-f934-4b37-8f97-40c50cc030bb",
+     "name": "Burger King",
+     "feature_type": "poi",
+     "lat": 40.396046,
+     "lon": -3.711855
+    },
+    {
+     "id": "042056b0-e264-4ffb-ae98-a5c621358098",
+     "name": "Burger King",
+     "feature_type": "poi",
+     "lat": 40.451347,
+     "lon": -3.695178
+    },
+    {
+     "id": "058100cd-3b57-4be2-8c36-80f72c4defb7",
+     "name": "Burger King",
+     "feature_type": "poi",
+     "lat": 40.627625,
+     "lon": -3.162692
+    },
+    {
+     "id": "07802ee3-0508-4779-9793-1bcc62a01c8d",
+     "name": "Burger King",
+     "feature_type": "poi",
+     "lat": 40.451782,
+     "lon": -3.687428
+    },
+    {
+     "id": "0887b8d2-5226-4287-ba9a-bb5c8a55c61d",
+     "name": "Burger King",
+     "feature_type": "poi",
+     "lat": 40.295551,
+     "lon": -3.817247
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "ES",
+    "metro": "madrid",
+    "chain": "Burger King"
+   },
+   "prox": {
+    "chain_rank_within_2km": 6,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 6.484,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    -3.710251,
+    40.410356
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:stockholm:pressbyran",
+   "kind": "place",
+   "query": "Pressbyrån",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 725.4,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "04af9297-60f9-4d69-a6fe-031cd8bf3f91",
+     "name": "Pressbyrån",
+     "feature_type": "poi",
+     "lat": 59.319546,
+     "lon": 18.072557
+    },
+    {
+     "id": "04c87c03-fafb-446b-b125-5077143be48c",
+     "name": "Pressbyrån",
+     "feature_type": "poi",
+     "lat": 59.276127,
+     "lon": 17.907661
+    },
+    {
+     "id": "05ee88e3-4eac-46e8-b3ea-e0788e4cb3c6",
+     "name": "Pressbyrån",
+     "feature_type": "poi",
+     "lat": 59.365231,
+     "lon": 18.054743
+    },
+    {
+     "id": "05f134db-04bf-4e3a-a2cf-0913d1f10608",
+     "name": "Pressbyrån",
+     "feature_type": "poi",
+     "lat": 59.277149,
+     "lon": 17.907049
+    },
+    {
+     "id": "0817dd84-bc31-4413-8367-16cb1fb01bd9",
+     "name": "Pressbyrån",
+     "feature_type": "poi",
+     "lat": 59.298992,
+     "lon": 18.080458
+    },
+    {
+     "id": "09e5ac57-7c35-4e70-82ee-d15507bc1253",
+     "name": "Pressbyrån",
+     "feature_type": "poi",
+     "lat": 59.338356,
+     "lon": 18.010664
+    },
+    {
+     "id": "0ac6a5bb-633f-4d39-9609-603a92a7ad4a",
+     "name": "Pressbyrån",
+     "feature_type": "poi",
+     "lat": 59.19936,
+     "lon": 17.834934
+    },
+    {
+     "id": "0c5873f6-7367-4e34-8d58-78aea9d74040",
+     "name": "Pressbyrån",
+     "feature_type": "poi",
+     "lat": 59.319508,
+     "lon": 18.072231
+    },
+    {
+     "id": "12481838-b8e4-4b06-b813-514f70eeea39",
+     "name": "Pressbyrån",
+     "feature_type": "poi",
+     "lat": 59.339298,
+     "lon": 18.082218
+    },
+    {
+     "id": "14fa7d23-f479-4d23-8bdc-0e5d1d59a5a4",
+     "name": "Pressbyrån",
+     "feature_type": "poi",
+     "lat": 59.355038,
+     "lon": 18.057585
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "SE",
+    "metro": "stockholm",
+    "chain": "Pressbyrån"
+   },
+   "prox": {
+    "chain_rank_within_2km": 9,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 2.813,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    18.082734,
+    59.344305
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:stockholm:7-eleven",
+   "kind": "place",
+   "query": "7-Eleven",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 270.0,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "0424868c-50f2-439f-87b6-4657adc7cb90",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 59.313499,
+     "lon": 18.073666
+    },
+    {
+     "id": "0ade8bc0-399f-46f2-8287-4581ecd58e8f",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 59.337986,
+     "lon": 18.101223
+    },
+    {
+     "id": "0c785b60-010e-415a-9b0d-6380c31ac579",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 59.33416,
+     "lon": 18.035816
+    },
+    {
+     "id": "0f865b50-32c4-4c18-8c36-96a151718467",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 59.331738,
+     "lon": 18.060551
+    },
+    {
+     "id": "12bcfc4c-c9a4-49d6-97e5-fcb00525b578",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 59.310493,
+     "lon": 18.075161
+    },
+    {
+     "id": "16c33fbe-0b23-45fc-bb1c-93c9df367a04",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 59.341793,
+     "lon": 18.037836
+    },
+    {
+     "id": "1943b125-135a-4753-9ff4-c0fc75c24e2f",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 59.315964,
+     "lon": 18.034327
+    },
+    {
+     "id": "23e0d5fb-5a16-4b26-ab7e-a4e3509f0694",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 59.331169,
+     "lon": 18.030643
+    },
+    {
+     "id": "27ef5853-4095-44dd-866c-5a770942ecee",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 59.298752,
+     "lon": 18.079245
+    },
+    {
+     "id": "2a73b5d6-acdd-4c9b-abce-b53b25d96b85",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 59.336502,
+     "lon": 18.076347
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "SE",
+    "metro": "stockholm",
+    "chain": "7-Eleven"
+   },
+   "prox": {
+    "chain_rank_within_2km": 2,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 3.226,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    18.110314,
+    59.335684
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:warsaw:zabka",
+   "kind": "place",
+   "query": "Żabka",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 945.7,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "121b3a7e-0922-412f-8d7c-67246d519d37",
+     "name": "Żabka",
+     "feature_type": "poi",
+     "lat": 52.24271,
+     "lon": 20.939959
+    },
+    {
+     "id": "2cc9b27b-1fad-4561-9328-1bb1a4210e3a",
+     "name": "Żabka",
+     "feature_type": "poi",
+     "lat": 52.207024,
+     "lon": 21.052322
+    },
+    {
+     "id": "44a5f8b8-b954-41c1-9116-06200b99c4ff",
+     "name": "Żabka",
+     "feature_type": "poi",
+     "lat": 52.103527,
+     "lon": 20.628397
+    },
+    {
+     "id": "6c8cd994-00e1-4e8c-bf4c-98362205460c",
+     "name": "Żabka",
+     "feature_type": "poi",
+     "lat": 52.208336,
+     "lon": 21.012844
+    },
+    {
+     "id": "73a0b79e-efad-410a-b284-edca12c017fe",
+     "name": "Żabka",
+     "feature_type": "poi",
+     "lat": 52.159698,
+     "lon": 21.028446
+    },
+    {
+     "id": "762d9990-e8e1-46e6-835d-1a9a99cab4d1",
+     "name": "Żabka",
+     "feature_type": "poi",
+     "lat": 52.211678,
+     "lon": 21.058777
+    },
+    {
+     "id": "8f396252-cb2b-4e3b-bcc3-a7ba1db55178",
+     "name": "Żabka",
+     "feature_type": "poi",
+     "lat": 52.169796,
+     "lon": 21.074211
+    },
+    {
+     "id": "98b09219-6b21-49b4-832d-2051c4cf8b16",
+     "name": "Żabka",
+     "feature_type": "poi",
+     "lat": 52.174282,
+     "lon": 20.997131
+    },
+    {
+     "id": "ef3402ec-b5f5-4308-abfe-9ff03f358d31",
+     "name": "Żabka",
+     "feature_type": "poi",
+     "lat": 52.241856,
+     "lon": 20.931147
+    },
+    {
+     "id": "0b9ec18a-77b3-481e-9923-8adfe3026d34",
+     "name": "Żabka",
+     "feature_type": "poi",
+     "lat": 52.226627,
+     "lon": 21.064108
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "PL",
+    "metro": "warsaw",
+    "chain": "Żabka"
+   },
+   "prox": {
+    "chain_rank_within_2km": null,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 2.736,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    20.979945,
+    52.240255
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:warsaw:costa-coffee",
+   "kind": "place",
+   "query": "Costa Coffee",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 736.7,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "01d96bf1-ebb7-4ce2-8905-84dd389acb91",
+     "name": "Costa Coffee",
+     "feature_type": "poi",
+     "lat": 52.244194,
+     "lon": 21.086027
+    },
+    {
+     "id": "5724001c-b2e8-416c-929e-6514065d59b7",
+     "name": "Costa Coffee",
+     "feature_type": "poi",
+     "lat": 52.296734,
+     "lon": 20.931879
+    },
+    {
+     "id": "6efd7096-fde3-4910-be38-0ae86b51afa0",
+     "name": "Costa Coffee",
+     "feature_type": "poi",
+     "lat": 52.235352,
+     "lon": 21.009941
+    },
+    {
+     "id": "8c3975c1-9bab-4d42-90d0-a84487f6c17c",
+     "name": "Costa Coffee",
+     "feature_type": "poi",
+     "lat": 52.219166,
+     "lon": 20.966343
+    },
+    {
+     "id": "90c0f780-451d-4c16-b15c-4a8da92f519f",
+     "name": "Costa Coffee",
+     "feature_type": "poi",
+     "lat": 52.230274,
+     "lon": 21.003679
+    },
+    {
+     "id": "9d8972ad-075b-4cec-b19f-1638b3697fb8",
+     "name": "Costa Coffee",
+     "feature_type": "poi",
+     "lat": 52.241665,
+     "lon": 20.932436
+    },
+    {
+     "id": "a38e4561-1d6e-4cd8-a1f5-74b6ca76aa01",
+     "name": "Costa Coffee",
+     "feature_type": "poi",
+     "lat": 52.237114,
+     "lon": 21.025743
+    },
+    {
+     "id": "a72bc41e-434f-421c-acb6-f98706a3e074",
+     "name": "Costa Coffee",
+     "feature_type": "poi",
+     "lat": 52.303837,
+     "lon": 21.057821
+    },
+    {
+     "id": "c905fe04-8fec-4400-bf4f-f8ebc8c8aae7",
+     "name": "Costa Coffee",
+     "feature_type": "poi",
+     "lat": 52.179615,
+     "lon": 21.004053
+    },
+    {
+     "id": "cb20fb59-78a7-4c1e-a289-95282f05f2af",
+     "name": "Costa Coffee",
+     "feature_type": "poi",
+     "lat": 52.251953,
+     "lon": 20.915041
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "PL",
+    "metro": "warsaw",
+    "chain": "Costa Coffee"
+   },
+   "prox": {
+    "chain_rank_within_2km": null,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 6.875,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    21.002546,
+    52.209433
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:istanbul:sok",
+   "kind": "place",
+   "query": "Şok",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 1233.0,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "29129264-1b7f-4486-8133-303eac5a1d81",
+     "name": "Şok",
+     "feature_type": "poi",
+     "lat": 41.037544,
+     "lon": 28.871483
+    },
+    {
+     "id": "e1b82b88-8077-4274-b973-0101c4c657a1",
+     "name": "Şok",
+     "feature_type": "poi",
+     "lat": 41.049377,
+     "lon": 28.834408
+    },
+    {
+     "id": "086938ef-74a4-4118-9866-d989a91d2c48",
+     "name": "Şok",
+     "feature_type": "poi",
+     "lat": 41.078033,
+     "lon": 29.026585
+    },
+    {
+     "id": "51bc536f-d64e-4686-abf1-b1127e963e84",
+     "name": "Şok",
+     "feature_type": "poi",
+     "lat": 41.018417,
+     "lon": 29.077772
+    },
+    {
+     "id": "6d8b4d6a-9882-43b7-80e6-a9225b28c2fd",
+     "name": "Şok",
+     "feature_type": "poi",
+     "lat": 41.027599,
+     "lon": 29.103298
+    },
+    {
+     "id": "71cfe76c-7840-4b30-a1f7-71bfddec88d7",
+     "name": "Şok",
+     "feature_type": "poi",
+     "lat": 41.084377,
+     "lon": 29.038984
+    },
+    {
+     "id": "7a5d8ef2-bdae-49c6-a0c2-2bd3004f333b",
+     "name": "Şok",
+     "feature_type": "poi",
+     "lat": 41.036079,
+     "lon": 28.979324
+    },
+    {
+     "id": "8fb627f1-9ac7-4eea-9467-5acc0a7113f1",
+     "name": "Şok",
+     "feature_type": "poi",
+     "lat": 41.027622,
+     "lon": 29.022247
+    },
+    {
+     "id": "90705992-2ea0-4816-9eca-a6c9008f8832",
+     "name": "Şok",
+     "feature_type": "poi",
+     "lat": 41.014175,
+     "lon": 29.055056
+    },
+    {
+     "id": "9563f691-a00f-4594-a8cc-5c75a113c460",
+     "name": "Şok",
+     "feature_type": "poi",
+     "lat": 40.980301,
+     "lon": 29.062401
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "TR",
+    "metro": "istanbul",
+    "chain": "Şok"
+   },
+   "prox": {
+    "chain_rank_within_2km": 8,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 11.775,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    29.011188,
+    41.027148
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:istanbul:migros",
+   "kind": "place",
+   "query": "Migros",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 554.3,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "4995d695-3da7-467e-afaf-63e3a0ff70da",
+     "name": "Migros Sitesi",
+     "feature_type": "poi",
+     "lat": 40.983028,
+     "lon": 28.708572
+    },
+    {
+     "id": "7f738de4-6806-4438-ac7d-bdafb93c5ebc",
+     "name": "Migros",
+     "feature_type": "poi",
+     "lat": 40.988586,
+     "lon": 29.085915
+    },
+    {
+     "id": "1642f9b4-30cb-4244-9a10-78d046a11cf4",
+     "name": "Migros",
+     "feature_type": "poi",
+     "lat": 41.049953,
+     "lon": 29.001844
+    },
+    {
+     "id": "72fbef60-3144-4003-b55c-e59397d1c3e7",
+     "name": "Migros",
+     "feature_type": "poi",
+     "lat": 40.963593,
+     "lon": 29.081411
+    },
+    {
+     "id": "77d88ea6-3940-4ec9-bfaf-c6e91d04956e",
+     "name": "Migros",
+     "feature_type": "poi",
+     "lat": 40.979599,
+     "lon": 29.087332
+    },
+    {
+     "id": "8a211164-9a30-45c2-8b24-960b375a4520",
+     "name": "Migros",
+     "feature_type": "poi",
+     "lat": 41.015766,
+     "lon": 28.627649
+    },
+    {
+     "id": "942fb616-d7b3-416d-b94e-f117210fcb2b",
+     "name": "Migros",
+     "feature_type": "poi",
+     "lat": 40.953407,
+     "lon": 29.100395
+    },
+    {
+     "id": "f7c6fde9-5821-425f-b774-d463afae1bca",
+     "name": "Migros",
+     "feature_type": "poi",
+     "lat": 40.908947,
+     "lon": 29.199644
+    },
+    {
+     "id": "0805f793-75cf-4417-9458-9a7871f02b6b",
+     "name": "Migros",
+     "feature_type": "poi",
+     "lat": 41.040016,
+     "lon": 28.769882
+    },
+    {
+     "id": "57519bc2-00be-4479-b103-e7dfcc19c701",
+     "name": "Migros",
+     "feature_type": "poi",
+     "lat": 41.035015,
+     "lon": 28.777214
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "TR",
+    "metro": "istanbul",
+    "chain": "Migros"
+   },
+   "prox": {
+    "chain_rank_within_2km": 3,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 24.281,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    28.986729,
+    41.043295
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:tokyo:967962",
+   "kind": "place",
+   "query": "ローソン",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 923.9,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "80436214-484a-4adc-8ec4-43a209d987f4",
+     "name": "ローソン　横浜大口通店",
+     "feature_type": "poi",
+     "lat": 35.489925,
+     "lon": 139.646103
+    },
+    {
+     "id": "07172e51-486d-4ea9-ae9c-f9366e89998b",
+     "name": "ローソン",
+     "feature_type": "poi",
+     "lat": 35.392765,
+     "lon": 139.527069
+    },
+    {
+     "id": "07be1e63-071c-4a8e-9047-73ecce733de1",
+     "name": "ローソン",
+     "feature_type": "poi",
+     "lat": 35.719704,
+     "lon": 140.230438
+    },
+    {
+     "id": "0805259c-34cb-4bc2-bebd-3c7bf52c4879",
+     "name": "ローソン",
+     "feature_type": "poi",
+     "lat": 35.496399,
+     "lon": 139.758408
+    },
+    {
+     "id": "0f621620-97f3-44ec-8b37-a1aed851b436",
+     "name": "ローソン",
+     "feature_type": "poi",
+     "lat": 35.658298,
+     "lon": 139.660461
+    },
+    {
+     "id": "1b127012-d23d-4247-ba87-0c0085d28a27",
+     "name": "ローソン",
+     "feature_type": "poi",
+     "lat": 35.522911,
+     "lon": 139.449829
+    },
+    {
+     "id": "1da45ebe-9ec5-4c88-be87-02ac492aab44",
+     "name": "ローソン",
+     "feature_type": "poi",
+     "lat": 35.722553,
+     "lon": 139.794785
+    },
+    {
+     "id": "20bc983f-eef6-4339-9914-ae20e7436304",
+     "name": "ローソン",
+     "feature_type": "poi",
+     "lat": 35.578854,
+     "lon": 139.369293
+    },
+    {
+     "id": "26f7ff9b-2e3b-45c5-b4ed-7bb5ed1f7305",
+     "name": "ローソン",
+     "feature_type": "poi",
+     "lat": 35.561062,
+     "lon": 139.385254
+    },
+    {
+     "id": "35c9f748-b0e5-4dd2-920f-e77c2030d8fb",
+     "name": "ローソン",
+     "feature_type": "poi",
+     "lat": 35.324692,
+     "lon": 139.411942
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "JP",
+    "metro": "tokyo",
+    "chain": "ローソン"
+   },
+   "prox": {
+    "chain_rank_within_2km": null,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 25.132,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    139.764904,
+    35.694258
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:tokyo:starbucks",
+   "kind": "place",
+   "query": "Starbucks",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 202.4,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "069d4f66-979c-43fd-bb23-8d9e34f76c52",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 35.77742,
+     "lon": 139.632874
+    },
+    {
+     "id": "0da7b490-6d68-47d8-9b0a-b8308d839438",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 35.432091,
+     "lon": 139.39856
+    },
+    {
+     "id": "109c789e-704a-42cd-ba59-50f93793ca6e",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 35.651745,
+     "lon": 139.544846
+    },
+    {
+     "id": "11dfba09-65dd-4bec-b626-1bc56157739a",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 35.612843,
+     "lon": 139.627365
+    },
+    {
+     "id": "171eab19-44e0-482c-abe3-b76599744967",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 35.319653,
+     "lon": 139.547638
+    },
+    {
+     "id": "18d97b85-f9ca-4512-98ea-3b6f54dea22e",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 35.658276,
+     "lon": 140.119064
+    },
+    {
+     "id": "21ed9236-e76f-46ae-82c4-8f761941ac2d",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 35.282543,
+     "lon": 139.661072
+    },
+    {
+     "id": "3118c50d-b5bc-4ad1-9623-ec357579955b",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 35.588375,
+     "lon": 139.728256
+    },
+    {
+     "id": "3b47ea5a-6656-43fe-ad77-0d2b7e389c37",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 35.626579,
+     "lon": 140.089706
+    },
+    {
+     "id": "3be335d9-3891-42f8-9418-577e1fd76167",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 35.710964,
+     "lon": 139.7948
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "JP",
+    "metro": "tokyo",
+    "chain": "Starbucks"
+   },
+   "prox": {
+    "chain_rank_within_2km": null,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 15.661,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    139.762361,
+    35.683675
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:bangkok:7-eleven",
+   "kind": "place",
+   "query": "7-Eleven",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 2027.7,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "8d469948-7014-4327-a0f6-db5453da784f",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 13.778782,
+     "lon": 100.60421
+    },
+    {
+     "id": "a0ae8e19-4db1-4240-a271-6cf55b442964",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 13.894959,
+     "lon": 100.6381
+    },
+    {
+     "id": "f68c08c6-74d8-4b03-8885-5b44c5c0976a",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 13.727668,
+     "lon": 100.53257
+    },
+    {
+     "id": "432784f7-1ecf-4ab7-9b91-9f34d371d1e1",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 13.737246,
+     "lon": 100.561592
+    },
+    {
+     "id": "d60f0ee8-30b9-4ee8-91c4-e09961810849",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 13.729711,
+     "lon": 100.586166
+    },
+    {
+     "id": "fc37805d-d007-4d0d-91b6-60b84b76bd94",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 13.781986,
+     "lon": 100.416412
+    },
+    {
+     "id": "119d7b05-b495-4d74-a598-e8603ae565e8",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 13.728714,
+     "lon": 100.565216
+    },
+    {
+     "id": "12f3c230-bdb2-491f-b120-71ac56979db0",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 13.822589,
+     "lon": 100.436081
+    },
+    {
+     "id": "24415ff2-8b50-4e0a-a17c-1a3beb4a88c9",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 13.753455,
+     "lon": 100.529015
+    },
+    {
+     "id": "458ff635-4bdb-47d7-a56d-4f7aa9fcc813",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 13.789695,
+     "lon": 100.55983
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "TH",
+    "metro": "bangkok",
+    "chain": "7-Eleven"
+   },
+   "prox": {
+    "chain_rank_within_2km": 4,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 7.185,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    100.548563,
+    13.743364
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:bangkok:kfc",
+   "kind": "place",
+   "query": "KFC",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 928.6,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "f402ac92-4383-4627-9713-da956f81b667",
+     "name": "KFC ชั้นG future park rangsit",
+     "feature_type": "poi",
+     "lat": 13.989572,
+     "lon": 100.616325
+    },
+    {
+     "id": "1bd97b47-1eec-48e7-922b-aa87ba3fa421",
+     "name": "KFC",
+     "feature_type": "poi",
+     "lat": 13.819475,
+     "lon": 100.078178
+    },
+    {
+     "id": "da61af96-d299-496a-a6cf-4dbfa7e73ced",
+     "name": "KFC",
+     "feature_type": "poi",
+     "lat": 13.723529,
+     "lon": 100.521194
+    },
+    {
+     "id": "27903c48-0134-468b-9d10-c9173cdb1a28",
+     "name": "KFC",
+     "feature_type": "poi",
+     "lat": 13.711868,
+     "lon": 100.434563
+    },
+    {
+     "id": "288fa42f-7461-47cc-9828-c3cca43e8afc",
+     "name": "KFC",
+     "feature_type": "poi",
+     "lat": 13.719748,
+     "lon": 100.515091
+    },
+    {
+     "id": "2e576cff-82ad-4386-b415-4ae392c1ee98",
+     "name": "KFC",
+     "feature_type": "poi",
+     "lat": 13.866128,
+     "lon": 100.572556
+    },
+    {
+     "id": "3aac3732-7dd5-4356-a93f-dd719477823d",
+     "name": "KFC",
+     "feature_type": "poi",
+     "lat": 13.960915,
+     "lon": 100.621948
+    },
+    {
+     "id": "3df17002-6e30-41bc-b843-4d7075d8f9b9",
+     "name": "KFC",
+     "feature_type": "poi",
+     "lat": 13.888777,
+     "lon": 100.655411
+    },
+    {
+     "id": "455ad863-1c8f-4d0b-8e8e-e97270a98165",
+     "name": "KFC",
+     "feature_type": "poi",
+     "lat": 13.836156,
+     "lon": 100.696632
+    },
+    {
+     "id": "4d8d665c-687e-4e7a-b15a-52a3cbea4ffb",
+     "name": "KFC",
+     "feature_type": "poi",
+     "lat": 13.745723,
+     "lon": 100.50042
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "TH",
+    "metro": "bangkok",
+    "chain": "KFC"
+   },
+   "prox": {
+    "chain_rank_within_2km": null,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 28.827,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    100.542457,
+    13.740445
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:singapore:7-eleven",
+   "kind": "place",
+   "query": "7-Eleven",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 470.1,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "0fe32c12-3782-4249-a55c-dec9a4614dcd",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 1.295225,
+     "lon": 103.829491
+    },
+    {
+     "id": "6df2a71e-8c43-4d76-97a5-462998c405c1",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 1.365216,
+     "lon": 103.849113
+    },
+    {
+     "id": "b64b0e23-6903-4ae0-9570-fe7b002290ca",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 1.279662,
+     "lon": 103.84758
+    },
+    {
+     "id": "e59dd053-440d-4097-8326-53af668b13bf",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 1.39068,
+     "lon": 103.890221
+    },
+    {
+     "id": "f9e97085-3a60-43e0-92ca-24e9f264f484",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 1.301511,
+     "lon": 103.852692
+    },
+    {
+     "id": "2ebc2674-81ab-4563-a6bc-e4e7bfa0e97b",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 1.327236,
+     "lon": 103.846298
+    },
+    {
+     "id": "581a4b69-07b6-4a5e-a9d0-bbc56aa7dc8c",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 1.372159,
+     "lon": 103.931992
+    },
+    {
+     "id": "58faae64-4f67-43e4-9529-081ba20c5f4b",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 1.390619,
+     "lon": 103.901192
+    },
+    {
+     "id": "bb38c857-fc3a-4b6a-b752-2021c5470927",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 1.320116,
+     "lon": 103.843536
+    },
+    {
+     "id": "c1a41840-ddc5-4cff-81b8-a4996b7fbc85",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 1.393997,
+     "lon": 103.889259
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "SG",
+    "metro": "singapore",
+    "chain": "7-Eleven"
+   },
+   "prox": {
+    "chain_rank_within_2km": 6,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 4.503,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    103.861889,
+    1.319535
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:singapore:subway",
+   "kind": "place",
+   "query": "Subway",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 453.3,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "106f56e1-7b6a-4053-8e0e-697c329e7d52",
+     "name": "Subway",
+     "feature_type": "poi",
+     "lat": 1.318516,
+     "lon": 103.863228
+    },
+    {
+     "id": "1e2798f3-69ee-458b-af5d-16b8c3c80896",
+     "name": "Subway",
+     "feature_type": "poi",
+     "lat": 1.290154,
+     "lon": 103.817192
+    },
+    {
+     "id": "20c52f27-06fc-4db8-b441-e3fb330dbd60",
+     "name": "Subway",
+     "feature_type": "poi",
+     "lat": 1.371743,
+     "lon": 103.847679
+    },
+    {
+     "id": "23e4a6f6-99b0-4609-84fb-16e3445aee05",
+     "name": "Subway",
+     "feature_type": "poi",
+     "lat": 1.324816,
+     "lon": 103.929939
+    },
+    {
+     "id": "24ec4416-d3b4-4b0c-9e44-636360ac6226",
+     "name": "Subway",
+     "feature_type": "poi",
+     "lat": 1.350835,
+     "lon": 103.720016
+    },
+    {
+     "id": "3d97f0c0-b9d7-4d49-bc03-c4d5b0bd119c",
+     "name": "Subway",
+     "feature_type": "poi",
+     "lat": 1.348932,
+     "lon": 103.935822
+    },
+    {
+     "id": "4997a3d7-db15-411a-a98b-b0e71cb68b85",
+     "name": "Subway",
+     "feature_type": "poi",
+     "lat": 1.292561,
+     "lon": 103.810471
+    },
+    {
+     "id": "596c5eee-d8fd-4ac7-8050-84406a29a1c0",
+     "name": "Subway",
+     "feature_type": "poi",
+     "lat": 1.32045,
+     "lon": 103.843925
+    },
+    {
+     "id": "5a05cdb9-e9d9-4380-961c-c3b43f6696a0",
+     "name": "Subway",
+     "feature_type": "poi",
+     "lat": 1.391203,
+     "lon": 103.876305
+    },
+    {
+     "id": "7b1fbdda-d8d7-49fd-8a74-41cb5b5b640c",
+     "name": "Subway",
+     "feature_type": "poi",
+     "lat": 1.392125,
+     "lon": 103.895302
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "SG",
+    "metro": "singapore",
+    "chain": "Subway"
+   },
+   "prox": {
+    "chain_rank_within_2km": 8,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 2.091,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    103.852418,
+    1.333902
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:sydney:woolworths",
+   "kind": "place",
+   "query": "Woolworths",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 664.1,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "b6025ce2-9a3b-4b5a-9007-56a2bfe35779",
+     "name": "Woolworths Riley Street Car Park",
+     "feature_type": "poi",
+     "lat": -33.873699,
+     "lon": 151.216217
+    },
+    {
+     "id": "b4d7cc9c-618b-4f95-978d-b7ac0cec8216",
+     "name": "Woolworths Metro Sydney Park Village",
+     "feature_type": "poi",
+     "lat": -33.905918,
+     "lon": 151.188583
+    },
+    {
+     "id": "03e72581-2498-4465-bcee-550f589b3654",
+     "name": "Woolworths",
+     "feature_type": "poi",
+     "lat": -33.787865,
+     "lon": 151.267258
+    },
+    {
+     "id": "0d8e7045-b874-4b95-878a-c6a0e7193b53",
+     "name": "Woolworths",
+     "feature_type": "poi",
+     "lat": -33.806332,
+     "lon": 151.08812
+    },
+    {
+     "id": "0f3d8363-78c9-4055-af73-38beeb89ca03",
+     "name": "Woolworths",
+     "feature_type": "poi",
+     "lat": -34.01366,
+     "lon": 151.015945
+    },
+    {
+     "id": "3564b5b0-c5f4-49bc-b8ef-553980489f2d",
+     "name": "Woolworths",
+     "feature_type": "poi",
+     "lat": -33.858795,
+     "lon": 151.092529
+    },
+    {
+     "id": "3a6e3cc8-c95e-4165-83bc-0d4f1b838ea8",
+     "name": "Woolworths",
+     "feature_type": "poi",
+     "lat": -33.814392,
+     "lon": 151.054169
+    },
+    {
+     "id": "438b9c55-79c0-4a92-9ce3-2f33674a3be0",
+     "name": "Woolworths",
+     "feature_type": "poi",
+     "lat": -33.884979,
+     "lon": 151.149368
+    },
+    {
+     "id": "58de9127-9c23-4cb7-a4d4-3a0629246fa4",
+     "name": "Woolworths",
+     "feature_type": "poi",
+     "lat": -33.872982,
+     "lon": 151.09314
+    },
+    {
+     "id": "76c6f1f7-68be-4b07-b505-fce6d46ff5d7",
+     "name": "Woolworths",
+     "feature_type": "poi",
+     "lat": -33.812515,
+     "lon": 151.106873
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "AU",
+    "metro": "sydney",
+    "chain": "Woolworths"
+   },
+   "prox": {
+    "chain_rank_within_2km": 1,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 1.238,
+    "top1_is_chain": true,
+    "top1_within_assert": true,
+    "empty": false
+   },
+   "proximity": [
+    151.215615,
+    -33.862579
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:sydney:7-eleven",
+   "kind": "place",
+   "query": "7-Eleven",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 537.0,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "1d108216-8aba-477a-a796-23214dc8ab18",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": -33.91544,
+     "lon": 150.997543
+    },
+    {
+     "id": "2bf25fe7-e674-4a54-b81a-2ac2ba40cfb5",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": -33.902439,
+     "lon": 150.896286
+    },
+    {
+     "id": "2eb31660-61b4-450c-914a-6f2cceeddb09",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": -33.83004,
+     "lon": 151.010178
+    },
+    {
+     "id": "43e5076c-67c7-444d-848d-9419ac86c914",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": -34.039425,
+     "lon": 151.120422
+    },
+    {
+     "id": "478e4c76-a74c-422c-b51d-c9e7dd9d8b6a",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": -33.883976,
+     "lon": 150.892151
+    },
+    {
+     "id": "489e6f97-9e6c-4cf0-a0c9-e9f4c104b36e",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": -33.952324,
+     "lon": 151.058441
+    },
+    {
+     "id": "54ab64d4-0e55-4750-bee4-556907390a44",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": -33.775131,
+     "lon": 150.79364
+    },
+    {
+     "id": "692d4195-27ce-497e-9fad-ae14dd1b9e4d",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": -33.872051,
+     "lon": 150.937241
+    },
+    {
+     "id": "6e725e8f-e943-463b-a2ee-5c2c5c046ac5",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": -34.024265,
+     "lon": 150.759216
+    },
+    {
+     "id": "9b26726e-4419-45eb-9264-07019ebb70a7",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": -34.032269,
+     "lon": 150.85022
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "AU",
+    "metro": "sydney",
+    "chain": "7-Eleven"
+   },
+   "prox": {
+    "chain_rank_within_2km": null,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 18.421,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    151.192785,
+    -33.881042
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:johannesburg:kfc",
+   "kind": "place",
+   "query": "KFC",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 800.2,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "02d6a0a8-d07e-482f-abc8-9e8cca32a047",
+     "name": "KFC",
+     "feature_type": "poi",
+     "lat": -26.104429,
+     "lon": 27.772278
+    },
+    {
+     "id": "0c33acfe-01cd-438c-a4ee-72fa6e17aa64",
+     "name": "KFC",
+     "feature_type": "poi",
+     "lat": -26.268085,
+     "lon": 27.90494
+    },
+    {
+     "id": "0c9e8426-ed03-49cb-bdcb-ac156a6aa8b2",
+     "name": "KFC",
+     "feature_type": "poi",
+     "lat": -26.189007,
+     "lon": 28.123989
+    },
+    {
+     "id": "0fdd5385-8c9c-4c5c-adb4-b0c824d26e19",
+     "name": "KFC",
+     "feature_type": "poi",
+     "lat": -26.181679,
+     "lon": 27.698376
+    },
+    {
+     "id": "116eff10-47fd-49e0-8a2c-7c691dc21da0",
+     "name": "KFC",
+     "feature_type": "poi",
+     "lat": -26.707642,
+     "lon": 27.103321
+    },
+    {
+     "id": "14c3338d-2ea4-4589-8c75-28ffaa7c7826",
+     "name": "KFC",
+     "feature_type": "poi",
+     "lat": -26.259481,
+     "lon": 27.929813
+    },
+    {
+     "id": "1e818f67-3ee4-4f15-bb00-7a7dbf77b642",
+     "name": "KFC",
+     "feature_type": "poi",
+     "lat": -26.309202,
+     "lon": 28.108303
+    },
+    {
+     "id": "2067f0bb-3147-4833-8798-de38c21bdf0a",
+     "name": "KFC",
+     "feature_type": "poi",
+     "lat": -26.125324,
+     "lon": 27.931154
+    },
+    {
+     "id": "28181c76-7c24-4ae1-abb8-f971dbd61eb6",
+     "name": "KFC",
+     "feature_type": "poi",
+     "lat": -26.169085,
+     "lon": 27.902409
+    },
+    {
+     "id": "2a04ff8e-6459-4862-8f1c-1c7586e1b9db",
+     "name": "KFC",
+     "feature_type": "poi",
+     "lat": -26.562859,
+     "lon": 27.829693
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "ZA",
+    "metro": "johannesburg",
+    "chain": "KFC"
+   },
+   "prox": {
+    "chain_rank_within_2km": null,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 30.229,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    28.053467,
+    -26.205421
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:johannesburg:pick-n-pay",
+   "kind": "place",
+   "query": "Pick n Pay",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 554.5,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "322d30a3-b3bd-4091-b6ee-5db9ddd16a40",
+     "name": "Pick n pay woodmead retail park",
+     "feature_type": "poi",
+     "lat": -26.051794,
+     "lon": 28.092834
+    },
+    {
+     "id": "bb840d40-3208-4fe9-8d63-47dd2e3132fe",
+     "name": "Pick n Pay",
+     "feature_type": "poi",
+     "lat": -26.059179,
+     "lon": 27.947048
+    },
+    {
+     "id": "c3ddfb93-c7b7-4bcf-b3ed-6309b979db13",
+     "name": "Pick n Pay",
+     "feature_type": "poi",
+     "lat": -26.712694,
+     "lon": 27.109341
+    },
+    {
+     "id": "e692025a-0a70-456a-b1c4-9d588f4eba56",
+     "name": "Pick n Pay",
+     "feature_type": "poi",
+     "lat": -26.103638,
+     "lon": 27.924538
+    },
+    {
+     "id": "d5aaab35-10fe-46a1-92df-60dbbf172ee8",
+     "name": "Pick n Pay",
+     "feature_type": "poi",
+     "lat": -26.246689,
+     "lon": 28.095131
+    },
+    {
+     "id": "e0105c43-f2bd-4b08-bddd-50d41665d1d6",
+     "name": "Pick n Pay",
+     "feature_type": "poi",
+     "lat": -26.080751,
+     "lon": 28.016382
+    },
+    {
+     "id": "2380ba37-c416-4694-83d5-cae7219deef4",
+     "name": "Pick n Pay",
+     "feature_type": "poi",
+     "lat": -26.206587,
+     "lon": 28.047213
+    },
+    {
+     "id": "3db3d5f4-d2b3-43c0-83b2-eaeff0869ab0",
+     "name": "Pick n Pay",
+     "feature_type": "poi",
+     "lat": -26.353817,
+     "lon": 27.361053
+    },
+    {
+     "id": "84b74e95-f877-4194-bcec-2ef41417382c",
+     "name": "Pick n Pay",
+     "feature_type": "poi",
+     "lat": -26.147488,
+     "lon": 28.09939
+    },
+    {
+     "id": "dff7d4f8-6f64-40d4-9795-a2b803679c3f",
+     "name": "Pick n Pay",
+     "feature_type": "poi",
+     "lat": -26.156414,
+     "lon": 27.885433
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "ZA",
+    "metro": "johannesburg",
+    "chain": "Pick n Pay"
+   },
+   "prox": {
+    "chain_rank_within_2km": 7,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 17.918,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    28.041703,
+    -26.206254
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:mumbai:subway",
+   "kind": "place",
+   "query": "Subway",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 837.0,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "217fa9f4-1020-4b49-b249-39dc247f80c0",
+     "name": "Subway",
+     "feature_type": "poi",
+     "lat": 19.116018,
+     "lon": 72.90873
+    },
+    {
+     "id": "5d2fc042-40c5-486e-b53e-7deccc8d6750",
+     "name": "Subway",
+     "feature_type": "poi",
+     "lat": 19.287573,
+     "lon": 72.867401
+    },
+    {
+     "id": "0d322481-5db0-457a-9bbb-e497ef08a37f",
+     "name": "Subway",
+     "feature_type": "poi",
+     "lat": 19.0313,
+     "lon": 73.065804
+    },
+    {
+     "id": "64ceacc7-daa6-4ed2-92f8-f153a51939f6",
+     "name": "Subway",
+     "feature_type": "poi",
+     "lat": 19.132389,
+     "lon": 72.812531
+    },
+    {
+     "id": "afa919e4-d8cf-481a-8f75-0c616c62833f",
+     "name": "Subway",
+     "feature_type": "poi",
+     "lat": 19.258238,
+     "lon": 72.853058
+    },
+    {
+     "id": "eb866e6d-058e-4190-80a1-4c9bf50fde71",
+     "name": "Subway",
+     "feature_type": "poi",
+     "lat": 19.230434,
+     "lon": 73.123955
+    },
+    {
+     "id": "44cbd1f8-435d-45f3-be43-754bb7ede59f",
+     "name": "Subway",
+     "feature_type": "poi",
+     "lat": 19.096031,
+     "lon": 72.874557
+    },
+    {
+     "id": "6c2c4069-8e04-4121-ad54-29711134a072",
+     "name": "Subway",
+     "feature_type": "poi",
+     "lat": 19.359291,
+     "lon": 72.812477
+    },
+    {
+     "id": "9f38e4e5-5537-40d1-bc51-30a621be8fa9",
+     "name": "Subway",
+     "feature_type": "poi",
+     "lat": 19.171408,
+     "lon": 72.835007
+    },
+    {
+     "id": "b31d28c9-0dae-4c48-826e-fd0e86975a44",
+     "name": "Subway",
+     "feature_type": "poi",
+     "lat": 19.069756,
+     "lon": 72.868347
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "IN",
+    "metro": "mumbai",
+    "chain": "Subway"
+   },
+   "prox": {
+    "chain_rank_within_2km": null,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 8.035,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    72.882626,
+    19.048099
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:mumbai:starbucks",
+   "kind": "place",
+   "query": "Starbucks",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 305.9,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "05055027-6efc-4364-9ce8-9b16dfdcc1fa",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 19.09408,
+     "lon": 72.922752
+    },
+    {
+     "id": "05ae5e83-f2c8-4c77-a451-4af10e00175d",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 19.050636,
+     "lon": 72.827202
+    },
+    {
+     "id": "112adbd6-dd2c-41a2-a736-d92bf1438ba0",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 19.185116,
+     "lon": 72.834259
+    },
+    {
+     "id": "1ac15cec-b24c-4ad9-8550-b6545ef48068",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 19.060453,
+     "lon": 72.898544
+    },
+    {
+     "id": "1d93d7a9-c1cd-425d-a264-2c6bd50f92b7",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 19.059994,
+     "lon": 72.83223
+    },
+    {
+     "id": "20c6e2b6-f430-4fa0-8a72-ef62337c7e27",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 19.02137,
+     "lon": 73.018135
+    },
+    {
+     "id": "2cc07df3-6781-4a6e-b684-ef1f4eceddfb",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 18.994711,
+     "lon": 72.830811
+    },
+    {
+     "id": "3ad0c987-621f-40fc-b2db-015bdbe6b500",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 18.99785,
+     "lon": 72.828911
+    },
+    {
+     "id": "3d196427-2a43-402d-a623-658cfc5de0fc",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 19.255571,
+     "lon": 72.984436
+    },
+    {
+     "id": "4d556471-f7b6-4f87-94e1-a573c721bf08",
+     "name": "Starbucks",
+     "feature_type": "poi",
+     "lat": 19.155357,
+     "lon": 72.853752
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "IN",
+    "metro": "mumbai",
+    "chain": "Starbucks"
+   },
+   "prox": {
+    "chain_rank_within_2km": null,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 7.215,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    72.887511,
+    19.038399
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:jakarta:indomaret",
+   "kind": "place",
+   "query": "Indomaret",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 1166.9,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "726ee334-e21e-441f-8d0b-20a973f5c429",
+     "name": "Indomaret Puri Park View",
+     "feature_type": "poi",
+     "lat": -6.192752,
+     "lon": 106.753067
+    },
+    {
+     "id": "8b7271e1-974b-42ea-88ad-1d3140a28378",
+     "name": "Indomaret",
+     "feature_type": "poi",
+     "lat": -6.180904,
+     "lon": 106.802582
+    },
+    {
+     "id": "b46f0089-1a98-4c8c-bf7f-495f96cfb0c9",
+     "name": "Indomaret",
+     "feature_type": "poi",
+     "lat": -6.308417,
+     "lon": 106.672333
+    },
+    {
+     "id": "de865434-f1ee-4413-bec6-44166d9e47cb",
+     "name": "Indomaret",
+     "feature_type": "poi",
+     "lat": -6.224205,
+     "lon": 106.852509
+    },
+    {
+     "id": "eb04b7ac-8cac-45b4-b4e5-ecd33df5536b",
+     "name": "Indomaret",
+     "feature_type": "poi",
+     "lat": -6.229206,
+     "lon": 106.847443
+    },
+    {
+     "id": "15d499c1-918a-46ac-b53d-598b8d9d3f61",
+     "name": "Indomaret",
+     "feature_type": "poi",
+     "lat": -6.259823,
+     "lon": 106.558815
+    },
+    {
+     "id": "32e4caa8-f575-41d2-9bbf-d28e3d67b44c",
+     "name": "Indomaret",
+     "feature_type": "poi",
+     "lat": -6.124799,
+     "lon": 106.755913
+    },
+    {
+     "id": "e07f1890-97d9-4bb8-9c1a-f8f95f391f06",
+     "name": "Indomaret",
+     "feature_type": "poi",
+     "lat": -6.273722,
+     "lon": 106.833626
+    },
+    {
+     "id": "341eabd3-d6bd-4326-8155-02edeeeb0c64",
+     "name": "Indomaret",
+     "feature_type": "poi",
+     "lat": -6.224177,
+     "lon": 106.589615
+    },
+    {
+     "id": "22d15fde-f7be-4e9b-a215-f2604909b476",
+     "name": "Indomaret",
+     "feature_type": "poi",
+     "lat": -6.234764,
+     "lon": 106.586563
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "ID",
+    "metro": "jakarta",
+    "chain": "Indomaret"
+   },
+   "prox": {
+    "chain_rank_within_2km": null,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 12.854,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    106.868743,
+    -6.204499
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:jakarta:kfc",
+   "kind": "place",
+   "query": "KFC",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 453.2,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "f0170b18-35e5-4836-8967-514b5ba365db",
+     "name": "KFC Bandara Soekarno-Hatta",
+     "feature_type": "poi",
+     "lat": -6.280937,
+     "lon": 106.713387
+    },
+    {
+     "id": "0e9c1a7e-e334-4e56-9bc1-044d12719b7d",
+     "name": "KFC Airport Hub",
+     "feature_type": "poi",
+     "lat": -6.113725,
+     "lon": 106.653816
+    },
+    {
+     "id": "1de816cc-b272-430d-9dd3-80e6c5d38cce",
+     "name": "KFC",
+     "feature_type": "poi",
+     "lat": -6.272833,
+     "lon": 106.698135
+    },
+    {
+     "id": "3f59a58c-08a9-4857-90ab-51a363c37cf4",
+     "name": "KFC",
+     "feature_type": "poi",
+     "lat": -6.214243,
+     "lon": 106.81485
+    },
+    {
+     "id": "43b38761-9db2-4cd7-ac69-b3aaa13d6bee",
+     "name": "KFC",
+     "feature_type": "poi",
+     "lat": -6.18579,
+     "lon": 106.739365
+    },
+    {
+     "id": "43daed7e-509e-4a6f-9ec0-f4610e3de73e",
+     "name": "KFC",
+     "feature_type": "poi",
+     "lat": -6.193264,
+     "lon": 106.673615
+    },
+    {
+     "id": "48cfd88d-a1fb-43f3-9646-053451d9b969",
+     "name": "KFC",
+     "feature_type": "poi",
+     "lat": -6.283958,
+     "lon": 106.780464
+    },
+    {
+     "id": "4a4a6d8a-3230-41eb-a0e8-c4df31e72034",
+     "name": "KFC",
+     "feature_type": "poi",
+     "lat": -6.168318,
+     "lon": 106.78688
+    },
+    {
+     "id": "69550555-deea-4873-86b6-a3cd0194a887",
+     "name": "KFC",
+     "feature_type": "poi",
+     "lat": -6.147851,
+     "lon": 106.823822
+    },
+    {
+     "id": "6c590d29-3304-47d3-9379-ce950c83335f",
+     "name": "KFC",
+     "feature_type": "poi",
+     "lat": -6.221643,
+     "lon": 106.83271
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "ID",
+    "metro": "jakarta",
+    "chain": "KFC"
+   },
+   "prox": {
+    "chain_rank_within_2km": 10,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 16.333,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    106.84477,
+    -6.213716
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:manila:jollibee",
+   "kind": "place",
+   "query": "Jollibee",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 1318.8,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "9dfe0b2b-5c71-4de6-8aee-e95d03fbb019",
+     "name": "Jollibee Luneta Park",
+     "feature_type": "poi",
+     "lat": 14.598995,
+     "lon": 121.007469
+    },
+    {
+     "id": "06f56736-6ea5-4854-a69d-69a98d4fd9f1",
+     "name": "Jollibee",
+     "feature_type": "poi",
+     "lat": 14.313958,
+     "lon": 121.049942
+    },
+    {
+     "id": "07c1a38c-44c1-4277-94e7-aff38d99c983",
+     "name": "Jollibee",
+     "feature_type": "poi",
+     "lat": 14.384233,
+     "lon": 120.977905
+    },
+    {
+     "id": "095d650c-3db1-4bb8-8939-90f867d4cc50",
+     "name": "Jollibee",
+     "feature_type": "poi",
+     "lat": 14.178787,
+     "lon": 121.288254
+    },
+    {
+     "id": "0bea6885-e50f-4d0a-8491-87af0cf8391a",
+     "name": "Jollibee",
+     "feature_type": "poi",
+     "lat": 14.709182,
+     "lon": 120.993721
+    },
+    {
+     "id": "11f5c1ad-c7c2-4e9f-b5d9-0643fa49b2c2",
+     "name": "Jollibee",
+     "feature_type": "poi",
+     "lat": 14.159777,
+     "lon": 121.138367
+    },
+    {
+     "id": "13ccf870-d13c-457a-83eb-9941a7cbc5ed",
+     "name": "Jollibee",
+     "feature_type": "poi",
+     "lat": 14.585601,
+     "lon": 121.001236
+    },
+    {
+     "id": "19a95bee-521d-40b8-9ebb-552cfed41631",
+     "name": "Jollibee",
+     "feature_type": "poi",
+     "lat": 14.522764,
+     "lon": 121.000671
+    },
+    {
+     "id": "243924f4-c1d9-4843-b0ca-ad652c46f512",
+     "name": "Jollibee",
+     "feature_type": "poi",
+     "lat": 14.418979,
+     "lon": 121.047516
+    },
+    {
+     "id": "276afc4b-5330-4a26-a790-8462761225d7",
+     "name": "Jollibee",
+     "feature_type": "poi",
+     "lat": 14.627658,
+     "lon": 121.004395
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "PH",
+    "metro": "manila",
+    "chain": "Jollibee"
+   },
+   "prox": {
+    "chain_rank_within_2km": 1,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 1.24,
+    "top1_is_chain": true,
+    "top1_within_assert": true,
+    "empty": false
+   },
+   "proximity": [
+    121.018664,
+    14.596363
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  },
+  {
+   "provider": "overture",
+   "case_id": "prox:manila:7-eleven",
+   "kind": "place",
+   "query": "7-Eleven",
+   "query_style": "chain_proximity",
+   "status": 200,
+   "ms": 363.1,
+   "error": null,
+   "transient_retries": 0,
+   "transient_retry_reasons": [],
+   "candidates": [
+    {
+     "id": "000770be-49b2-4243-b9d2-fd41f70f5a22",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 14.686004,
+     "lon": 121.023987
+    },
+    {
+     "id": "019d1fa1-9451-4ec2-a732-da2a65e37005",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 14.641203,
+     "lon": 121.040604
+    },
+    {
+     "id": "01cd03d6-e7b7-4615-a192-7c970cd736d5",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 14.418419,
+     "lon": 121.017296
+    },
+    {
+     "id": "0318574e-7c6e-4208-8253-3909cdb37e61",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 14.591588,
+     "lon": 121.0196
+    },
+    {
+     "id": "031bb822-193f-40bb-a6f5-ee88a36411d8",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 14.485732,
+     "lon": 121.229378
+    },
+    {
+     "id": "045a64c6-4342-4a1c-ad13-e72bf08b28c2",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 14.428343,
+     "lon": 121.020355
+    },
+    {
+     "id": "054db951-4179-472f-bc44-0fd783eee5fe",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 14.55395,
+     "lon": 120.997917
+    },
+    {
+     "id": "07f1a667-bd9a-476a-9d23-28995909fcb4",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 14.20153,
+     "lon": 121.131165
+    },
+    {
+     "id": "0a8a9c1a-2fd2-4b69-8777-f2e3901746e7",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 14.537944,
+     "lon": 121.051933
+    },
+    {
+     "id": "0c1b82fc-73a9-437f-b270-d0aa8dddcb3b",
+     "name": "7-Eleven",
+     "feature_type": "poi",
+     "lat": 14.632437,
+     "lon": 121.059898
+    }
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "PH",
+    "metro": "manila",
+    "chain": "7-Eleven"
+   },
+   "prox": {
+    "chain_rank_within_2km": 4,
+    "chain_rank_any": 1,
+    "top1_distance_from_proximity_km": 9.506,
+    "top1_is_chain": true,
+    "top1_within_assert": false,
+    "empty": false
+   },
+   "proximity": [
+    121.035117,
+    14.601196
+   ],
+   "scoring_authority": "custom_chain_within_proximity_v1"
+  }
+ ],
+ "variant_results": [
+  {
+   "case_id": "variant:apostrophe:2097a8b6-881b-49dd-8ae0-3146f0a0ff83",
+   "query": "Paulas Cafe",
+   "control_query": "Paula's Cafe",
+   "variant": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:apostrophe:2097a8b6-881b-49dd-8ae0-3146f0a0ff83",
+    "kind": "place",
+    "query": "Paulas Cafe",
+    "query_style": "variant_apostrophe",
+    "status": 200,
+    "ms": 1274.4,
+    "error": null,
+    "rank": null,
+    "found_at_1": false,
+    "found_at_10": false,
+    "matched_distance_km": null,
+    "top1_distance_km": null,
+    "expected_feature_type": null,
+    "top1_feature_type": null,
+    "type_at_1": null,
+    "type_present": null,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "apostrophe",
+     "country": "GB",
+     "metro": "london"
+    },
+    "variant_score": {
+     "name_distance_rank": null,
+     "exact_id_rank": null,
+     "empty": true
+    }
+   },
+   "control": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:apostrophe:2097a8b6-881b-49dd-8ae0-3146f0a0ff83:control",
+    "kind": "place",
+    "query": "Paula's Cafe",
+    "query_style": "variant_apostrophe_control",
+    "status": 200,
+    "ms": 1294.7,
+    "error": null,
+    "rank": null,
+    "found_at_1": false,
+    "found_at_10": false,
+    "matched_distance_km": null,
+    "top1_distance_km": null,
+    "expected_feature_type": null,
+    "top1_feature_type": null,
+    "type_at_1": null,
+    "type_present": null,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "apostrophe",
+     "country": "GB",
+     "metro": "london"
+    },
+    "variant_score": {
+     "name_distance_rank": null,
+     "exact_id_rank": null,
+     "empty": true
+    }
+   }
+  },
+  {
+   "case_id": "variant:apostrophe:efe83e6c-0345-4991-ab35-0c30c48f4276",
+   "query": "Delucas Florist",
+   "control_query": "Deluca's Florist",
+   "variant": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:apostrophe:efe83e6c-0345-4991-ab35-0c30c48f4276",
+    "kind": "place",
+    "query": "Delucas Florist",
+    "query_style": "variant_apostrophe",
+    "status": 200,
+    "ms": 678.8,
+    "error": null,
+    "rank": null,
+    "found_at_1": false,
+    "found_at_10": false,
+    "matched_distance_km": null,
+    "top1_distance_km": 0.421,
+    "expected_feature_type": null,
+    "top1_feature_type": null,
+    "type_at_1": null,
+    "type_present": null,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [
+     {
+      "id": "1be4eed8-b548-4277-9018-683cd9df5706",
+      "name": "Delucas Florist",
+      "feature_type": "poi",
+      "lat": -33.877907,
+      "lon": 151.225861,
+      "distance_km": 0.421
+     }
+    ],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "apostrophe",
+     "country": "AU",
+     "metro": "sydney"
+    },
+    "variant_score": {
+     "name_distance_rank": null,
+     "exact_id_rank": null,
+     "empty": false
+    }
+   },
+   "control": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:apostrophe:efe83e6c-0345-4991-ab35-0c30c48f4276:control",
+    "kind": "place",
+    "query": "Deluca's Florist",
+    "query_style": "variant_apostrophe_control",
+    "status": 200,
+    "ms": 873.1,
+    "error": null,
+    "rank": null,
+    "found_at_1": false,
+    "found_at_10": false,
+    "matched_distance_km": null,
+    "top1_distance_km": null,
+    "expected_feature_type": null,
+    "top1_feature_type": null,
+    "type_at_1": null,
+    "type_present": null,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "apostrophe",
+     "country": "AU",
+     "metro": "sydney"
+    },
+    "variant_score": {
+     "name_distance_rank": null,
+     "exact_id_rank": null,
+     "empty": true
+    }
+   }
+  },
+  {
+   "case_id": "variant:apostrophe:839c614b-cf2c-4cfb-9a15-256c3ab5ee4b",
+   "query": "Lens Mill Store",
+   "control_query": "Len's Mill Store",
+   "variant": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:apostrophe:839c614b-cf2c-4cfb-9a15-256c3ab5ee4b",
+    "kind": "place",
+    "query": "Lens Mill Store",
+    "query_style": "variant_apostrophe",
+    "status": 200,
+    "ms": 1135.5,
+    "error": null,
+    "rank": null,
+    "found_at_1": false,
+    "found_at_10": false,
+    "matched_distance_km": null,
+    "top1_distance_km": null,
+    "expected_feature_type": null,
+    "top1_feature_type": null,
+    "type_at_1": null,
+    "type_present": null,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "apostrophe",
+     "country": "CA",
+     "metro": "toronto"
+    },
+    "variant_score": {
+     "name_distance_rank": null,
+     "exact_id_rank": null,
+     "empty": true
+    }
+   },
+   "control": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:apostrophe:839c614b-cf2c-4cfb-9a15-256c3ab5ee4b:control",
+    "kind": "place",
+    "query": "Len's Mill Store",
+    "query_style": "variant_apostrophe_control",
+    "status": 200,
+    "ms": 773.5,
+    "error": null,
+    "rank": null,
+    "found_at_1": false,
+    "found_at_10": false,
+    "matched_distance_km": null,
+    "top1_distance_km": null,
+    "expected_feature_type": null,
+    "top1_feature_type": null,
+    "type_at_1": null,
+    "type_present": null,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "apostrophe",
+     "country": "CA",
+     "metro": "toronto"
+    },
+    "variant_score": {
+     "name_distance_rank": null,
+     "exact_id_rank": null,
+     "empty": true
+    }
+   }
+  },
+  {
+   "case_id": "variant:apostrophe:71ec4b26-847e-4d64-b1a7-33546ad4583e",
+   "query": "Lens place",
+   "control_query": "Len's place",
+   "variant": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:apostrophe:71ec4b26-847e-4d64-b1a7-33546ad4583e",
+    "kind": "place",
+    "query": "Lens place",
+    "query_style": "variant_apostrophe",
+    "status": 200,
+    "ms": 391.0,
+    "error": null,
+    "rank": null,
+    "found_at_1": false,
+    "found_at_10": false,
+    "matched_distance_km": null,
+    "top1_distance_km": null,
+    "expected_feature_type": null,
+    "top1_feature_type": null,
+    "type_at_1": null,
+    "type_present": null,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "apostrophe",
+     "country": "ZA",
+     "metro": "johannesburg"
+    },
+    "variant_score": {
+     "name_distance_rank": null,
+     "exact_id_rank": null,
+     "empty": true
+    }
+   },
+   "control": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:apostrophe:71ec4b26-847e-4d64-b1a7-33546ad4583e:control",
+    "kind": "place",
+    "query": "Len's place",
+    "query_style": "variant_apostrophe_control",
+    "status": 200,
+    "ms": 711.6,
+    "error": null,
+    "rank": null,
+    "found_at_1": false,
+    "found_at_10": false,
+    "matched_distance_km": null,
+    "top1_distance_km": null,
+    "expected_feature_type": null,
+    "top1_feature_type": null,
+    "type_at_1": null,
+    "type_present": null,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "apostrophe",
+     "country": "ZA",
+     "metro": "johannesburg"
+    },
+    "variant_score": {
+     "name_distance_rank": null,
+     "exact_id_rank": null,
+     "empty": true
+    }
+   }
+  },
+  {
+   "case_id": "variant:apostrophe:205bc0cb-6897-4ea3-84fc-351e0eb425d5",
+   "query": "Dominos Pizza",
+   "control_query": "Domino's Pizza",
+   "variant": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:apostrophe:205bc0cb-6897-4ea3-84fc-351e0eb425d5",
+    "kind": "place",
+    "query": "Dominos Pizza",
+    "query_style": "variant_apostrophe",
+    "status": 200,
+    "ms": 1033.6,
+    "error": null,
+    "rank": null,
+    "found_at_1": false,
+    "found_at_10": false,
+    "matched_distance_km": null,
+    "top1_distance_km": null,
+    "expected_feature_type": null,
+    "top1_feature_type": null,
+    "type_at_1": null,
+    "type_present": null,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "apostrophe",
+     "country": "IN",
+     "metro": "mumbai"
+    },
+    "variant_score": {
+     "name_distance_rank": null,
+     "exact_id_rank": null,
+     "empty": true
+    }
+   },
+   "control": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:apostrophe:205bc0cb-6897-4ea3-84fc-351e0eb425d5:control",
+    "kind": "place",
+    "query": "Domino's Pizza",
+    "query_style": "variant_apostrophe_control",
+    "status": 200,
+    "ms": 438.6,
+    "error": null,
+    "rank": null,
+    "found_at_1": false,
+    "found_at_10": false,
+    "matched_distance_km": null,
+    "top1_distance_km": 9245.556,
+    "expected_feature_type": null,
+    "top1_feature_type": null,
+    "type_at_1": null,
+    "type_present": null,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [
+     {
+      "id": "32201af0-221e-44e4-aeef-f80ef1dfbf62",
+      "name": "Domino's Pizza Broken Hill",
+      "feature_type": "poi",
+      "lat": -31.952066,
+      "lon": 141.463638,
+      "distance_km": 9245.556
+     }
+    ],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "apostrophe",
+     "country": "IN",
+     "metro": "mumbai"
+    },
+    "variant_score": {
+     "name_distance_rank": null,
+     "exact_id_rank": null,
+     "empty": false
+    }
+   }
+  },
+  {
+   "case_id": "variant:ampersand:02ec7d15-4548-4ed3-8366-abf9f145e159",
+   "query": "Saiq's Hair and Beauty",
+   "control_query": "Saiq's Hair & Beauty",
+   "variant": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:ampersand:02ec7d15-4548-4ed3-8366-abf9f145e159",
+    "kind": "place",
+    "query": "Saiq's Hair and Beauty",
+    "query_style": "variant_ampersand",
+    "status": 200,
+    "ms": 1059.2,
+    "error": null,
+    "rank": null,
+    "found_at_1": false,
+    "found_at_10": false,
+    "matched_distance_km": null,
+    "top1_distance_km": null,
+    "expected_feature_type": null,
+    "top1_feature_type": null,
+    "type_at_1": null,
+    "type_present": null,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "ampersand",
+     "country": "GB",
+     "metro": "london"
+    },
+    "variant_score": {
+     "name_distance_rank": null,
+     "exact_id_rank": null,
+     "empty": true
+    }
+   },
+   "control": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:ampersand:02ec7d15-4548-4ed3-8366-abf9f145e159:control",
+    "kind": "place",
+    "query": "Saiq's Hair & Beauty",
+    "query_style": "variant_ampersand_control",
+    "status": 200,
+    "ms": 505.6,
+    "error": null,
+    "rank": 1,
+    "found_at_1": true,
+    "found_at_10": true,
+    "matched_distance_km": 0.001,
+    "top1_distance_km": 0.001,
+    "expected_feature_type": null,
+    "top1_feature_type": null,
+    "type_at_1": null,
+    "type_present": null,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [
+     {
+      "id": "02ec7d15-4548-4ed3-8366-abf9f145e159",
+      "name": "Saiq's Hair & Beauty",
+      "feature_type": "poi",
+      "lat": 51.572796,
+      "lon": -0.008432,
+      "distance_km": 0.001
+     }
+    ],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "ampersand",
+     "country": "GB",
+     "metro": "london"
+    },
+    "variant_score": {
+     "name_distance_rank": 1,
+     "exact_id_rank": 1,
+     "empty": false
+    }
+   }
+  },
+  {
+   "case_id": "variant:ampersand:726ab33e-cbf8-43dc-818d-bf7f9d0d129a",
+   "query": "Animal Gifts and Collextibles",
+   "control_query": "Animal Gifts & Collextibles",
+   "variant": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:ampersand:726ab33e-cbf8-43dc-818d-bf7f9d0d129a",
+    "kind": "place",
+    "query": "Animal Gifts and Collextibles",
+    "query_style": "variant_ampersand",
+    "status": 200,
+    "ms": 908.1,
+    "error": null,
+    "rank": null,
+    "found_at_1": false,
+    "found_at_10": false,
+    "matched_distance_km": null,
+    "top1_distance_km": null,
+    "expected_feature_type": null,
+    "top1_feature_type": null,
+    "type_at_1": null,
+    "type_present": null,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "ampersand",
+     "country": "US",
+     "metro": "seattle"
+    },
+    "variant_score": {
+     "name_distance_rank": null,
+     "exact_id_rank": null,
+     "empty": true
+    }
+   },
+   "control": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:ampersand:726ab33e-cbf8-43dc-818d-bf7f9d0d129a:control",
+    "kind": "place",
+    "query": "Animal Gifts & Collextibles",
+    "query_style": "variant_ampersand_control",
+    "status": 200,
+    "ms": 561.8,
+    "error": null,
+    "rank": 1,
+    "found_at_1": true,
+    "found_at_10": true,
+    "matched_distance_km": 0.001,
+    "top1_distance_km": 0.001,
+    "expected_feature_type": null,
+    "top1_feature_type": null,
+    "type_at_1": null,
+    "type_present": null,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [
+     {
+      "id": "726ab33e-cbf8-43dc-818d-bf7f9d0d129a",
+      "name": "Animal Gifts & Collextibles",
+      "feature_type": "poi",
+      "lat": 47.608894,
+      "lon": -122.341316,
+      "distance_km": 0.001
+     }
+    ],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "ampersand",
+     "country": "US",
+     "metro": "seattle"
+    },
+    "variant_score": {
+     "name_distance_rank": 1,
+     "exact_id_rank": 1,
+     "empty": false
+    }
+   }
+  },
+  {
+   "case_id": "variant:ampersand:f04b96c1-8cce-4d12-9b02-e075a33b4fef",
+   "query": "Skull and Rose Cafe",
+   "control_query": "Skull & Rose Cafe",
+   "variant": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:ampersand:f04b96c1-8cce-4d12-9b02-e075a33b4fef",
+    "kind": "place",
+    "query": "Skull and Rose Cafe",
+    "query_style": "variant_ampersand",
+    "status": 200,
+    "ms": 841.3,
+    "error": null,
+    "rank": null,
+    "found_at_1": false,
+    "found_at_10": false,
+    "matched_distance_km": null,
+    "top1_distance_km": null,
+    "expected_feature_type": null,
+    "top1_feature_type": null,
+    "type_at_1": null,
+    "type_present": null,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "ampersand",
+     "country": "AU",
+     "metro": "sydney"
+    },
+    "variant_score": {
+     "name_distance_rank": null,
+     "exact_id_rank": null,
+     "empty": true
+    }
+   },
+   "control": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:ampersand:f04b96c1-8cce-4d12-9b02-e075a33b4fef:control",
+    "kind": "place",
+    "query": "Skull & Rose Cafe",
+    "query_style": "variant_ampersand_control",
+    "status": 200,
+    "ms": 106.9,
+    "error": null,
+    "rank": null,
+    "found_at_1": false,
+    "found_at_10": false,
+    "matched_distance_km": null,
+    "top1_distance_km": null,
+    "expected_feature_type": null,
+    "top1_feature_type": null,
+    "type_at_1": null,
+    "type_present": null,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "ampersand",
+     "country": "AU",
+     "metro": "sydney"
+    },
+    "variant_score": {
+     "name_distance_rank": null,
+     "exact_id_rank": null,
+     "empty": true
+    }
+   }
+  },
+  {
+   "case_id": "variant:ampersand:c871e236-a875-4653-ba5e-6b836b9c82b1",
+   "query": "Hummer and Ochse",
+   "control_query": "Hummer & Ochse",
+   "variant": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:ampersand:c871e236-a875-4653-ba5e-6b836b9c82b1",
+    "kind": "place",
+    "query": "Hummer and Ochse",
+    "query_style": "variant_ampersand",
+    "status": 200,
+    "ms": 1265.0,
+    "error": null,
+    "rank": null,
+    "found_at_1": false,
+    "found_at_10": false,
+    "matched_distance_km": null,
+    "top1_distance_km": null,
+    "expected_feature_type": null,
+    "top1_feature_type": null,
+    "type_at_1": null,
+    "type_present": null,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "ampersand",
+     "country": "DE",
+     "metro": "berlin"
+    },
+    "variant_score": {
+     "name_distance_rank": null,
+     "exact_id_rank": null,
+     "empty": true
+    }
+   },
+   "control": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:ampersand:c871e236-a875-4653-ba5e-6b836b9c82b1:control",
+    "kind": "place",
+    "query": "Hummer & Ochse",
+    "query_style": "variant_ampersand_control",
+    "status": 200,
+    "ms": 516.4,
+    "error": null,
+    "rank": 1,
+    "found_at_1": true,
+    "found_at_10": true,
+    "matched_distance_km": 0.001,
+    "top1_distance_km": 0.001,
+    "expected_feature_type": null,
+    "top1_feature_type": null,
+    "type_at_1": null,
+    "type_present": null,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [
+     {
+      "id": "c871e236-a875-4653-ba5e-6b836b9c82b1",
+      "name": "Hummer & Ochse",
+      "feature_type": "poi",
+      "lat": 52.501774,
+      "lon": 13.340878,
+      "distance_km": 0.001
+     }
+    ],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "ampersand",
+     "country": "DE",
+     "metro": "berlin"
+    },
+    "variant_score": {
+     "name_distance_rank": 1,
+     "exact_id_rank": 1,
+     "empty": false
+    }
+   }
+  },
+  {
+   "case_id": "variant:ampersand:dad3fab8-39e1-43d5-a2cc-f90fbabd318f",
+   "query": "Me and My",
+   "control_query": "Me & My",
+   "variant": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:ampersand:dad3fab8-39e1-43d5-a2cc-f90fbabd318f",
+    "kind": "place",
+    "query": "Me and My",
+    "query_style": "variant_ampersand",
+    "status": 200,
+    "ms": 1560.0,
+    "error": null,
+    "rank": null,
+    "found_at_1": false,
+    "found_at_10": false,
+    "matched_distance_km": null,
+    "top1_distance_km": null,
+    "expected_feature_type": null,
+    "top1_feature_type": null,
+    "type_at_1": null,
+    "type_present": null,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "ampersand",
+     "country": "SG",
+     "metro": "singapore"
+    },
+    "variant_score": {
+     "name_distance_rank": null,
+     "exact_id_rank": null,
+     "empty": true
+    }
+   },
+   "control": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:ampersand:dad3fab8-39e1-43d5-a2cc-f90fbabd318f:control",
+    "kind": "place",
+    "query": "Me & My",
+    "query_style": "variant_ampersand_control",
+    "status": 200,
+    "ms": 529.5,
+    "error": null,
+    "rank": null,
+    "found_at_1": false,
+    "found_at_10": false,
+    "matched_distance_km": null,
+    "top1_distance_km": null,
+    "expected_feature_type": null,
+    "top1_feature_type": null,
+    "type_at_1": null,
+    "type_present": null,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "ampersand",
+     "country": "SG",
+     "metro": "singapore"
+    },
+    "variant_score": {
+     "name_distance_rank": null,
+     "exact_id_rank": null,
+     "empty": true
+    }
+   }
+  },
+  {
+   "case_id": "variant:nonascii_latin:7687bbd4-c339-40b3-9c98-34d65377b977",
+   "query": "Svanemollebugtens Vinterbadelaug",
+   "control_query": "Svanemøllebugtens Vinterbadelaug",
+   "variant": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:nonascii_latin:7687bbd4-c339-40b3-9c98-34d65377b977",
+    "kind": "place",
+    "query": "Svanemollebugtens Vinterbadelaug",
+    "query_style": "variant_nonascii_latin",
+    "status": 200,
+    "ms": 262.0,
+    "error": null,
+    "rank": null,
+    "found_at_1": false,
+    "found_at_10": false,
+    "matched_distance_km": null,
+    "top1_distance_km": null,
+    "expected_feature_type": null,
+    "top1_feature_type": null,
+    "type_at_1": null,
+    "type_present": null,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "nonascii_latin",
+     "country": "DK",
+     "metro": "copenhagen"
+    },
+    "variant_score": {
+     "name_distance_rank": null,
+     "exact_id_rank": null,
+     "empty": true
+    }
+   },
+   "control": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:nonascii_latin:7687bbd4-c339-40b3-9c98-34d65377b977:control",
+    "kind": "place",
+    "query": "Svanemøllebugtens Vinterbadelaug",
+    "query_style": "variant_nonascii_latin_control",
+    "status": 200,
+    "ms": 559.9,
+    "error": null,
+    "rank": 1,
+    "found_at_1": true,
+    "found_at_10": true,
+    "matched_distance_km": 0.001,
+    "top1_distance_km": 0.001,
+    "expected_feature_type": null,
+    "top1_feature_type": null,
+    "type_at_1": null,
+    "type_present": null,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [
+     {
+      "id": "7687bbd4-c339-40b3-9c98-34d65377b977",
+      "name": "Svanemøllebugtens Vinterbadelaug",
+      "feature_type": "poi",
+      "lat": 55.718147,
+      "lon": 12.589108,
+      "distance_km": 0.001
+     }
+    ],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "nonascii_latin",
+     "country": "DK",
+     "metro": "copenhagen"
+    },
+    "variant_score": {
+     "name_distance_rank": 1,
+     "exact_id_rank": 1,
+     "empty": false
+    }
+   }
+  },
+  {
+   "case_id": "variant:nonascii_latin:3ec74e78-a1ce-42e0-afb2-6da8063343a3",
+   "query": "Sorenga Bro",
+   "control_query": "Sørenga Bro",
+   "variant": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:nonascii_latin:3ec74e78-a1ce-42e0-afb2-6da8063343a3",
+    "kind": "place",
+    "query": "Sorenga Bro",
+    "query_style": "variant_nonascii_latin",
+    "status": 200,
+    "ms": 582.1,
+    "error": null,
+    "rank": null,
+    "found_at_1": false,
+    "found_at_10": false,
+    "matched_distance_km": null,
+    "top1_distance_km": null,
+    "expected_feature_type": null,
+    "top1_feature_type": null,
+    "type_at_1": null,
+    "type_present": null,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "nonascii_latin",
+     "country": "NO",
+     "metro": "oslo"
+    },
+    "variant_score": {
+     "name_distance_rank": null,
+     "exact_id_rank": null,
+     "empty": true
+    }
+   },
+   "control": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:nonascii_latin:3ec74e78-a1ce-42e0-afb2-6da8063343a3:control",
+    "kind": "place",
+    "query": "Sørenga Bro",
+    "query_style": "variant_nonascii_latin_control",
+    "status": 200,
+    "ms": 898.1,
+    "error": null,
+    "rank": 1,
+    "found_at_1": true,
+    "found_at_10": true,
+    "matched_distance_km": 0.0,
+    "top1_distance_km": 0.0,
+    "expected_feature_type": null,
+    "top1_feature_type": null,
+    "type_at_1": null,
+    "type_present": null,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [
+     {
+      "id": "3ec74e78-a1ce-42e0-afb2-6da8063343a3",
+      "name": "Sørenga Bro",
+      "feature_type": "poi",
+      "lat": 59.902004,
+      "lon": 10.760751,
+      "distance_km": 0.0
+     }
+    ],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "nonascii_latin",
+     "country": "NO",
+     "metro": "oslo"
+    },
+    "variant_score": {
+     "name_distance_rank": 1,
+     "exact_id_rank": 1,
+     "empty": false
+    }
+   }
+  },
+  {
+   "case_id": "variant:nonascii_latin:7ca1dcd1-4041-4455-982c-36c1fe9f3d77",
+   "query": "WTL Stegny",
+   "control_query": "WTŁ Stegny",
+   "variant": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:nonascii_latin:7ca1dcd1-4041-4455-982c-36c1fe9f3d77",
+    "kind": "place",
+    "query": "WTL Stegny",
+    "query_style": "variant_nonascii_latin",
+    "status": 200,
+    "ms": 615.0,
+    "error": null,
+    "rank": null,
+    "found_at_1": false,
+    "found_at_10": false,
+    "matched_distance_km": null,
+    "top1_distance_km": null,
+    "expected_feature_type": null,
+    "top1_feature_type": null,
+    "type_at_1": null,
+    "type_present": null,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "nonascii_latin",
+     "country": "PL",
+     "metro": "warsaw"
+    },
+    "variant_score": {
+     "name_distance_rank": null,
+     "exact_id_rank": null,
+     "empty": true
+    }
+   },
+   "control": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:nonascii_latin:7ca1dcd1-4041-4455-982c-36c1fe9f3d77:control",
+    "kind": "place",
+    "query": "WTŁ Stegny",
+    "query_style": "variant_nonascii_latin_control",
+    "status": 200,
+    "ms": 732.7,
+    "error": null,
+    "rank": 1,
+    "found_at_1": true,
+    "found_at_10": true,
+    "matched_distance_km": 0.001,
+    "top1_distance_km": 0.001,
+    "expected_feature_type": null,
+    "top1_feature_type": null,
+    "type_at_1": null,
+    "type_present": null,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [
+     {
+      "id": "7ca1dcd1-4041-4455-982c-36c1fe9f3d77",
+      "name": "WTŁ Stegny",
+      "feature_type": "poi",
+      "lat": 52.186832,
+      "lon": 21.043261,
+      "distance_km": 0.001
+     }
+    ],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "nonascii_latin",
+     "country": "PL",
+     "metro": "warsaw"
+    },
+    "variant_score": {
+     "name_distance_rank": 1,
+     "exact_id_rank": 1,
+     "empty": false
+    }
+   }
+  },
+  {
+   "case_id": "variant:nonascii_latin:a8716f55-f78a-4f53-9d79-559c0f82504a",
+   "query": "Sostrene Grene",
+   "control_query": "Søstrene Grene",
+   "variant": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:nonascii_latin:a8716f55-f78a-4f53-9d79-559c0f82504a",
+    "kind": "place",
+    "query": "Sostrene Grene",
+    "query_style": "variant_nonascii_latin",
+    "status": 200,
+    "ms": 698.5,
+    "error": null,
+    "rank": null,
+    "found_at_1": false,
+    "found_at_10": false,
+    "matched_distance_km": null,
+    "top1_distance_km": 879.828,
+    "expected_feature_type": null,
+    "top1_feature_type": null,
+    "type_at_1": null,
+    "type_present": null,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [
+     {
+      "id": "2120ecc2-25ff-4d1b-a326-6acffc555b01",
+      "name": "Sostrene Grene",
+      "feature_type": "poi",
+      "lat": 48.875244,
+      "lon": 2.327078,
+      "distance_km": 879.828
+     },
+     {
+      "id": "4beedc30-3874-4245-a843-feb0262ea432",
+      "name": "Sostrene Grene",
+      "feature_type": "poi",
+      "lat": 50.850563,
+      "lon": 5.691458,
+      "distance_km": 564.446
+     },
+     {
+      "id": "6bee61e1-77fc-4e4f-a090-c90a3870c5e7",
+      "name": "Sostrene Grene",
+      "feature_type": "poi",
+      "lat": 52.958187,
+      "lon": -1.147707,
+      "distance_km": 979.412
+     },
+     {
+      "id": "879de907-e036-456b-91e3-979a5a46add9",
+      "name": "Sostrene Grene",
+      "feature_type": "poi",
+      "lat": 51.404072,
+      "lon": -1.323152,
+      "distance_km": 1015.641
+     },
+     {
+      "id": "8fb4cba3-1b06-414a-8b19-ba0a9e3ffb8a",
+      "name": "Sostrene Grene",
+      "feature_type": "poi",
+      "lat": 52.153973,
+      "lon": 5.384698,
+      "distance_km": 546.876
+     },
+     {
+      "id": "90b58a53-5609-416a-99ce-f3a085bfdb48",
+      "name": "Sostrene Grene",
+      "feature_type": "poi",
+      "lat": 47.901455,
+      "lon": 1.906133,
+      "distance_km": 966.495
+     },
+     {
+      "id": "9873196d-47ed-49c7-a2ff-1b342017589b",
+      "name": "Sostrene Grene",
+      "feature_type": "poi",
+      "lat": 55.858025,
+      "lon": -4.25549,
+      "distance_km": 1202.798
+     },
+     {
+      "id": "9e6593cb-2ae7-4aa7-8893-cc37cb473731",
+      "name": "Sostrene Grene",
+      "feature_type": "poi",
+      "lat": 52.091419,
+      "lon": 5.113798,
+      "distance_km": 566.167
+     },
+     {
+      "id": "a397428d-1903-47e0-94bd-5c2b5216340a",
+      "name": "Sostrene Grene",
+      "feature_type": "poi",
+      "lat": 54.659641,
+      "lon": -5.669562,
+      "distance_km": 1276.642
+     },
+     {
+      "id": "bc7ec281-b362-4cd7-ae3b-f2825b793621",
+      "name": "Sostrene Grene",
+      "feature_type": "poi",
+      "lat": 52.663559,
+      "lon": -8.627881,
+      "distance_km": 1482.703
+     }
+    ],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "nonascii_latin",
+     "country": "DE",
+     "metro": "berlin"
+    },
+    "variant_score": {
+     "name_distance_rank": null,
+     "exact_id_rank": null,
+     "empty": false
+    }
+   },
+   "control": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:nonascii_latin:a8716f55-f78a-4f53-9d79-559c0f82504a:control",
+    "kind": "place",
+    "query": "Søstrene Grene",
+    "query_style": "variant_nonascii_latin_control",
+    "status": 200,
+    "ms": 512.2,
+    "error": null,
+    "rank": null,
+    "found_at_1": false,
+    "found_at_10": false,
+    "matched_distance_km": null,
+    "top1_distance_km": 456.261,
+    "expected_feature_type": null,
+    "top1_feature_type": null,
+    "type_at_1": null,
+    "type_present": null,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [
+     {
+      "id": "59588f8c-92ee-4d79-9cff-56692bedffb8",
+      "name": "Søstrene Grene Logistik Parken.",
+      "feature_type": "poi",
+      "lat": 56.159332,
+      "lon": 10.063027,
+      "distance_km": 456.261
+     },
+     {
+      "id": "01452de9-c453-4542-a9a0-e62d56268739",
+      "name": "Søstrene Grene",
+      "feature_type": "poi",
+      "lat": 55.640755,
+      "lon": 12.077153,
+      "distance_km": 354.607
+     },
+     {
+      "id": "03dac43c-0a63-4bbb-b744-b835d4494089",
+      "name": "Søstrene Grene",
+      "feature_type": "poi",
+      "lat": 59.444889,
+      "lon": 18.071455,
+      "distance_km": 819.104
+     },
+     {
+      "id": "07202461-a20e-4a49-a0b6-1da5fcdd06cc",
+      "name": "Søstrene Grene",
+      "feature_type": "poi",
+      "lat": 52.513088,
+      "lon": 6.091401,
+      "distance_km": 495.173
+     },
+     {
+      "id": "0a6155ed-6639-4bbd-bd2d-431dd38b24c8",
+      "name": "Søstrene Grene",
+      "feature_type": "poi",
+      "lat": 66.310097,
+      "lon": 14.135728,
+      "distance_km": 1530.627
+     },
+     {
+      "id": "0a79aab1-4678-4081-9d39-0728bf89c02e",
+      "name": "Søstrene Grene",
+      "feature_type": "poi",
+      "lat": 62.739197,
+      "lon": 7.17889,
+      "distance_km": 1190.928
+     }
+    ],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "nonascii_latin",
+     "country": "DE",
+     "metro": "berlin"
+    },
+    "variant_score": {
+     "name_distance_rank": null,
+     "exact_id_rank": null,
+     "empty": false
+    }
+   }
+  },
+  {
+   "case_id": "variant:nonascii_latin:949175db-36c1-4460-ab50-59a2b8a244db",
+   "query": "Phuong Dong",
+   "control_query": "Phương Đông",
+   "variant": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:nonascii_latin:949175db-36c1-4460-ab50-59a2b8a244db",
+    "kind": "place",
+    "query": "Phuong Dong",
+    "query_style": "variant_nonascii_latin",
+    "status": 200,
+    "ms": 1064.3,
+    "error": null,
+    "rank": null,
+    "found_at_1": false,
+    "found_at_10": false,
+    "matched_distance_km": null,
+    "top1_distance_km": 1148.802,
+    "expected_feature_type": null,
+    "top1_feature_type": null,
+    "type_at_1": null,
+    "type_present": null,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [
+     {
+      "id": "1c4922e2-42c3-4579-9096-172b75e23f4a",
+      "name": "Phường Đồng Nguyên, VN-56",
+      "feature_type": "locality",
+      "lat": 21.125035,
+      "lon": 105.972936,
+      "distance_km": 1148.802
+     },
+     {
+      "id": "9105ce94-4dc3-4969-b2dd-f03063e9f216",
+      "name": "Phường Đông Ngạc, VN-HN",
+      "feature_type": "locality",
+      "lat": 21.07612,
+      "lon": 105.778951,
+      "distance_km": 1145.014
+     },
+     {
+      "id": "3f3ddac2-b24a-4c62-8e3f-84a6e94315a3",
+      "name": "Phường Đông Kinh, VN-09",
+      "feature_type": "locality",
+      "lat": 21.84184,
+      "lon": 106.765066,
+      "distance_km": 1225.717
+     },
+     {
+      "id": "bf5764f2-6f4b-46a4-bc57-6960011d01b1",
+      "name": "Phường Đông Triều, VN-13",
+      "feature_type": "locality",
+      "lat": 21.083655,
+      "lon": 106.513812,
+      "distance_km": 1141.623
+     },
+     {
+      "id": "42a85ffc-bd2c-4d28-a85f-c4ddb447e97b",
+      "name": "Phường Đông Mai, VN-13",
+      "feature_type": "locality",
+      "lat": 21.004413,
+      "lon": 106.84686,
+      "distance_km": 1132.668
+     },
+     {
+      "id": "c27944ae-8709-4386-934b-b1430b0170c7",
+      "name": "Phường Hà Đông, VN-HN",
+      "feature_type": "locality",
+      "lat": 20.973294,
+      "lon": 105.7788,
+      "distance_km": 1133.629
+     },
+     {
+      "id": "e5abd8eb-760d-4173-a67d-9b11a11e9895",
+      "name": "Phường Đống Đa, VN-HN",
+      "feature_type": "locality",
+      "lat": 21.01073,
+      "lon": 105.818202,
+      "distance_km": 1137.409
+     }
+    ],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "nonascii_latin",
+     "country": "VN",
+     "metro": "ho_chi_minh_city"
+    },
+    "variant_score": {
+     "name_distance_rank": null,
+     "exact_id_rank": null,
+     "empty": false
+    }
+   },
+   "control": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:nonascii_latin:949175db-36c1-4460-ab50-59a2b8a244db:control",
+    "kind": "place",
+    "query": "Phương Đông",
+    "query_style": "variant_nonascii_latin_control",
+    "status": 200,
+    "ms": 434.1,
+    "error": null,
+    "rank": null,
+    "found_at_1": false,
+    "found_at_10": false,
+    "matched_distance_km": null,
+    "top1_distance_km": 1134.425,
+    "expected_feature_type": null,
+    "top1_feature_type": null,
+    "type_at_1": null,
+    "type_present": null,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [
+     {
+      "id": "ddc98ab3-bd56-4b6c-ab6a-c252922ae17d",
+      "name": "Phương Đông",
+      "feature_type": "poi",
+      "lat": 20.987022,
+      "lon": 105.858498,
+      "distance_km": 1134.425
+     },
+     {
+      "id": "f4dd0b4f-74a1-4dba-8414-2f8277412fd6",
+      "name": "Phương Việt Travel",
+      "feature_type": "poi",
+      "lat": 21.005016,
+      "lon": 105.836014,
+      "distance_km": 1136.616
+     },
+     {
+      "id": "b7ae263f-2f1d-4bbb-9531-62889bc5b613",
+      "name": "Sân bay Thọ Xuân Thanh Hoá",
+      "feature_type": "poi",
+      "lat": 19.934772,
+      "lon": 105.514053,
+      "distance_km": 1021.894
+     },
+     {
+      "id": "1c4922e2-42c3-4579-9096-172b75e23f4a",
+      "name": "Phường Đồng Nguyên, VN-56",
+      "feature_type": "locality",
+      "lat": 21.125035,
+      "lon": 105.972936,
+      "distance_km": 1148.802
+     },
+     {
+      "id": "64879aa3-30a6-4853-b036-f33fc819e945",
+      "name": "Phường Nam Đông Hà, VN-25",
+      "feature_type": "locality",
+      "lat": 16.801621,
+      "lon": 107.110837,
+      "distance_km": 666.574
+     },
+     {
+      "id": "7aad47f5-be89-457a-945d-64374d2ef637",
+      "name": "Gallery Art Bảo Phương Gallery Art Bao Phuong",
+      "feature_type": "poi",
+      "lat": 17.473734,
+      "lon": 106.617317,
+      "distance_km": 740.087
+     },
+     {
+      "id": "17f17912-128a-433b-853b-14f179c0b7ba",
+      "name": "Phường An Nhơn Đông, VN-30",
+      "feature_type": "locality",
+      "lat": 13.902107,
+      "lon": 109.105273,
+      "distance_km": 429.472
+     },
+     {
+      "id": "bbc05f12-4f8f-4150-97a5-f01d3a33e801",
+      "name": "Phường Đông Hòa, VN-SG",
+      "feature_type": "locality",
+      "lat": 10.892849,
+      "lon": 106.79832,
+      "distance_km": 11.59
+     },
+     {
+      "id": "53fc6211-3f5f-4fb5-9090-3ab4747f3aec",
+      "name": "Phường Bình Đông, VN-SG",
+      "feature_type": "locality",
+      "lat": 10.72831,
+      "lon": 106.637965,
+      "distance_km": 13.741
+     },
+     {
+      "id": "45ee8ce3-8cb6-460d-8dfe-9f14250322b7",
+      "name": "Phường Tân Đông Hiệp, VN-SG",
+      "feature_type": "locality",
+      "lat": 10.936957,
+      "lon": 106.764429,
+      "distance_km": 13.875
+     }
+    ],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "nonascii_latin",
+     "country": "VN",
+     "metro": "ho_chi_minh_city"
+    },
+    "variant_score": {
+     "name_distance_rank": null,
+     "exact_id_rank": null,
+     "empty": false
+    }
+   }
+  },
+  {
+   "case_id": "variant:hyphen_locality:aeac6baa-905c-42f4-a93c-75187879bc15",
+   "query": "Pimpri Chinchwad",
+   "control_query": "Pimpri-Chinchwad",
+   "variant": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:hyphen_locality:aeac6baa-905c-42f4-a93c-75187879bc15",
+    "kind": "place",
+    "query": "Pimpri Chinchwad",
+    "query_style": "variant_hyphen_locality",
+    "status": 200,
+    "ms": 285.2,
+    "error": null,
+    "rank": 3,
+    "found_at_1": false,
+    "found_at_10": true,
+    "matched_distance_km": 0.0,
+    "top1_distance_km": 2.572,
+    "expected_feature_type": "locality",
+    "top1_feature_type": "poi",
+    "type_at_1": false,
+    "type_present": true,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [
+     {
+      "id": "3cd4a4a3-8fef-443f-8152-9e472db5be00",
+      "name": "Pimpri Chinchwad",
+      "feature_type": "poi",
+      "lat": 18.608402,
+      "lon": 73.787895,
+      "distance_km": 2.572
+     },
+     {
+      "id": "7205daab-4a19-4200-be03-c34fc9511bb7",
+      "name": "Pimpri Chinchwad Science Centre",
+      "feature_type": "poi",
+      "lat": 18.639952,
+      "lon": 73.79998,
+      "distance_km": 1.341
+     },
+     {
+      "id": "aeac6baa-905c-42f4-a93c-75187879bc15",
+      "name": "Pimpri-Chinchwad, IN-MH",
+      "feature_type": "locality",
+      "lat": 18.627929,
+      "lon": 73.800983,
+      "distance_km": 0.0
+     },
+     {
+      "id": "728db147-93e5-47ab-9f08-96cb79277afc",
+      "name": "Pimpri railway station",
+      "feature_type": "poi",
+      "lat": 18.623199,
+      "lon": 73.8022,
+      "distance_km": 0.541
+     },
+     {
+      "id": "d297a20e-0640-4388-8bc8-c21704b1eb75",
+      "name": "Chinchwad Railway Station Parking Area",
+      "feature_type": "poi",
+      "lat": 18.640343,
+      "lon": 73.790985,
+      "distance_km": 1.737
+     },
+     {
+      "id": "8f344e84-a1ea-406e-854c-5629a84bcf68",
+      "name": "Pearl Learning Centre , And Arts And Crafts Classes , Pimpri , Pune-17",
+      "feature_type": "poi",
+      "lat": 18.614256,
+      "lon": 73.800972,
+      "distance_km": 1.52
+     },
+     {
+      "id": "7678d741-0fe7-4db4-92c4-596f6502bc4e",
+      "name": "Kakade Park, Chinchwad",
+      "feature_type": "poi",
+      "lat": 18.624842,
+      "lon": 73.785828,
+      "distance_km": 1.634
+     },
+     {
+      "id": "5a48f666-2947-4980-bbb4-3f6df388150e",
+      "name": "Dr. Tonape's Genesis Hospital | Best Orthopedic & General Surgeon | Rehabilitation Centre | Diabetologist in Pimpri-Chinchwad",
+      "feature_type": "poi",
+      "lat": 18.632404,
+      "lon": 73.801674,
+      "distance_km": 0.503
+     },
+     {
+      "id": "8660f235-8b9f-4535-b70d-acca72b2d3df",
+      "name": "Forever Health and Lactation Clinic, Pimpri",
+      "feature_type": "poi",
+      "lat": 18.641197,
+      "lon": 73.795052,
+      "distance_km": 1.603
+     },
+     {
+      "id": "0fd1f677-3cee-4137-b84c-2bbe5b62c3f1",
+      "name": "Lokmanya Hospital, Chinchwad",
+      "feature_type": "poi",
+      "lat": 18.638687,
+      "lon": 73.765694,
+      "distance_km": 3.906
+     }
+    ],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "hyphen_locality",
+     "country": "IN",
+     "metro": "-",
+     "sample_band": "top_population"
+    },
+    "variant_score": {
+     "name_distance_rank": 3,
+     "exact_id_rank": 3,
+     "empty": false
+    }
+   },
+   "control": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:hyphen_locality:aeac6baa-905c-42f4-a93c-75187879bc15:control",
+    "kind": "place",
+    "query": "Pimpri-Chinchwad",
+    "query_style": "variant_hyphen_locality_control",
+    "status": 200,
+    "ms": 273.3,
+    "error": null,
+    "rank": 1,
+    "found_at_1": true,
+    "found_at_10": true,
+    "matched_distance_km": 0.0,
+    "top1_distance_km": 0.0,
+    "expected_feature_type": "locality",
+    "top1_feature_type": "locality",
+    "type_at_1": true,
+    "type_present": true,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [
+     {
+      "id": "aeac6baa-905c-42f4-a93c-75187879bc15",
+      "name": "Pimpri-Chinchwad, IN-MH",
+      "feature_type": "locality",
+      "lat": 18.627929,
+      "lon": 73.800983,
+      "distance_km": 0.0
+     },
+     {
+      "id": "3cd4a4a3-8fef-443f-8152-9e472db5be00",
+      "name": "Pimpri Chinchwad",
+      "feature_type": "poi",
+      "lat": 18.608402,
+      "lon": 73.787895,
+      "distance_km": 2.572
+     },
+     {
+      "id": "728db147-93e5-47ab-9f08-96cb79277afc",
+      "name": "Pimpri railway station",
+      "feature_type": "poi",
+      "lat": 18.623199,
+      "lon": 73.8022,
+      "distance_km": 0.541
+     },
+     {
+      "id": "d297a20e-0640-4388-8bc8-c21704b1eb75",
+      "name": "Chinchwad Railway Station Parking Area",
+      "feature_type": "poi",
+      "lat": 18.640343,
+      "lon": 73.790985,
+      "distance_km": 1.737
+     },
+     {
+      "id": "8f344e84-a1ea-406e-854c-5629a84bcf68",
+      "name": "Pearl Learning Centre , And Arts And Crafts Classes , Pimpri , Pune-17",
+      "feature_type": "poi",
+      "lat": 18.614256,
+      "lon": 73.800972,
+      "distance_km": 1.52
+     },
+     {
+      "id": "7678d741-0fe7-4db4-92c4-596f6502bc4e",
+      "name": "Kakade Park, Chinchwad",
+      "feature_type": "poi",
+      "lat": 18.624842,
+      "lon": 73.785828,
+      "distance_km": 1.634
+     },
+     {
+      "id": "5a48f666-2947-4980-bbb4-3f6df388150e",
+      "name": "Dr. Tonape's Genesis Hospital | Best Orthopedic & General Surgeon | Rehabilitation Centre | Diabetologist in Pimpri-Chinchwad",
+      "feature_type": "poi",
+      "lat": 18.632404,
+      "lon": 73.801674,
+      "distance_km": 0.503
+     },
+     {
+      "id": "8660f235-8b9f-4535-b70d-acca72b2d3df",
+      "name": "Forever Health and Lactation Clinic, Pimpri",
+      "feature_type": "poi",
+      "lat": 18.641197,
+      "lon": 73.795052,
+      "distance_km": 1.603
+     },
+     {
+      "id": "0fd1f677-3cee-4137-b84c-2bbe5b62c3f1",
+      "name": "Lokmanya Hospital, Chinchwad",
+      "feature_type": "poi",
+      "lat": 18.638687,
+      "lon": 73.765694,
+      "distance_km": 3.906
+     },
+     {
+      "id": "9391ff66-042c-4cb5-82ae-5e1ae2389345",
+      "name": "FabHotel Regal Inn - Hotel in Pimpri-Chinchwad",
+      "feature_type": "poi",
+      "lat": 18.633301,
+      "lon": 73.803299,
+      "distance_km": 0.645
+     }
+    ],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "hyphen_locality",
+     "country": "IN",
+     "metro": "-",
+     "sample_band": "top_population"
+    },
+    "variant_score": {
+     "name_distance_rank": 1,
+     "exact_id_rank": 1,
+     "empty": false
+    }
+   }
+  },
+  {
+   "case_id": "variant:hyphen_locality:c351bc37-c2cd-4bb3-a4a3-5f79e69a13ac",
+   "query": "Mbuji Mayi",
+   "control_query": "Mbuji-Mayi",
+   "variant": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:hyphen_locality:c351bc37-c2cd-4bb3-a4a3-5f79e69a13ac",
+    "kind": "place",
+    "query": "Mbuji Mayi",
+    "query_style": "variant_hyphen_locality",
+    "status": 200,
+    "ms": 376.6,
+    "error": null,
+    "rank": 3,
+    "found_at_1": false,
+    "found_at_10": true,
+    "matched_distance_km": 0.072,
+    "top1_distance_km": 938.743,
+    "expected_feature_type": "locality",
+    "top1_feature_type": "poi",
+    "type_at_1": false,
+    "type_present": true,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [
+     {
+      "id": "b9ad5145-bdd6-422c-8ad1-b43d92fb7340",
+      "name": "Mbuji mayi",
+      "feature_type": "poi",
+      "lat": -4.342342,
+      "lon": 15.313086,
+      "distance_km": 938.743
+     },
+     {
+      "id": "225788fa-cf99-4a37-863d-4d715b38af23",
+      "name": "Mbuji Mayi Airport",
+      "feature_type": "poi",
+      "lat": -6.124929,
+      "lon": 23.572199,
+      "distance_km": 3.055
+     },
+     {
+      "id": "f5739b4d-7806-4250-a913-33b1a9f7c4b9",
+      "name": "Mbuji-Mayi",
+      "feature_type": "poi",
+      "lat": -6.125535,
+      "lon": 23.600349,
+      "distance_km": 0.072
+     },
+     {
+      "id": "6a1c127b-2c75-45ff-ac9b-05b3b9a41ee0",
+      "name": "Mbuji Mayi Market",
+      "feature_type": "poi",
+      "lat": 44.651505,
+      "lon": -63.582428,
+      "distance_km": 10263.889
+     },
+     {
+      "id": "c351bc37-c2cd-4bb3-a4a3-5f79e69a13ac",
+      "name": "Mbuji-Mayi, CD-KE",
+      "feature_type": "locality",
+      "lat": -6.125894,
+      "lon": 23.599811,
+      "distance_km": 0.0
+     },
+     {
+      "id": "cfe5e694-5c85-4ba7-bb33-748996b59200",
+      "name": "Mbuji-Mayi, CD-KE",
+      "feature_type": "county",
+      "lat": -6.1111,
+      "lon": 23.609966,
+      "distance_km": 1.992
+     },
+     {
+      "id": "baa7b942-121d-4966-a7bb-d03fb66978f4",
+      "name": "Mbuji-Mayi (vattendrag i Kongo-Kinshasa, Katanga)",
+      "feature_type": "poi",
+      "lat": -8.59201,
+      "lon": 22.977539,
+      "distance_km": 282.674
+     },
+     {
+      "id": "c94f35aa-aafc-4302-b740-ac61a553fdd6",
+      "name": "Mbuji-Mayi (vattendrag i Kongo-Kinshasa, lat -6,03, long 23,77)",
+      "feature_type": "poi",
+      "lat": -6.03333,
+      "lon": 23.76667,
+      "distance_km": 21.127
+     },
+     {
+      "id": "cce60d33-354f-4b64-b130-f352a4052a26",
+      "name": "Fatshi Aéroport International De Mbuji-mayi",
+      "feature_type": "poi",
+      "lat": -6.10794,
+      "lon": 23.626101,
+      "distance_km": 3.526
+     },
+     {
+      "id": "062f83f8-4e23-415d-b18c-2bb3dd0d6e72",
+      "name": "Ville de Mbuji-Mayi",
+      "feature_type": "poi",
+      "lat": -6.15,
+      "lon": 23.6,
+      "distance_km": 2.68
+     }
+    ],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "hyphen_locality",
+     "country": "CD",
+     "metro": "-",
+     "sample_band": "top_population"
+    },
+    "variant_score": {
+     "name_distance_rank": 3,
+     "exact_id_rank": 3,
+     "empty": false
+    }
+   },
+   "control": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:hyphen_locality:c351bc37-c2cd-4bb3-a4a3-5f79e69a13ac:control",
+    "kind": "place",
+    "query": "Mbuji-Mayi",
+    "query_style": "variant_hyphen_locality_control",
+    "status": 200,
+    "ms": 93.6,
+    "error": null,
+    "rank": 1,
+    "found_at_1": true,
+    "found_at_10": true,
+    "matched_distance_km": 0.0,
+    "top1_distance_km": 0.0,
+    "expected_feature_type": "locality",
+    "top1_feature_type": "locality",
+    "type_at_1": true,
+    "type_present": true,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [
+     {
+      "id": "c351bc37-c2cd-4bb3-a4a3-5f79e69a13ac",
+      "name": "Mbuji-Mayi, CD-KE",
+      "feature_type": "locality",
+      "lat": -6.125894,
+      "lon": 23.599811,
+      "distance_km": 0.0
+     },
+     {
+      "id": "f5739b4d-7806-4250-a913-33b1a9f7c4b9",
+      "name": "Mbuji-Mayi",
+      "feature_type": "poi",
+      "lat": -6.125535,
+      "lon": 23.600349,
+      "distance_km": 0.072
+     },
+     {
+      "id": "baa7b942-121d-4966-a7bb-d03fb66978f4",
+      "name": "Mbuji-Mayi (vattendrag i Kongo-Kinshasa, Katanga)",
+      "feature_type": "poi",
+      "lat": -8.59201,
+      "lon": 22.977539,
+      "distance_km": 282.674
+     },
+     {
+      "id": "c94f35aa-aafc-4302-b740-ac61a553fdd6",
+      "name": "Mbuji-Mayi (vattendrag i Kongo-Kinshasa, lat -6,03, long 23,77)",
+      "feature_type": "poi",
+      "lat": -6.03333,
+      "lon": 23.76667,
+      "distance_km": 21.127
+     },
+     {
+      "id": "cfe5e694-5c85-4ba7-bb33-748996b59200",
+      "name": "Mbuji-Mayi, CD-KE",
+      "feature_type": "county",
+      "lat": -6.1111,
+      "lon": 23.609966,
+      "distance_km": 1.992
+     },
+     {
+      "id": "b9ad5145-bdd6-422c-8ad1-b43d92fb7340",
+      "name": "Mbuji mayi",
+      "feature_type": "poi",
+      "lat": -4.342342,
+      "lon": 15.313086,
+      "distance_km": 938.743
+     },
+     {
+      "id": "225788fa-cf99-4a37-863d-4d715b38af23",
+      "name": "Mbuji Mayi Airport",
+      "feature_type": "poi",
+      "lat": -6.124929,
+      "lon": 23.572199,
+      "distance_km": 3.055
+     },
+     {
+      "id": "6a1c127b-2c75-45ff-ac9b-05b3b9a41ee0",
+      "name": "Mbuji Mayi Market",
+      "feature_type": "poi",
+      "lat": 44.651505,
+      "lon": -63.582428,
+      "distance_km": 10263.889
+     },
+     {
+      "id": "cce60d33-354f-4b64-b130-f352a4052a26",
+      "name": "Fatshi Aéroport International De Mbuji-mayi",
+      "feature_type": "poi",
+      "lat": -6.10794,
+      "lon": 23.626101,
+      "distance_km": 3.526
+     },
+     {
+      "id": "062f83f8-4e23-415d-b18c-2bb3dd0d6e72",
+      "name": "Ville de Mbuji-Mayi",
+      "feature_type": "poi",
+      "lat": -6.15,
+      "lon": 23.6,
+      "distance_km": 2.68
+     }
+    ],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "hyphen_locality",
+     "country": "CD",
+     "metro": "-",
+     "sample_band": "top_population"
+    },
+    "variant_score": {
+     "name_distance_rank": 1,
+     "exact_id_rank": 1,
+     "empty": false
+    }
+   }
+  },
+  {
+   "case_id": "variant:hyphen_locality:3e1c941b-074d-45d5-ba91-10cb91c6d9b6",
+   "query": "Port au Prince",
+   "control_query": "Port-au-Prince",
+   "variant": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:hyphen_locality:3e1c941b-074d-45d5-ba91-10cb91c6d9b6",
+    "kind": "place",
+    "query": "Port au Prince",
+    "query_style": "variant_hyphen_locality",
+    "status": 200,
+    "ms": 1012.2,
+    "error": null,
+    "rank": 1,
+    "found_at_1": true,
+    "found_at_10": true,
+    "matched_distance_km": 0.0,
+    "top1_distance_km": 0.0,
+    "expected_feature_type": "locality",
+    "top1_feature_type": "locality",
+    "type_at_1": true,
+    "type_present": true,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [
+     {
+      "id": "3e1c941b-074d-45d5-ba91-10cb91c6d9b6",
+      "name": "Port-au-Prince, HT-OU",
+      "feature_type": "locality",
+      "lat": 18.547327,
+      "lon": -72.339593,
+      "distance_km": 0.0
+     }
+    ],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "hyphen_locality",
+     "country": "HT",
+     "metro": "-",
+     "sample_band": "top_population"
+    },
+    "variant_score": {
+     "name_distance_rank": 1,
+     "exact_id_rank": 1,
+     "empty": false
+    }
+   },
+   "control": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:hyphen_locality:3e1c941b-074d-45d5-ba91-10cb91c6d9b6:control",
+    "kind": "place",
+    "query": "Port-au-Prince",
+    "query_style": "variant_hyphen_locality_control",
+    "status": 200,
+    "ms": 187.5,
+    "error": null,
+    "rank": 1,
+    "found_at_1": true,
+    "found_at_10": true,
+    "matched_distance_km": 0.0,
+    "top1_distance_km": 0.0,
+    "expected_feature_type": "locality",
+    "top1_feature_type": "locality",
+    "type_at_1": true,
+    "type_present": true,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [
+     {
+      "id": "3e1c941b-074d-45d5-ba91-10cb91c6d9b6",
+      "name": "Port-au-Prince, HT-OU",
+      "feature_type": "locality",
+      "lat": 18.547327,
+      "lon": -72.339593,
+      "distance_km": 0.0
+     }
+    ],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "hyphen_locality",
+     "country": "HT",
+     "metro": "-",
+     "sample_band": "top_population"
+    },
+    "variant_score": {
+     "name_distance_rank": 1,
+     "exact_id_rank": 1,
+     "empty": false
+    }
+   }
+  },
+  {
+   "case_id": "variant:hyphen_locality:936fca1e-05d4-45fe-b25b-badcec3bdb18",
+   "query": "Pointe Noire",
+   "control_query": "Pointe-Noire",
+   "variant": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:hyphen_locality:936fca1e-05d4-45fe-b25b-badcec3bdb18",
+    "kind": "place",
+    "query": "Pointe Noire",
+    "query_style": "variant_hyphen_locality",
+    "status": 200,
+    "ms": 777.0,
+    "error": null,
+    "rank": 2,
+    "found_at_1": false,
+    "found_at_10": true,
+    "matched_distance_km": 0.0,
+    "top1_distance_km": 4.509,
+    "expected_feature_type": "locality",
+    "top1_feature_type": "poi",
+    "type_at_1": false,
+    "type_present": true,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [
+     {
+      "id": "2a3786e5-0206-4e86-9c7d-9c2054158cd4",
+      "name": "Pointe Noire Airport",
+      "feature_type": "poi",
+      "lat": -4.815974,
+      "lon": 11.88657,
+      "distance_km": 4.509
+     },
+     {
+      "id": "936fca1e-05d4-45fe-b25b-badcec3bdb18",
+      "name": "Pointe-Noire, CG-5",
+      "feature_type": "locality",
+      "lat": -4.797537,
+      "lon": 11.85033,
+      "distance_km": 0.0
+     },
+     {
+      "id": "3bdbcb60-89bd-4f71-b9c8-5a59c281b895",
+      "name": "Pointe-Noire (département), CG-16",
+      "feature_type": "region",
+      "lat": -4.827063,
+      "lon": 12.026058,
+      "distance_km": 19.746
+     },
+     {
+      "id": "a61c5187-6c72-4c76-af75-7845001b25a3",
+      "name": "Aéroport Agostino Pointe-Noire, République Du Congo",
+      "feature_type": "poi",
+      "lat": -4.81533,
+      "lon": 11.883181,
+      "distance_km": 4.143
+     },
+     {
+      "id": "76a256d8-d1e7-4405-9724-749548747fbe",
+      "name": "Johannesburg-Cape Town-Brazzaville-Pointe Noire",
+      "feature_type": "poi",
+      "lat": -26.2029,
+      "lon": 28.045511,
+      "distance_km": 2937.984
+     },
+     {
+      "id": "92fcbe98-3e4d-442f-89c8-c9c8a774a16b",
+      "name": "Aéroport International A. A. Neto de Pointe Noire",
+      "feature_type": "poi",
+      "lat": -4.815224,
+      "lon": 11.883043,
+      "distance_km": 4.124
+     },
+     {
+      "id": "6801d1ef-491f-4ac7-8311-31f46d05f075",
+      "name": "Lapangan Terbang Pointe Noire",
+      "feature_type": "poi",
+      "lat": -4.813333,
+      "lon": 11.885833,
+      "distance_km": 4.308
+     }
+    ],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "hyphen_locality",
+     "country": "CG",
+     "metro": "-",
+     "sample_band": "top_population"
+    },
+    "variant_score": {
+     "name_distance_rank": 2,
+     "exact_id_rank": 2,
+     "empty": false
+    }
+   },
+   "control": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:hyphen_locality:936fca1e-05d4-45fe-b25b-badcec3bdb18:control",
+    "kind": "place",
+    "query": "Pointe-Noire",
+    "query_style": "variant_hyphen_locality_control",
+    "status": 200,
+    "ms": 103.8,
+    "error": null,
+    "rank": 1,
+    "found_at_1": true,
+    "found_at_10": true,
+    "matched_distance_km": 0.0,
+    "top1_distance_km": 0.0,
+    "expected_feature_type": "locality",
+    "top1_feature_type": "locality",
+    "type_at_1": true,
+    "type_present": true,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [
+     {
+      "id": "936fca1e-05d4-45fe-b25b-badcec3bdb18",
+      "name": "Pointe-Noire, CG-5",
+      "feature_type": "locality",
+      "lat": -4.797537,
+      "lon": 11.85033,
+      "distance_km": 0.0
+     },
+     {
+      "id": "3bdbcb60-89bd-4f71-b9c8-5a59c281b895",
+      "name": "Pointe-Noire (département), CG-16",
+      "feature_type": "region",
+      "lat": -4.827063,
+      "lon": 12.026058,
+      "distance_km": 19.746
+     },
+     {
+      "id": "2a3786e5-0206-4e86-9c7d-9c2054158cd4",
+      "name": "Pointe Noire Airport",
+      "feature_type": "poi",
+      "lat": -4.815974,
+      "lon": 11.88657,
+      "distance_km": 4.509
+     },
+     {
+      "id": "a61c5187-6c72-4c76-af75-7845001b25a3",
+      "name": "Aéroport Agostino Pointe-Noire, République Du Congo",
+      "feature_type": "poi",
+      "lat": -4.81533,
+      "lon": 11.883181,
+      "distance_km": 4.143
+     },
+     {
+      "id": "76a256d8-d1e7-4405-9724-749548747fbe",
+      "name": "Johannesburg-Cape Town-Brazzaville-Pointe Noire",
+      "feature_type": "poi",
+      "lat": -26.2029,
+      "lon": 28.045511,
+      "distance_km": 2937.984
+     },
+     {
+      "id": "92fcbe98-3e4d-442f-89c8-c9c8a774a16b",
+      "name": "Aéroport International A. A. Neto de Pointe Noire",
+      "feature_type": "poi",
+      "lat": -4.815224,
+      "lon": 11.883043,
+      "distance_km": 4.124
+     },
+     {
+      "id": "6801d1ef-491f-4ac7-8311-31f46d05f075",
+      "name": "Lapangan Terbang Pointe Noire",
+      "feature_type": "poi",
+      "lat": -4.813333,
+      "lon": 11.885833,
+      "distance_km": 4.308
+     }
+    ],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "hyphen_locality",
+     "country": "CG",
+     "metro": "-",
+     "sample_band": "top_population"
+    },
+    "variant_score": {
+     "name_distance_rank": 1,
+     "exact_id_rank": 1,
+     "empty": false
+    }
+   }
+  },
+  {
+   "case_id": "variant:hyphen_locality:1da687c4-b419-40dd-9089-ca6f32a32d17",
+   "query": "Bobo Dioulasso",
+   "control_query": "Bobo-Dioulasso",
+   "variant": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:hyphen_locality:1da687c4-b419-40dd-9089-ca6f32a32d17",
+    "kind": "place",
+    "query": "Bobo Dioulasso",
+    "query_style": "variant_hyphen_locality",
+    "status": 200,
+    "ms": 615.0,
+    "error": null,
+    "rank": 1,
+    "found_at_1": true,
+    "found_at_10": true,
+    "matched_distance_km": 0.0,
+    "top1_distance_km": 0.0,
+    "expected_feature_type": "locality",
+    "top1_feature_type": "locality",
+    "type_at_1": true,
+    "type_present": true,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [
+     {
+      "id": "1da687c4-b419-40dd-9089-ca6f32a32d17",
+      "name": "Bobo-Dioulasso, BF-09",
+      "feature_type": "locality",
+      "lat": 11.17658,
+      "lon": -4.296144,
+      "distance_km": 0.0
+     },
+     {
+      "id": "a346d6a5-31f8-4cc8-aa01-a6727d1a0e54",
+      "name": "Gare de Bobo-Dioulasso",
+      "feature_type": "poi",
+      "lat": 11.178522,
+      "lon": -4.306885,
+      "distance_km": 1.191
+     },
+     {
+      "id": "98e0679a-dced-4c27-815d-d3d7bbf22356",
+      "name": "Grande Mosquée de Bobo-Dioulasso",
+      "feature_type": "poi",
+      "lat": 11.177795,
+      "lon": -4.296025,
+      "distance_km": 0.136
+     },
+     {
+      "id": "d32d6859-0a36-42b3-b249-3f798af27eda",
+      "name": "Joe Boutique - Galerie d'Antiquités Africaines de Bobo Dioulasso",
+      "feature_type": "poi",
+      "lat": 11.173862,
+      "lon": -4.298553,
+      "distance_km": 0.401
+     },
+     {
+      "id": "92e6a2e2-664a-4bc0-b960-a8a02b1f15ca",
+      "name": "Grande Mosquée De Bobo-Dioulasso",
+      "feature_type": "poi",
+      "lat": 11.185375,
+      "lon": -4.29639,
+      "distance_km": 0.978
+     },
+     {
+      "id": "40f1c9c2-73b7-4d75-abb9-332e5fa23929",
+      "name": "Église des Assemblées de Dieu Temple Horeb - Bobo Dioulasso",
+      "feature_type": "poi",
+      "lat": 11.1833,
+      "lon": -4.2833,
+      "distance_km": 1.588
+     },
+     {
+      "id": "e021c27d-0a1b-48d3-98fe-5a7272d3958b",
+      "name": "Commune de Bobo-Dioulasso",
+      "feature_type": "poi",
+      "lat": 11.16918,
+      "lon": -4.29969,
+      "distance_km": 0.909
+     },
+     {
+      "id": "dd060694-4df1-4cd3-9352-4622a5a851df",
+      "name": "Université Aube Nouvelle / Bobo-Dioulasso",
+      "feature_type": "poi",
+      "lat": 11.16918,
+      "lon": -4.29969,
+      "distance_km": 0.909
+     },
+     {
+      "id": "1539246f-a2a6-4d96-a893-ddc4fd6d814e",
+      "name": "M24 Bobo Dioulasso",
+      "feature_type": "poi",
+      "lat": 11.174592,
+      "lon": -4.299495,
+      "distance_km": 0.427
+     },
+     {
+      "id": "e4e55456-c658-4748-ae2d-5c0ec2affd7c",
+      "name": "Hotel L'auberge, Bobo-Dioulasso, Burkina Faso",
+      "feature_type": "poi",
+      "lat": 11.175079,
+      "lon": -4.29981,
+      "distance_km": 0.433
+     }
+    ],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "hyphen_locality",
+     "country": "BF",
+     "metro": "-",
+     "sample_band": "top_population"
+    },
+    "variant_score": {
+     "name_distance_rank": 1,
+     "exact_id_rank": 1,
+     "empty": false
+    }
+   },
+   "control": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:hyphen_locality:1da687c4-b419-40dd-9089-ca6f32a32d17:control",
+    "kind": "place",
+    "query": "Bobo-Dioulasso",
+    "query_style": "variant_hyphen_locality_control",
+    "status": 200,
+    "ms": 119.5,
+    "error": null,
+    "rank": 1,
+    "found_at_1": true,
+    "found_at_10": true,
+    "matched_distance_km": 0.0,
+    "top1_distance_km": 0.0,
+    "expected_feature_type": "locality",
+    "top1_feature_type": "locality",
+    "type_at_1": true,
+    "type_present": true,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [
+     {
+      "id": "1da687c4-b419-40dd-9089-ca6f32a32d17",
+      "name": "Bobo-Dioulasso, BF-09",
+      "feature_type": "locality",
+      "lat": 11.17658,
+      "lon": -4.296144,
+      "distance_km": 0.0
+     },
+     {
+      "id": "a346d6a5-31f8-4cc8-aa01-a6727d1a0e54",
+      "name": "Gare de Bobo-Dioulasso",
+      "feature_type": "poi",
+      "lat": 11.178522,
+      "lon": -4.306885,
+      "distance_km": 1.191
+     },
+     {
+      "id": "98e0679a-dced-4c27-815d-d3d7bbf22356",
+      "name": "Grande Mosquée de Bobo-Dioulasso",
+      "feature_type": "poi",
+      "lat": 11.177795,
+      "lon": -4.296025,
+      "distance_km": 0.136
+     },
+     {
+      "id": "d32d6859-0a36-42b3-b249-3f798af27eda",
+      "name": "Joe Boutique - Galerie d'Antiquités Africaines de Bobo Dioulasso",
+      "feature_type": "poi",
+      "lat": 11.173862,
+      "lon": -4.298553,
+      "distance_km": 0.401
+     },
+     {
+      "id": "92e6a2e2-664a-4bc0-b960-a8a02b1f15ca",
+      "name": "Grande Mosquée De Bobo-Dioulasso",
+      "feature_type": "poi",
+      "lat": 11.185375,
+      "lon": -4.29639,
+      "distance_km": 0.978
+     },
+     {
+      "id": "40f1c9c2-73b7-4d75-abb9-332e5fa23929",
+      "name": "Église des Assemblées de Dieu Temple Horeb - Bobo Dioulasso",
+      "feature_type": "poi",
+      "lat": 11.1833,
+      "lon": -4.2833,
+      "distance_km": 1.588
+     },
+     {
+      "id": "e021c27d-0a1b-48d3-98fe-5a7272d3958b",
+      "name": "Commune de Bobo-Dioulasso",
+      "feature_type": "poi",
+      "lat": 11.16918,
+      "lon": -4.29969,
+      "distance_km": 0.909
+     },
+     {
+      "id": "dd060694-4df1-4cd3-9352-4622a5a851df",
+      "name": "Université Aube Nouvelle / Bobo-Dioulasso",
+      "feature_type": "poi",
+      "lat": 11.16918,
+      "lon": -4.29969,
+      "distance_km": 0.909
+     },
+     {
+      "id": "1539246f-a2a6-4d96-a893-ddc4fd6d814e",
+      "name": "M24 Bobo Dioulasso",
+      "feature_type": "poi",
+      "lat": 11.174592,
+      "lon": -4.299495,
+      "distance_km": 0.427
+     },
+     {
+      "id": "e4e55456-c658-4748-ae2d-5c0ec2affd7c",
+      "name": "Hotel L'auberge, Bobo-Dioulasso, Burkina Faso",
+      "feature_type": "poi",
+      "lat": 11.175079,
+      "lon": -4.29981,
+      "distance_km": 0.433
+     }
+    ],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "hyphen_locality",
+     "country": "BF",
+     "metro": "-",
+     "sample_band": "top_population"
+    },
+    "variant_score": {
+     "name_distance_rank": 1,
+     "exact_id_rank": 1,
+     "empty": false
+    }
+   }
+  },
+  {
+   "case_id": "variant:hyphen_locality:0a067856-c822-4b38-bdbd-4abbb24cacca",
+   "query": "Monte Carlo",
+   "control_query": "Monte-Carlo",
+   "variant": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:hyphen_locality:0a067856-c822-4b38-bdbd-4abbb24cacca",
+    "kind": "place",
+    "query": "Monte Carlo",
+    "query_style": "variant_hyphen_locality",
+    "status": 200,
+    "ms": 2992.2,
+    "error": null,
+    "rank": null,
+    "found_at_1": false,
+    "found_at_10": false,
+    "matched_distance_km": null,
+    "top1_distance_km": 9351.363,
+    "expected_feature_type": "locality",
+    "top1_feature_type": "poi",
+    "type_at_1": false,
+    "type_present": false,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [
+     {
+      "id": "54188a35-b598-4290-8ed7-4d2ac447494c",
+      "name": "Monte Carlo",
+      "feature_type": "poi",
+      "lat": 25.731205,
+      "lon": -100.225143,
+      "distance_km": 9351.363
+     },
+     {
+      "id": "43a3a4c9-0160-4672-8aa1-a64ffde95c24",
+      "name": "Monte Carlo",
+      "feature_type": "poi",
+      "lat": -26.294125,
+      "lon": -48.856216,
+      "distance_km": 9667.948
+     },
+     {
+      "id": "677f5271-5426-4fdb-b27f-a25d51138468",
+      "name": "Monte Carlo",
+      "feature_type": "poi",
+      "lat": -26.828209,
+      "lon": -48.628517,
+      "distance_km": 9701.808
+     },
+     {
+      "id": "0ed3cc3d-d32c-4b91-8961-d6c80e731352",
+      "name": "Monte Carlo",
+      "feature_type": "poi",
+      "lat": -19.467775,
+      "lon": -42.559734,
+      "distance_km": 8675.547
+     },
+     {
+      "id": "a11db542-2e6a-4377-a1ed-afe08ab55c2d",
+      "name": "Monte Carlo",
+      "feature_type": "poi",
+      "lat": 13.836126,
+      "lon": 100.553749,
+      "distance_km": 9195.763
+     },
+     {
+      "id": "460829d6-245f-4bf4-ba34-13490fab3f74",
+      "name": "Monte Carlo",
+      "feature_type": "poi",
+      "lat": -20.439573,
+      "lon": -54.589722,
+      "distance_km": 9521.521
+     },
+     {
+      "id": "86674ef0-7681-4836-aec4-b0e1b753ec47",
+      "name": "Monte Carlo",
+      "feature_type": "poi",
+      "lat": -26.134861,
+      "lon": 27.931076,
+      "distance_km": 8046.477
+     },
+     {
+      "id": "471bf014-72a2-410e-8bb9-cd169934d3e8",
+      "name": "Monte Carlo",
+      "feature_type": "poi",
+      "lat": -29.881849,
+      "lon": 30.953938,
+      "distance_km": 8529.663
+     },
+     {
+      "id": "c0bd2036-da18-445d-b537-6f67b21ef1ff",
+      "name": "Monte Carlo",
+      "feature_type": "poi",
+      "lat": 43.24696,
+      "lon": 6.52998,
+      "distance_km": 90.774
+     },
+     {
+      "id": "a218afa5-f0f1-406a-8e41-1d7666327472",
+      "name": "Monte Carlo",
+      "feature_type": "poi",
+      "lat": -22.966463,
+      "lon": -43.177246,
+      "distance_km": 9032.668
+     }
+    ],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "hyphen_locality",
+     "country": "MC",
+     "metro": "-",
+     "sample_band": "targeted_lower_population"
+    },
+    "variant_score": {
+     "name_distance_rank": null,
+     "exact_id_rank": null,
+     "empty": false
+    }
+   },
+   "control": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:hyphen_locality:0a067856-c822-4b38-bdbd-4abbb24cacca:control",
+    "kind": "place",
+    "query": "Monte-Carlo",
+    "query_style": "variant_hyphen_locality_control",
+    "status": 200,
+    "ms": 68.0,
+    "error": null,
+    "rank": null,
+    "found_at_1": false,
+    "found_at_10": false,
+    "matched_distance_km": null,
+    "top1_distance_km": 9351.363,
+    "expected_feature_type": "locality",
+    "top1_feature_type": "poi",
+    "type_at_1": false,
+    "type_present": false,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [
+     {
+      "id": "54188a35-b598-4290-8ed7-4d2ac447494c",
+      "name": "Monte Carlo",
+      "feature_type": "poi",
+      "lat": 25.731205,
+      "lon": -100.225143,
+      "distance_km": 9351.363
+     },
+     {
+      "id": "43a3a4c9-0160-4672-8aa1-a64ffde95c24",
+      "name": "Monte Carlo",
+      "feature_type": "poi",
+      "lat": -26.294125,
+      "lon": -48.856216,
+      "distance_km": 9667.948
+     },
+     {
+      "id": "677f5271-5426-4fdb-b27f-a25d51138468",
+      "name": "Monte Carlo",
+      "feature_type": "poi",
+      "lat": -26.828209,
+      "lon": -48.628517,
+      "distance_km": 9701.808
+     },
+     {
+      "id": "0ed3cc3d-d32c-4b91-8961-d6c80e731352",
+      "name": "Monte Carlo",
+      "feature_type": "poi",
+      "lat": -19.467775,
+      "lon": -42.559734,
+      "distance_km": 8675.547
+     },
+     {
+      "id": "a11db542-2e6a-4377-a1ed-afe08ab55c2d",
+      "name": "Monte Carlo",
+      "feature_type": "poi",
+      "lat": 13.836126,
+      "lon": 100.553749,
+      "distance_km": 9195.763
+     },
+     {
+      "id": "460829d6-245f-4bf4-ba34-13490fab3f74",
+      "name": "Monte Carlo",
+      "feature_type": "poi",
+      "lat": -20.439573,
+      "lon": -54.589722,
+      "distance_km": 9521.521
+     },
+     {
+      "id": "86674ef0-7681-4836-aec4-b0e1b753ec47",
+      "name": "Monte Carlo",
+      "feature_type": "poi",
+      "lat": -26.134861,
+      "lon": 27.931076,
+      "distance_km": 8046.477
+     },
+     {
+      "id": "471bf014-72a2-410e-8bb9-cd169934d3e8",
+      "name": "Monte Carlo",
+      "feature_type": "poi",
+      "lat": -29.881849,
+      "lon": 30.953938,
+      "distance_km": 8529.663
+     },
+     {
+      "id": "c0bd2036-da18-445d-b537-6f67b21ef1ff",
+      "name": "Monte Carlo",
+      "feature_type": "poi",
+      "lat": 43.24696,
+      "lon": 6.52998,
+      "distance_km": 90.774
+     },
+     {
+      "id": "a218afa5-f0f1-406a-8e41-1d7666327472",
+      "name": "Monte Carlo",
+      "feature_type": "poi",
+      "lat": -22.966463,
+      "lon": -43.177246,
+      "distance_km": 9032.668
+     }
+    ],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "hyphen_locality",
+     "country": "MC",
+     "metro": "-",
+     "sample_band": "targeted_lower_population"
+    },
+    "variant_score": {
+     "name_distance_rank": null,
+     "exact_id_rank": null,
+     "empty": false
+    }
+   }
+  },
+  {
+   "case_id": "variant:hyphen_locality:8248f197-ef50-4588-a32c-ccad1abe72ba",
+   "query": "Opa locka",
+   "control_query": "Opa-locka",
+   "variant": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:hyphen_locality:8248f197-ef50-4588-a32c-ccad1abe72ba",
+    "kind": "place",
+    "query": "Opa locka",
+    "query_style": "variant_hyphen_locality",
+    "status": 200,
+    "ms": 368.9,
+    "error": null,
+    "rank": 9,
+    "found_at_1": false,
+    "found_at_10": true,
+    "matched_distance_km": 0.0,
+    "top1_distance_km": 1.979,
+    "expected_feature_type": "locality",
+    "top1_feature_type": "poi",
+    "type_at_1": false,
+    "type_present": true,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [
+     {
+      "id": "f8236510-fc6f-4664-80b4-a45e2b107a94",
+      "name": "Opa Locka Airport",
+      "feature_type": "poi",
+      "lat": 25.909557,
+      "lon": -80.268402,
+      "distance_km": 1.979
+     },
+     {
+      "id": "651bca31-6b7b-4606-8ffc-180afc1f968d",
+      "name": "Opa Locka Executive Airport Air Traffic Control Tower",
+      "feature_type": "poi",
+      "lat": 25.919952,
+      "lon": -80.319077,
+      "distance_km": 7.151
+     },
+     {
+      "id": "9459579d-2737-4ef1-8e4c-099f7771bd72",
+      "name": "Opa Locka Airport (OPF)",
+      "feature_type": "poi",
+      "lat": 25.902731,
+      "lon": -80.267097,
+      "distance_km": 1.678
+     },
+     {
+      "id": "0e6e5303-e3a1-4449-ac9d-d1168edde8d0",
+      "name": "Miami Opa-Locka Executive Airport",
+      "feature_type": "poi",
+      "lat": 25.907499,
+      "lon": -80.278336,
+      "distance_km": 2.86
+     },
+     {
+      "id": "c86dd63d-78ac-42cb-bd69-2f0d86753a73",
+      "name": "Embassair FBO Opa-Locka",
+      "feature_type": "poi",
+      "lat": 25.897114,
+      "lon": -80.275551,
+      "distance_km": 2.589
+     },
+     {
+      "id": "edb91cdd-f2c0-4a87-9f04-ab04c8c4fb0c",
+      "name": "Opa-locka West Airport",
+      "feature_type": "poi",
+      "lat": 25.948889,
+      "lon": -80.423332,
+      "distance_km": 18.06
+     },
+     {
+      "id": "bd132135-61e1-4417-9c18-2503a3b76837",
+      "name": "Miami-Opa locka Executive Tower",
+      "feature_type": "poi",
+      "lat": 25.908295,
+      "lon": -80.273003,
+      "distance_km": 2.364
+     },
+     {
+      "id": "22e2705c-0037-48c7-b3b7-500f607679cb",
+      "name": "US Department of Transportation Miami Air Station Opa Loca Airport",
+      "feature_type": "poi",
+      "lat": 25.907066,
+      "lon": -80.272957,
+      "distance_km": 2.325
+     },
+     {
+      "id": "8248f197-ef50-4588-a32c-ccad1abe72ba",
+      "name": "Opa-locka, FL",
+      "feature_type": "locality",
+      "lat": 25.902317,
+      "lon": -80.250327,
+      "distance_km": 0.0
+     },
+     {
+      "id": "8e863b09-069b-4ed5-9e79-e6278f360313",
+      "name": "Opa-locka station",
+      "feature_type": "poi",
+      "lat": 25.900291,
+      "lon": -80.253342,
+      "distance_km": 0.376
+     }
+    ],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "hyphen_locality",
+     "country": "US",
+     "metro": "-",
+     "sample_band": "targeted_lower_population"
+    },
+    "variant_score": {
+     "name_distance_rank": 9,
+     "exact_id_rank": 9,
+     "empty": false
+    }
+   },
+   "control": {
+    "provider": "overture",
+    "scoring_mode": "exact_gers_id",
+    "capability": "supported",
+    "capability_reason": null,
+    "case_id": "variant:hyphen_locality:8248f197-ef50-4588-a32c-ccad1abe72ba:control",
+    "kind": "place",
+    "query": "Opa-locka",
+    "query_style": "variant_hyphen_locality_control",
+    "status": 200,
+    "ms": 81.6,
+    "error": null,
+    "rank": 1,
+    "found_at_1": true,
+    "found_at_10": true,
+    "matched_distance_km": 0.0,
+    "top1_distance_km": 0.0,
+    "expected_feature_type": "locality",
+    "top1_feature_type": "locality",
+    "type_at_1": true,
+    "type_present": true,
+    "transient_retries": 0,
+    "transient_retry_reasons": [],
+    "candidates": [
+     {
+      "id": "8248f197-ef50-4588-a32c-ccad1abe72ba",
+      "name": "Opa-locka, FL",
+      "feature_type": "locality",
+      "lat": 25.902317,
+      "lon": -80.250327,
+      "distance_km": 0.0
+     },
+     {
+      "id": "edb91cdd-f2c0-4a87-9f04-ab04c8c4fb0c",
+      "name": "Opa-locka West Airport",
+      "feature_type": "poi",
+      "lat": 25.948889,
+      "lon": -80.423332,
+      "distance_km": 18.06
+     },
+     {
+      "id": "8e863b09-069b-4ed5-9e79-e6278f360313",
+      "name": "Opa-locka station",
+      "feature_type": "poi",
+      "lat": 25.900291,
+      "lon": -80.253342,
+      "distance_km": 0.376
+     },
+     {
+      "id": "13742941-55d1-47ca-b0fe-4c551240c8c6",
+      "name": "Opa-Locka United Methodist Church",
+      "feature_type": "poi",
+      "lat": 25.90605,
+      "lon": -80.255302,
+      "distance_km": 0.648
+     },
+     {
+      "id": "0e6e5303-e3a1-4449-ac9d-d1168edde8d0",
+      "name": "Miami Opa-Locka Executive Airport",
+      "feature_type": "poi",
+      "lat": 25.907499,
+      "lon": -80.278336,
+      "distance_km": 2.86
+     },
+     {
+      "id": "c86dd63d-78ac-42cb-bd69-2f0d86753a73",
+      "name": "Embassair FBO Opa-Locka",
+      "feature_type": "poi",
+      "lat": 25.897114,
+      "lon": -80.275551,
+      "distance_km": 2.589
+     },
+     {
+      "id": "f8236510-fc6f-4664-80b4-a45e2b107a94",
+      "name": "Opa Locka Airport",
+      "feature_type": "poi",
+      "lat": 25.909557,
+      "lon": -80.268402,
+      "distance_km": 1.979
+     },
+     {
+      "id": "651bca31-6b7b-4606-8ffc-180afc1f968d",
+      "name": "Opa Locka Executive Airport Air Traffic Control Tower",
+      "feature_type": "poi",
+      "lat": 25.919952,
+      "lon": -80.319077,
+      "distance_km": 7.151
+     },
+     {
+      "id": "bd132135-61e1-4417-9c18-2503a3b76837",
+      "name": "Miami-Opa locka Executive Tower",
+      "feature_type": "poi",
+      "lat": 25.908295,
+      "lon": -80.273003,
+      "distance_km": 2.364
+     },
+     {
+      "id": "9459579d-2737-4ef1-8e4c-099f7771bd72",
+      "name": "Opa Locka Airport (OPF)",
+      "feature_type": "poi",
+      "lat": 25.902731,
+      "lon": -80.267097,
+      "distance_km": 1.678
+     }
+    ],
+    "strata": {
+     "scope": "variant",
+     "variant_class": "hyphen_locality",
+     "country": "US",
+     "metro": "-",
+     "sample_band": "targeted_lower_population"
+    },
+    "variant_score": {
+     "name_distance_rank": 1,
+     "exact_id_rank": 1,
+     "empty": false
+    }
+   }
+  }
+ ]
+}

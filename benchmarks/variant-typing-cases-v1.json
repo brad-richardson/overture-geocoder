@@ -1,0 +1,450 @@
+{
+ "schema": "benchmark-v2-forward-cases-v1",
+ "meta": {
+  "seed": null,
+  "sources": [
+   "$OVERTURE_LOCAL/2026-06-17.0/theme=places/type=place/*.parquet",
+   "$OVERTURE_LOCAL/2026-07-22.0/theme=divisions/type=division/*.parquet"
+  ],
+  "timestamp": "2026-08-06T14:22:34+00:00",
+  "builder": "benchmarks/probes/2026-08-06-build-proximity-variant-cases.py",
+  "extension": "Extends benchmark-v2-forward-cases-v1 with control_query (the corpus spelling; the main query is the ASCII/typed variant users produce). hyphen_locality has five population-leading, country-distinct localities plus two deliberately lower-population divisions with same-name POI competition (see strata.sample_band). These cases have no expected_gers_id: they are scored by name+distance, and their gold comes from the 2026-07-22.0 divisions mirror (see provenance_note).",
+  "case_counts": {
+   "place": 22
+  }
+ },
+ "cases": [
+  {
+   "id": "variant:apostrophe:2097a8b6-881b-49dd-8ae0-3146f0a0ff83",
+   "kind": "place",
+   "query": "Paulas Cafe",
+   "query_style": "variant_apostrophe",
+   "expected_name": "Paula's Cafe",
+   "alt_names": [],
+   "expected_gers_id": "2097a8b6-881b-49dd-8ae0-3146f0a0ff83",
+   "expected_lat": 51.53166961669922,
+   "expected_lon": -0.08025182038545609,
+   "tolerance_km": 1.0,
+   "control_query": "Paula's Cafe",
+   "strata": {
+    "scope": "variant",
+    "variant_class": "apostrophe",
+    "country": "GB",
+    "metro": "london"
+   }
+  },
+  {
+   "id": "variant:apostrophe:efe83e6c-0345-4991-ab35-0c30c48f4276",
+   "kind": "place",
+   "query": "Delucas Florist",
+   "query_style": "variant_apostrophe",
+   "expected_name": "Deluca's Florist",
+   "alt_names": [],
+   "expected_gers_id": "efe83e6c-0345-4991-ab35-0c30c48f4276",
+   "expected_lat": -33.877899169921875,
+   "expected_lon": 151.22129821777344,
+   "tolerance_km": 1.0,
+   "control_query": "Deluca's Florist",
+   "strata": {
+    "scope": "variant",
+    "variant_class": "apostrophe",
+    "country": "AU",
+    "metro": "sydney"
+   }
+  },
+  {
+   "id": "variant:apostrophe:839c614b-cf2c-4cfb-9a15-256c3ab5ee4b",
+   "kind": "place",
+   "query": "Lens Mill Store",
+   "query_style": "variant_apostrophe",
+   "expected_name": "Len's Mill Store",
+   "alt_names": [],
+   "expected_gers_id": "839c614b-cf2c-4cfb-9a15-256c3ab5ee4b",
+   "expected_lat": 43.7192268371582,
+   "expected_lon": -79.46205139160156,
+   "tolerance_km": 1.0,
+   "control_query": "Len's Mill Store",
+   "strata": {
+    "scope": "variant",
+    "variant_class": "apostrophe",
+    "country": "CA",
+    "metro": "toronto"
+   }
+  },
+  {
+   "id": "variant:apostrophe:71ec4b26-847e-4d64-b1a7-33546ad4583e",
+   "kind": "place",
+   "query": "Lens place",
+   "query_style": "variant_apostrophe",
+   "expected_name": "Len's place",
+   "alt_names": [],
+   "expected_gers_id": "71ec4b26-847e-4d64-b1a7-33546ad4583e",
+   "expected_lat": -26.109743118286133,
+   "expected_lon": 28.12244415283203,
+   "tolerance_km": 1.0,
+   "control_query": "Len's place",
+   "strata": {
+    "scope": "variant",
+    "variant_class": "apostrophe",
+    "country": "ZA",
+    "metro": "johannesburg"
+   }
+  },
+  {
+   "id": "variant:apostrophe:205bc0cb-6897-4ea3-84fc-351e0eb425d5",
+   "kind": "place",
+   "query": "Dominos Pizza",
+   "query_style": "variant_apostrophe",
+   "expected_name": "Domino's Pizza",
+   "alt_names": [],
+   "expected_gers_id": "205bc0cb-6897-4ea3-84fc-351e0eb425d5",
+   "expected_lat": 19.067907333374023,
+   "expected_lon": 72.83267211914062,
+   "tolerance_km": 1.0,
+   "control_query": "Domino's Pizza",
+   "strata": {
+    "scope": "variant",
+    "variant_class": "apostrophe",
+    "country": "IN",
+    "metro": "mumbai"
+   }
+  },
+  {
+   "id": "variant:ampersand:02ec7d15-4548-4ed3-8366-abf9f145e159",
+   "kind": "place",
+   "query": "Saiq's Hair and Beauty",
+   "query_style": "variant_ampersand",
+   "expected_name": "Saiq's Hair & Beauty",
+   "alt_names": [],
+   "expected_gers_id": "02ec7d15-4548-4ed3-8366-abf9f145e159",
+   "expected_lat": 51.57278823852539,
+   "expected_lon": -0.008431600406765938,
+   "tolerance_km": 1.0,
+   "control_query": "Saiq's Hair & Beauty",
+   "strata": {
+    "scope": "variant",
+    "variant_class": "ampersand",
+    "country": "GB",
+    "metro": "london"
+   }
+  },
+  {
+   "id": "variant:ampersand:726ab33e-cbf8-43dc-818d-bf7f9d0d129a",
+   "kind": "place",
+   "query": "Animal Gifts and Collextibles",
+   "query_style": "variant_ampersand",
+   "expected_name": "Animal Gifts & Collextibles",
+   "alt_names": [],
+   "expected_gers_id": "726ab33e-cbf8-43dc-818d-bf7f9d0d129a",
+   "expected_lat": 47.60889434814453,
+   "expected_lon": -122.3413314819336,
+   "tolerance_km": 1.0,
+   "control_query": "Animal Gifts & Collextibles",
+   "strata": {
+    "scope": "variant",
+    "variant_class": "ampersand",
+    "country": "US",
+    "metro": "seattle"
+   }
+  },
+  {
+   "id": "variant:ampersand:f04b96c1-8cce-4d12-9b02-e075a33b4fef",
+   "kind": "place",
+   "query": "Skull and Rose Cafe",
+   "query_style": "variant_ampersand",
+   "expected_name": "Skull & Rose Cafe",
+   "alt_names": [],
+   "expected_gers_id": "f04b96c1-8cce-4d12-9b02-e075a33b4fef",
+   "expected_lat": -33.88637161254883,
+   "expected_lon": 151.15768432617188,
+   "tolerance_km": 1.0,
+   "control_query": "Skull & Rose Cafe",
+   "strata": {
+    "scope": "variant",
+    "variant_class": "ampersand",
+    "country": "AU",
+    "metro": "sydney"
+   }
+  },
+  {
+   "id": "variant:ampersand:c871e236-a875-4653-ba5e-6b836b9c82b1",
+   "kind": "place",
+   "query": "Hummer and Ochse",
+   "query_style": "variant_ampersand",
+   "expected_name": "Hummer & Ochse",
+   "alt_names": [],
+   "expected_gers_id": "c871e236-a875-4653-ba5e-6b836b9c82b1",
+   "expected_lat": 52.501766204833984,
+   "expected_lon": 13.340877532958984,
+   "tolerance_km": 1.0,
+   "control_query": "Hummer & Ochse",
+   "strata": {
+    "scope": "variant",
+    "variant_class": "ampersand",
+    "country": "DE",
+    "metro": "berlin"
+   }
+  },
+  {
+   "id": "variant:ampersand:dad3fab8-39e1-43d5-a2cc-f90fbabd318f",
+   "kind": "place",
+   "query": "Me and My",
+   "query_style": "variant_ampersand",
+   "expected_name": "Me & My",
+   "alt_names": [],
+   "expected_gers_id": "dad3fab8-39e1-43d5-a2cc-f90fbabd318f",
+   "expected_lat": 1.2752277851104736,
+   "expected_lon": 103.80704498291016,
+   "tolerance_km": 1.0,
+   "control_query": "Me & My",
+   "strata": {
+    "scope": "variant",
+    "variant_class": "ampersand",
+    "country": "SG",
+    "metro": "singapore"
+   }
+  },
+  {
+   "id": "variant:nonascii_latin:7687bbd4-c339-40b3-9c98-34d65377b977",
+   "kind": "place",
+   "query": "Svanemollebugtens Vinterbadelaug",
+   "query_style": "variant_nonascii_latin",
+   "expected_name": "Svanemøllebugtens Vinterbadelaug",
+   "alt_names": [],
+   "expected_gers_id": "7687bbd4-c339-40b3-9c98-34d65377b977",
+   "expected_lat": 55.7181396484375,
+   "expected_lon": 12.589105606079102,
+   "tolerance_km": 1.0,
+   "control_query": "Svanemøllebugtens Vinterbadelaug",
+   "strata": {
+    "scope": "variant",
+    "variant_class": "nonascii_latin",
+    "country": "DK",
+    "metro": "copenhagen"
+   }
+  },
+  {
+   "id": "variant:nonascii_latin:3ec74e78-a1ce-42e0-afb2-6da8063343a3",
+   "kind": "place",
+   "query": "Sorenga Bro",
+   "query_style": "variant_nonascii_latin",
+   "expected_name": "Sørenga Bro",
+   "alt_names": [],
+   "expected_gers_id": "3ec74e78-a1ce-42e0-afb2-6da8063343a3",
+   "expected_lat": 59.90200424194336,
+   "expected_lon": 10.760750770568848,
+   "tolerance_km": 1.0,
+   "control_query": "Sørenga Bro",
+   "strata": {
+    "scope": "variant",
+    "variant_class": "nonascii_latin",
+    "country": "NO",
+    "metro": "oslo"
+   }
+  },
+  {
+   "id": "variant:nonascii_latin:7ca1dcd1-4041-4455-982c-36c1fe9f3d77",
+   "kind": "place",
+   "query": "WTL Stegny",
+   "query_style": "variant_nonascii_latin",
+   "expected_name": "WTŁ Stegny",
+   "alt_names": [],
+   "expected_gers_id": "7ca1dcd1-4041-4455-982c-36c1fe9f3d77",
+   "expected_lat": 52.186824798583984,
+   "expected_lon": 21.04326057434082,
+   "tolerance_km": 1.0,
+   "control_query": "WTŁ Stegny",
+   "strata": {
+    "scope": "variant",
+    "variant_class": "nonascii_latin",
+    "country": "PL",
+    "metro": "warsaw"
+   }
+  },
+  {
+   "id": "variant:nonascii_latin:a8716f55-f78a-4f53-9d79-559c0f82504a",
+   "kind": "place",
+   "query": "Sostrene Grene",
+   "query_style": "variant_nonascii_latin",
+   "expected_name": "Søstrene Grene",
+   "alt_names": [],
+   "expected_gers_id": "a8716f55-f78a-4f53-9d79-559c0f82504a",
+   "expected_lat": 52.54949951171875,
+   "expected_lon": 13.414687156677246,
+   "tolerance_km": 1.0,
+   "control_query": "Søstrene Grene",
+   "strata": {
+    "scope": "variant",
+    "variant_class": "nonascii_latin",
+    "country": "DE",
+    "metro": "berlin"
+   }
+  },
+  {
+   "id": "variant:nonascii_latin:949175db-36c1-4460-ab50-59a2b8a244db",
+   "kind": "place",
+   "query": "Phuong Dong",
+   "query_style": "variant_nonascii_latin",
+   "expected_name": "Phương Đông",
+   "alt_names": [],
+   "expected_gers_id": "949175db-36c1-4460-ab50-59a2b8a244db",
+   "expected_lat": 10.818769454956055,
+   "expected_lon": 106.72366333007812,
+   "tolerance_km": 1.0,
+   "control_query": "Phương Đông",
+   "strata": {
+    "scope": "variant",
+    "variant_class": "nonascii_latin",
+    "country": "VN",
+    "metro": "ho_chi_minh_city"
+   }
+  },
+  {
+   "id": "variant:hyphen_locality:aeac6baa-905c-42f4-a93c-75187879bc15",
+   "kind": "place",
+   "query": "Pimpri Chinchwad",
+   "query_style": "variant_hyphen_locality",
+   "expected_name": "Pimpri-Chinchwad",
+   "alt_names": [],
+   "expected_lat": 18.627927780151367,
+   "expected_lon": 73.80098724365234,
+   "tolerance_km": 25.0,
+   "expected_feature_type": "locality",
+   "control_query": "Pimpri-Chinchwad",
+   "strata": {
+    "scope": "variant",
+    "variant_class": "hyphen_locality",
+    "country": "IN",
+    "metro": "-",
+    "sample_band": "top_population"
+   },
+   "provenance_note": "division sampled from the 2026-07-22.0 divisions mirror (no local 2026-06-17.0 divisions tree); subtype locality; population 1,729,320"
+  },
+  {
+   "id": "variant:hyphen_locality:c351bc37-c2cd-4bb3-a4a3-5f79e69a13ac",
+   "kind": "place",
+   "query": "Mbuji Mayi",
+   "query_style": "variant_hyphen_locality",
+   "expected_name": "Mbuji-Mayi",
+   "alt_names": [],
+   "expected_lat": -6.125894546508789,
+   "expected_lon": 23.599809646606445,
+   "tolerance_km": 25.0,
+   "expected_feature_type": "locality",
+   "control_query": "Mbuji-Mayi",
+   "strata": {
+    "scope": "variant",
+    "variant_class": "hyphen_locality",
+    "country": "CD",
+    "metro": "-",
+    "sample_band": "top_population"
+   },
+   "provenance_note": "division sampled from the 2026-07-22.0 divisions mirror (no local 2026-06-17.0 divisions tree); subtype locality; population 1,680,991"
+  },
+  {
+   "id": "variant:hyphen_locality:3e1c941b-074d-45d5-ba91-10cb91c6d9b6",
+   "kind": "place",
+   "query": "Port au Prince",
+   "query_style": "variant_hyphen_locality",
+   "expected_name": "Port-au-Prince",
+   "alt_names": [],
+   "expected_lat": 18.54732608795166,
+   "expected_lon": -72.33959579467773,
+   "tolerance_km": 25.0,
+   "expected_feature_type": "locality",
+   "control_query": "Port-au-Prince",
+   "strata": {
+    "scope": "variant",
+    "variant_class": "hyphen_locality",
+    "country": "HT",
+    "metro": "-",
+    "sample_band": "top_population"
+   },
+   "provenance_note": "division sampled from the 2026-07-22.0 divisions mirror (no local 2026-06-17.0 divisions tree); subtype locality; population 1,275,000"
+  },
+  {
+   "id": "variant:hyphen_locality:936fca1e-05d4-45fe-b25b-badcec3bdb18",
+   "kind": "place",
+   "query": "Pointe Noire",
+   "query_style": "variant_hyphen_locality",
+   "expected_name": "Pointe-Noire",
+   "alt_names": [],
+   "expected_lat": -4.797537088394165,
+   "expected_lon": 11.850330352783203,
+   "tolerance_km": 25.0,
+   "expected_feature_type": "locality",
+   "control_query": "Pointe-Noire",
+   "strata": {
+    "scope": "variant",
+    "variant_class": "hyphen_locality",
+    "country": "CG",
+    "metro": "-",
+    "sample_band": "top_population"
+   },
+   "provenance_note": "division sampled from the 2026-07-22.0 divisions mirror (no local 2026-06-17.0 divisions tree); subtype locality; population 1,006,611"
+  },
+  {
+   "id": "variant:hyphen_locality:1da687c4-b419-40dd-9089-ca6f32a32d17",
+   "kind": "place",
+   "query": "Bobo Dioulasso",
+   "query_style": "variant_hyphen_locality",
+   "expected_name": "Bobo-Dioulasso",
+   "alt_names": [],
+   "expected_lat": 11.176580429077148,
+   "expected_lon": -4.2961437702178955,
+   "tolerance_km": 25.0,
+   "expected_feature_type": "locality",
+   "control_query": "Bobo-Dioulasso",
+   "strata": {
+    "scope": "variant",
+    "variant_class": "hyphen_locality",
+    "country": "BF",
+    "metro": "-",
+    "sample_band": "top_population"
+   },
+   "provenance_note": "division sampled from the 2026-07-22.0 divisions mirror (no local 2026-06-17.0 divisions tree); subtype locality; population 724,971"
+  },
+  {
+   "id": "variant:hyphen_locality:0a067856-c822-4b38-bdbd-4abbb24cacca",
+   "kind": "place",
+   "query": "Monte Carlo",
+   "query_style": "variant_hyphen_locality",
+   "expected_name": "Monte-Carlo",
+   "alt_names": [],
+   "expected_lat": 43.740299224853516,
+   "expected_lon": 7.4265594482421875,
+   "tolerance_km": 25.0,
+   "expected_feature_type": "locality",
+   "control_query": "Monte-Carlo",
+   "strata": {
+    "scope": "variant",
+    "variant_class": "hyphen_locality",
+    "country": "MC",
+    "metro": "-",
+    "sample_band": "targeted_lower_population"
+   },
+   "provenance_note": "division sampled from the 2026-07-22.0 divisions mirror (no local 2026-06-17.0 divisions tree); subtype macrohood; population 15,507"
+  },
+  {
+   "id": "variant:hyphen_locality:8248f197-ef50-4588-a32c-ccad1abe72ba",
+   "kind": "place",
+   "query": "Opa locka",
+   "query_style": "variant_hyphen_locality",
+   "expected_name": "Opa-locka",
+   "alt_names": [],
+   "expected_lat": 25.902315139770508,
+   "expected_lon": -80.25032424926758,
+   "tolerance_km": 25.0,
+   "expected_feature_type": "locality",
+   "control_query": "Opa-locka",
+   "strata": {
+    "scope": "variant",
+    "variant_class": "hyphen_locality",
+    "country": "US",
+    "metro": "-",
+    "sample_band": "targeted_lower_population"
+   },
+   "provenance_note": "division sampled from the 2026-07-22.0 divisions mirror (no local 2026-06-17.0 divisions tree); subtype locality; population 15,596"
+  }
+ ]
+}

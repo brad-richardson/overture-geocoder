@@ -1,7 +1,7 @@
 """Contracts for the Phase 0 golden review instrument and its validator.
 
-These tests protect two properties: the instrument decides nothing, and the
-validator fails closed.
+These tests protect two properties: published review evidence stays bound to
+its inputs, and the validator fails closed.
 """
 
 import hashlib
@@ -550,9 +550,9 @@ def test_published_golden_set_matches_the_frozen_inputs():
     assert golden["summary"]["risk_flag_counts"]["no_normalized_name_overlap"] == 134
 
 
-def test_published_verdict_file_is_empty_and_bound(tmp_path):
+def test_published_partial_verdict_file_is_bound_and_fails_closed(tmp_path):
     verdicts = json.loads(VERDICTS.read_text())
-    assert verdicts["verdicts"] == []
+    assert len(verdicts["verdicts"]) == 58
     assert verdicts["meta"]["golden_review_set_sha256"] == builder.sha256_file(
         GOLDEN_SET
     )
@@ -568,7 +568,13 @@ def test_published_verdict_file_is_empty_and_bound(tmp_path):
     assert code == validator.EXIT_GATE_NOT_MET
     assert report["integrity"]["ok"] is True
     assert report["gate_met"] is False
-    assert report["coverage"]["remaining_for_gate"] == 200
+    assert report["coverage"]["decided"] == 57
+    assert report["coverage"]["remaining_for_gate"] == 143
+    assert report["coverage"]["verdict_counts"] == {
+        "accept": 56,
+        "needs_more_evidence": 1,
+        "reject": 1,
+    }
 
 
 def test_published_sheet_orders_risk_first_and_controls_last():

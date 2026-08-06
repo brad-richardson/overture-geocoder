@@ -2035,17 +2035,20 @@ def test_worker_global_head_uses_one_three_token_cap():
         "\n}", 1
     )[0]
     assert "HEAD_QUERY_TOKEN_CAP" in head_merge
-    # Three enforcement sites, all fail-closed, none of them a bypass:
-    #   1. the sharded construction-v1 head lane
-    #   2. `places_construction_head_records`, the helper the additive
+    # Five explicit cap uses, none of them widening head admission:
+    #   1. the proximity neighbor policy reserves empty-cell expansion for
+    #      queries too wide to fall through to the head
+    #   2. the sharded construction-v1 no-proximity head lane
+    #   3. `places_construction_head_records`, the helper the additive
     #      prefix-head fallback probes through -- so a 4-6 token query is split
     #      down to a <=3 token head probe and can never widen the cap itself
-    #   3. the legacy `head.phrp` no-proximity lane
+    #   4. the legacy `head.phrp` no-proximity lane
+    #   5. the local sharded-head experiment helper, which mirrors production
     # The count is asserted rather than the mere presence of the constant so a
     # new head path that forgets to guard, or one that quietly drops a guard,
     # both fail here. Raising this number is only correct when the added site
-    # REFUSES work above the cap; never when it admits it.
-    assert serving.count("tokens.len() > HEAD_QUERY_TOKEN_CAP") == 3
+    # preserves or narrows the cap; never when it admits wider work.
+    assert serving.count("tokens.len() > HEAD_QUERY_TOKEN_CAP") == 5
     assert "tokens.len() > 2" not in serving
 
 
