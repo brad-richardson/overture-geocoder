@@ -2292,18 +2292,29 @@ async fn search_places_construction(
                     records = retain_records_proving_query_run(candidates, query);
                 }
             }
-            // Neighbor-cell probe: a bias point near a cell edge (or in a cell
-            // that answered nothing) also asks the adjacent cell(s). Bounded at
-            // two extra cells, chosen by proximity to the edges; records are
-            // cell-partitioned so the union cannot double-count, but identity
-            // dedup below keeps that a checked property rather than a hope.
+            // Explicit-proximity neighbor-cell probe: a user-supplied bias
+            // point near a cell edge (or in a cell that answered nothing) also
+            // asks the adjacent cell(s). Inferred locality centroids retain the
+            // pre-wave single-cell lane: expanding them introduced unrelated
+            // tied candidates and evicted existing locality-qualified results
+            // at the ten-result cap.
+            //
+            // The explicit probe is bounded at two extra cells, chosen by
+            // proximity to the edges; records are cell-partitioned so the
+            // union cannot double-count, but identity dedup below keeps that a
+            // checked property rather than a hope.
             // For a head-servable query an empty primary routed cell will fall
             // through to the global head, so do not first spend two
             // unconditional nearest-neighbor probes. Four-token queries cannot
             // use the head and retain that bounded rescue path. Ordinary
             // edge-neighbor probes remain active for every token count.
             let expand_empty_primary = records.is_empty() && tokens.len() > HEAD_QUERY_TOKEN_CAP;
-            for neighbor in neighbor_construction_cells(longitude, latitude, expand_empty_primary) {
+            for neighbor in proximity_neighbor_cells(
+                proximity_is_explicit,
+                longitude,
+                latitude,
+                expand_empty_primary,
+            ) {
                 let extra = places_construction_routed_records(
                     loader,
                     object_root,
@@ -2354,6 +2365,25 @@ async fn search_places_construction(
     }
     let records = places_construction_head_records(loader, object_root, &routing, &tokens).await?;
     Ok(records.iter().map(record_projection).collect())
+}
+
+/// Select adjacent routed cells only for an explicit user proximity.
+///
+/// A locality suffix also routes through a centroid, but that centroid is an
+/// internal disambiguation choice rather than a user request to broaden the
+/// search. Keeping it single-cell preserves the accepted locality-qualified
+/// result set while explicit near-me queries retain the bounded edge rescue.
+fn proximity_neighbor_cells(
+    proximity_is_explicit: bool,
+    longitude: f64,
+    latitude: f64,
+    expand_empty_primary: bool,
+) -> Vec<String> {
+    if proximity_is_explicit {
+        neighbor_construction_cells(longitude, latitude, expand_empty_primary)
+    } else {
+        Vec::new()
+    }
 }
 
 /// Whether an empty routed (proximity) answer may be served by the global
@@ -2555,7 +2585,8 @@ async fn search_places(
     query: &str,
     proximity: Option<(f64, f64)>,
     // False when `proximity` is an inferred locality centroid rather than a
-    // point the request stated. Only the head fall-through reads it; see
+    // point the request stated. Neighbor expansion and head fall-through both
+    // use this boundary; see `proximity_neighbor_cells` and
     // `routed_lane_falls_through_to_head`.
     proximity_is_explicit: bool,
     autocomplete: bool,
@@ -3469,8 +3500,8 @@ mod proximity_experiment {
 mod seam_tests {
     use super::{
         division_proximity_demotion, effective_place_prominence, place_score, poi_match_quality,
-        poi_normalized_query, routed_lane_falls_through_to_head, NormalizedQuery,
-        DIVISION_PROXIMITY_DEMOTION, POI_PRIOR_CAP, PROXIMITY_CONFIDENCE_SHRINK,
+        poi_normalized_query, proximity_neighbor_cells, routed_lane_falls_through_to_head,
+        NormalizedQuery, DIVISION_PROXIMITY_DEMOTION, POI_PRIOR_CAP, PROXIMITY_CONFIDENCE_SHRINK,
         PROXIMITY_DISTANCE_BAND,
     };
     use crate::places_pages::PlaceProjection;
@@ -3899,6 +3930,15 @@ mod seam_tests {
             assert!(!routed_lane_falls_through_to_head(false, true, token_count));
             assert!(routed_lane_falls_through_to_head(true, true, token_count));
         }
+    }
+
+    /// The same explicit/inferred boundary applies to neighbor expansion. An
+    /// inferred New York centroid previously pulled tied hotels from adjacent
+    /// cells and pushed the accepted Plaza Hotel result beyond rank 10.
+    #[test]
+    fn an_inferred_locality_centroid_never_probes_neighbor_cells() {
+        assert!(proximity_neighbor_cells(false, -74.006, 40.7128, true).is_empty());
+        assert!(!proximity_neighbor_cells(true, -74.006, 40.7128, true).is_empty());
     }
 
     /// The demotion is deliberately narrow: it needs explicit proximity, a
