@@ -6,6 +6,7 @@
   "initial_run_git_sha": "00bc46c",
   "extension_run_base_git_sha": null,
   "provenance_note": null,
+  "metadata_repair_note": "Fresh-run request counts and initial timestamp were corrected offline after fixing the generator; request, candidate, and score rows are unchanged.",
   "data_version": "2026-08-03.0",
   "overture_places_vintage": "2026-06-17.0",
   "overture_divisions_vintage": "2026-07-22.0",
@@ -16,9 +17,9 @@
   ],
   "requests": 84,
   "initial_requests": 84,
-  "extension_requests": 84,
+  "extension_requests": 0,
   "requests_this_run": 84,
-  "initial_timestamp": null,
+  "initial_timestamp": "2026-08-06T19:34:35+00:00",
   "transient_retries_used": 0,
   "case_fingerprints": {
    "algorithm": "sha256-canonical-request-score-projection-v1",
@@ -90,7 +91,7 @@
    }
   },
   "content_sha256": {
-   "probe": "a3dab0303bd86461b877c6ebdd1342870d84f928f7ae44cdba35348f0694b5f1",
+   "probe": "be45649e4e0d545764b13486c777cfc35950ff71481c087a15e4fa31a827d9b3",
    "proximity_cases": "adfd83ee019cfc7bc006e5b5a3f1ea92eac37dcbc306d68e74698b2f0467adb6",
    "variant_cases": "0c5797a9a1967cf5f90c5825bd0953f3c8ba9e3ea8c7609cb1d0dc017e1ad0db"
   },

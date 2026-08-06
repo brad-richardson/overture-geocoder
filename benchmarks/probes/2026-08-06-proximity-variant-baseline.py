@@ -190,6 +190,31 @@ def fingerprint_block(proximity_cases, variant_cases):
     }
 
 
+def request_count_provenance(append_missing, prior_meta, requests_this_run,
+                             total_requests, run_timestamp):
+    """Separate an initial run's requests from later append-only extensions."""
+    if not append_missing:
+        return {
+            "initial_requests": total_requests,
+            "extension_requests": 0,
+            "requests_this_run": requests_this_run,
+            "initial_timestamp": run_timestamp,
+        }
+
+    prior_extension_requests = prior_meta.get(
+        "extension_requests", prior_meta.get("requests_added", 0))
+    return {
+        "initial_requests": prior_meta.get(
+            "initial_requests",
+            prior_meta.get("requests", 0) - prior_extension_requests,
+        ),
+        "extension_requests": prior_extension_requests + requests_this_run,
+        "requests_this_run": requests_this_run,
+        "initial_timestamp": prior_meta.get(
+            "initial_timestamp", prior_meta.get("timestamp")),
+    }
+
+
 def scrub_stock_proximity_score(row):
     for field in STOCK_SCORE_FIELDS:
         row.pop(field, None)
@@ -479,23 +504,24 @@ def main():
 
     proximity_summary = summarize_proximity(proximity_rows)
     variant_summary = summarize_variants(variant_pairs)
-    prior_extension_requests = prior_meta.get(
-        "extension_requests", prior_meta.get("requests_added", 0))
     prior_extension_sha = prior_meta.get(
         "extension_run_base_git_sha", prior_meta.get("git_sha"))
     if prior_extension_sha == EXTENSION_RUN_BASE_GIT_SHA[:7]:
         prior_extension_sha = EXTENSION_RUN_BASE_GIT_SHA
-    initial_requests = prior_meta.get(
-        "initial_requests",
-        prior_meta.get("requests", 0) - prior_extension_requests
-        if args.append_missing else len(proximity_rows) + 2 * len(variant_pairs),
+    total_requests = len(proximity_rows) + 2 * len(variant_pairs)
+    run_timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    request_provenance = request_count_provenance(
+        args.append_missing,
+        prior_meta,
+        len(runner.results),
+        total_requests,
+        run_timestamp,
     )
 
     payload = {
         "schema": "proximity-variant-baseline-v1",
         "meta": {
-            "timestamp": datetime.now(timezone.utc).isoformat(
-                timespec="seconds"),
+            "timestamp": run_timestamp,
             "base_url": args.base_url,
             "initial_run_git_sha": prior_meta.get(
                 "initial_run_git_sha",
@@ -518,12 +544,8 @@ def main():
             "interval_s": args.interval,
             "cases": [str(PROXIMITY_CASES.relative_to(REPO)),
                       str(VARIANT_CASES.relative_to(REPO))],
-            "requests": len(proximity_rows) + 2 * len(variant_pairs),
-            "initial_requests": initial_requests,
-            "extension_requests": prior_extension_requests + len(runner.results),
-            "requests_this_run": len(runner.results),
-            "initial_timestamp": prior_meta.get("initial_timestamp",
-                                                prior_meta.get("timestamp")),
+            "requests": total_requests,
+            **request_provenance,
             "transient_retries_used": prior_retries + sum(
                 row.get("transient_retries") or 0 for row in runner.results),
             "case_fingerprints": fingerprint_block(
