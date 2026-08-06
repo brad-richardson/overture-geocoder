@@ -129,6 +129,127 @@ fn normalized_words(value: &str) -> Vec<String> {
     words
 }
 
+/// One-to-one fold for lowercase Latin letters that NFKD does NOT decompose
+/// (stroked/dotless forms carry no combining mark, so the NFKD pipeline leaves
+/// them intact). Scoring-side only: the index tokenizer does not apply this
+/// fold, so retrieval is unaffected; it lets a candidate that retrieval DID
+/// produce (via its other tokens, or a diacritic-typed query) earn rank-time
+/// credit for the ASCII spelling users type. `ø` duplicates the fold the core
+/// ladder already applied, kept here so this function states the whole
+/// scoring fold in one place.
+///
+/// Deliberately NOT folded (here or anywhere): the one-to-many class
+/// `ß → ss`, `æ → ae`, `œ → oe`, `þ → th`. Neither retrieval nor scoring
+/// expands them, so both sides stay consistent-but-unfolded; expanding them
+/// would change character counts (LCP/prefix semantics) and is a separate,
+/// optional decision.
+fn fold_stroked_latin(character: char) -> char {
+    match character {
+        'ł' => 'l', // Polish
+        'đ' => 'd', // Vietnamese, Serbo-Croatian
+        'ı' => 'i', // Turkish dotless i
+        'ħ' => 'h', // Maltese
+        'ð' => 'd', // Icelandic eth
+        'ø' => 'o', // Danish/Norwegian
+        _ => character,
+    }
+}
+
+/// Ideographic comma substituted for a compatibility comma form that NFKD
+/// would otherwise decompose into an ASCII `,`.
+const GUARDED_COMMA: &str = "\u{3001}";
+
+/// The ten `DIGIT … COMMA` enclosed forms decompose to a digit followed by an
+/// ASCII comma, so the digit has to survive the guard.
+const GUARDED_DIGIT_COMMAS: [&str; 10] = [
+    "0\u{3001}",
+    "1\u{3001}",
+    "2\u{3001}",
+    "3\u{3001}",
+    "4\u{3001}",
+    "5\u{3001}",
+    "6\u{3001}",
+    "7\u{3001}",
+    "8\u{3001}",
+    "9\u{3001}",
+];
+
+/// Replacement for a character whose NFKD decomposition CONTAINS an ASCII
+/// comma the raw text never had, or `None` for every other character.
+///
+/// Thirteen characters do this: the fullwidth, small and vertical comma
+/// presentation forms, and the ten `DIGIT … COMMA` enclosed forms
+/// (`scoring_fold_never_synthesizes_an_ascii_comma` proves the set is
+/// exactly these, against the Unicode tables actually linked).
+///
+/// This matters for scoring and NOWHERE else in the tokenizer, because
+/// scoring is the only consumer that gives the ASCII comma syntactic force:
+/// `normalized_words` splits on every non-alphanumeric character, so a comma
+/// is just one more separator to it, but `NormalizedQuery::new` and the core
+/// ladder both TRUNCATE a string at its first `,`. Folding "東京，渋谷店"
+/// into "東京,渋谷店" therefore invents a truncation point the raw name never
+/// had: the name would score only its "東京" head, losing to a POI actually
+/// named 東京 on a query that spelled the full name exactly. A query LEADING
+/// with one folds to the empty string, which drops the entire places lane to
+/// confidence-only ranking while retrieval still returns rows.
+///
+/// U+3001 IDEOGRAPHIC COMMA keeps the character a separator without making it
+/// a truncator. Retrieval is unaffected: both `,` and `、` are
+/// non-alphanumeric, so `normalized_words` yields identical tokens either way.
+fn guard_synthetic_comma(character: char) -> Option<&'static str> {
+    match character {
+        '\u{fe10}' | '\u{fe50}' | '\u{ff0c}' => Some(GUARDED_COMMA),
+        '\u{1f101}'..='\u{1f10a}' => Some(GUARDED_DIGIT_COMMAS[character as usize - 0x1f101]),
+        _ => None,
+    }
+}
+
+/// Apply [`guard_synthetic_comma`] ahead of NFKD, borrowing unchanged when the
+/// text holds none of the thirteen (the overwhelmingly common case).
+fn guard_synthetic_commas(value: &str) -> std::borrow::Cow<'_, str> {
+    if !value
+        .chars()
+        .any(|character| guard_synthetic_comma(character).is_some())
+    {
+        return std::borrow::Cow::Borrowed(value);
+    }
+    let mut guarded = String::with_capacity(value.len());
+    for character in value.chars() {
+        match guard_synthetic_comma(character) {
+            Some(replacement) => guarded.push_str(replacement),
+            None => guarded.push(character),
+        }
+    }
+    std::borrow::Cow::Owned(guarded)
+}
+
+/// Rank-time normalization for places match-quality scoring.
+///
+/// The first four stages are character-for-character the ones
+/// [`normalized_words`] applies (NFKD, per-char lowercase, final-sigma fold,
+/// combining-mark strip — the `nfkd-lower-stripmark-cjk-bigram-v4` contract),
+/// minus the word split: scoring compares whole display strings, so spaces
+/// and commas must survive for the ladder's comma truncation and
+/// word-boundary rungs. [`fold_stroked_latin`] is then a scoring-only
+/// superset; see its contract note, and [`guard_synthetic_comma`] for the one
+/// place this fold must deliberately DIVERGE from raw NFKD.
+///
+/// This exists because retrieval and scoring MUST agree on what a character
+/// is: retrieval tokenization is NFKD-based, so a record retrieved for
+/// `skoda` against the indexed token of "Škoda Muzeum" would otherwise score
+/// `match_quality = 0` at rank time and be floored. Index/build bytes are
+/// untouched; this runs only on the query (once) and on each candidate's
+/// display name.
+pub(crate) fn fold_for_scoring(value: &str) -> String {
+    guard_synthetic_commas(value.trim())
+        .nfkd()
+        .flat_map(char::to_lowercase)
+        .map(fold_final_sigma)
+        .filter(|character| !is_combining_mark(*character))
+        .map(fold_stroked_latin)
+        .collect()
+}
+
 /// Full document tokenizer shared with the global v3 producer contract.
 #[cfg(test)]
 pub(crate) fn tokenize_query(value: &str) -> Vec<String> {
@@ -1496,6 +1617,63 @@ impl ShardLoader {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The scoring fold gives the ASCII comma syntactic force (both
+    /// `NormalizedQuery::new` and the core ladder truncate there), so it must
+    /// never CREATE one that the raw text did not contain. Sweeping the whole
+    /// code space pins [`guard_synthetic_comma`]'s table against the Unicode
+    /// data actually linked: a future `unicode-normalization` bump that adds a
+    /// fourteenth comma-decomposing character fails here rather than silently
+    /// truncating names in production.
+    #[test]
+    fn scoring_fold_never_synthesizes_an_ascii_comma() {
+        let mut guarded = 0;
+        for code_point in 0u32..=0x10FFFF {
+            let Some(character) = char::from_u32(code_point) else {
+                continue;
+            };
+            if character == ',' {
+                continue;
+            }
+            let mut buffer = [0u8; 4];
+            let folded = fold_for_scoring(character.encode_utf8(&mut buffer));
+            assert!(
+                !folded.contains(','),
+                "U+{code_point:04X} {character:?} folds to {folded:?}, \
+                 synthesizing a truncation point the raw text never had"
+            );
+            if guard_synthetic_comma(character).is_some() {
+                guarded += 1;
+            }
+        }
+        // Exactly the fullwidth/small/vertical comma forms plus the ten
+        // `DIGIT ... COMMA` enclosed forms.
+        assert_eq!(guarded, 13, "guarded comma set changed size");
+    }
+
+    /// The guard must not cost the digit: `🄁` decomposes to `0,` and the
+    /// index tokenizes it to `["0"]`, so the fold has to keep the `0` and
+    /// demote only the comma.
+    #[test]
+    fn guarded_digit_comma_keeps_its_digit_and_matches_index_tokens() {
+        assert_eq!(fold_for_scoring("\u{1f101}"), "0\u{3001}");
+        assert_eq!(query_terms(&fold_for_scoring("\u{1f101}")), ["0"]);
+        assert_eq!(normalized_words("\u{1f101}"), ["0"]);
+        // The three pure comma forms leave a separator, never a truncator.
+        for form in ['\u{fe10}', '\u{fe50}', '\u{ff0c}'] {
+            let mut buffer = [0u8; 4];
+            assert_eq!(fold_for_scoring(form.encode_utf8(&mut buffer)), "\u{3001}");
+        }
+    }
+
+    /// Retrieval must be untouched by the guard: `normalized_words` splits on
+    /// every non-alphanumeric character, so demoting `，` to `、` cannot move
+    /// an indexed token.
+    #[test]
+    fn comma_guard_leaves_indexed_tokens_identical() {
+        let raw = "\u{6771}\u{4eac}\u{ff0c}\u{6e0b}\u{8c37}\u{5e97}";
+        assert_eq!(normalized_words(raw), query_terms(&fold_for_scoring(raw)));
+    }
 
     #[test]
     fn v3_query_tokenizer_matches_global_producer_vectors() {
