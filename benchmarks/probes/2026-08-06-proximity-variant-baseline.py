@@ -193,6 +193,12 @@ def fingerprint_block(proximity_cases, variant_cases):
 def scrub_stock_proximity_score(row):
     for field in STOCK_SCORE_FIELDS:
         row.pop(field, None)
+    for candidate in row.get("candidates", []):
+        # Runner computes this from the deliberately displaced construction
+        # anchor. Raw coordinates remain available for custom proximity score
+        # replay, so retaining the anchor-derived distance is both unnecessary
+        # and contrary to the case contract.
+        candidate.pop("distance_km", None)
     row["scoring_authority"] = "custom_chain_within_proximity_v1"
 
 
@@ -208,6 +214,10 @@ def validate_frozen_rows(proximity_cases, proximity_rows,
         rescored = score_proximity(case, row)
         if rescored != row.get("prox"):
             raise ValueError(f"stale proximity score for {case['id']}")
+        # Descriptive strata do not affect request or score identity and may be
+        # corrected offline. Keep the frozen row aligned with the current case
+        # instead of silently preserving stale aggregation labels.
+        row["strata"] = case["strata"]
 
     variants_by_id = {case["id"]: case for case in variant_cases}
     for pair in variant_pairs:
@@ -220,6 +230,7 @@ def validate_frozen_rows(proximity_cases, proximity_rows,
             rescored = score_variant(case, pair[side])
             if rescored != pair[side].get("variant_score"):
                 raise ValueError(f"stale {side} score for {case['id']}")
+            pair[side]["strata"] = case["strata"]
 
 
 def atomic_write_json(path, payload):
