@@ -1,0 +1,1177 @@
+{
+ "schema": "benchmark-v2-forward-cases-v1",
+ "meta": {
+  "seed": null,
+  "sources": [
+   "$OVERTURE_LOCAL/2026-06-17.0/theme=places/type=place/*.parquet"
+  ],
+  "timestamp": "2026-08-06T14:22:28+00:00",
+  "builder": "benchmarks/probes/2026-08-06-build-proximity-variant-cases.py",
+  "extension": "Extends benchmark-v2-forward-cases-v1 with proximity_assert {nearest_within_km, offset_km, chain_instances_in_metro_box, chain_instances_within_2km, nearest_instance_km}. expected_gers_id is only construction provenance: the displaced point makes the anchor non-nearest in most cases, so its stock exact-GERS score MUST NOT be tracked, compared, or asserted. The 2026-08-06-proximity-variant-baseline probe is the sole scoring authority; it scores the rank of ANY record of the chain within 2 km of the proximity point and the top-1 distance from the proximity point.",
+  "case_counts": {
+   "place": 40
+  }
+ },
+ "cases": [
+  {
+   "id": "prox:seattle:starbucks",
+   "kind": "place",
+   "query": "Starbucks",
+   "query_style": "chain_proximity",
+   "expected_name": "Starbucks",
+   "alt_names": [],
+   "expected_gers_id": "b07659b9-5708-4444-8004-cad59eb1d44c",
+   "expected_lat": 47.608970642089844,
+   "expected_lon": -122.33995819091797,
+   "tolerance_km": 2.0,
+   "proximity": [
+    -122.351902,
+    47.607112
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "US",
+    "metro": "seattle",
+    "chain": "Starbucks"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 0.92,
+    "chain_instances_in_metro_box": 135,
+    "chain_instances_within_2km": 35,
+    "nearest_instance_km": 0.521
+   }
+  },
+  {
+   "id": "prox:seattle:7-eleven",
+   "kind": "place",
+   "query": "7-Eleven",
+   "query_style": "chain_proximity",
+   "expected_name": "7-Eleven",
+   "alt_names": [],
+   "expected_gers_id": "57eadb83-36b0-4d56-ab89-9e7b95be86de",
+   "expected_lat": 47.6104736328125,
+   "expected_lon": -122.338134765625,
+   "tolerance_km": 2.0,
+   "proximity": [
+    -122.321996,
+    47.613593
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "US",
+    "metro": "seattle",
+    "chain": "7-Eleven"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 1.26,
+    "chain_instances_in_metro_box": 43,
+    "chain_instances_within_2km": 8,
+    "nearest_instance_km": 0.297
+   }
+  },
+  {
+   "id": "prox:toronto:tim-hortons",
+   "kind": "place",
+   "query": "Tim Hortons",
+   "query_style": "chain_proximity",
+   "expected_name": "Tim Hortons",
+   "alt_names": [],
+   "expected_gers_id": "ee236237-7f1c-43d8-b1b9-255979511615",
+   "expected_lat": 43.66470718383789,
+   "expected_lon": -79.38756561279297,
+   "tolerance_km": 2.0,
+   "proximity": [
+    -79.387042,
+    43.659295
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "CA",
+    "metro": "toronto",
+    "chain": "Tim Hortons"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 0.604,
+    "chain_instances_in_metro_box": 250,
+    "chain_instances_within_2km": 67,
+    "nearest_instance_km": 0.097
+   }
+  },
+  {
+   "id": "prox:toronto:starbucks",
+   "kind": "place",
+   "query": "Starbucks",
+   "query_style": "chain_proximity",
+   "expected_name": "Starbucks",
+   "alt_names": [],
+   "expected_gers_id": "5833606b-4ac0-48c0-b000-d865bb565174",
+   "expected_lat": 43.668128967285156,
+   "expected_lon": -79.38854217529297,
+   "tolerance_km": 2.0,
+   "proximity": [
+    -79.370061,
+    43.662728
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "CA",
+    "metro": "toronto",
+    "chain": "Starbucks"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 1.605,
+    "chain_instances_in_metro_box": 163,
+    "chain_instances_within_2km": 40,
+    "nearest_instance_km": 0.701
+   }
+  },
+  {
+   "id": "prox:mexico_city:oxxo",
+   "kind": "place",
+   "query": "OXXO",
+   "query_style": "chain_proximity",
+   "expected_name": "OXXO",
+   "alt_names": [],
+   "expected_gers_id": "e125ebb6-2808-4ce8-8faa-46b314b02a91",
+   "expected_lat": 19.419189453125,
+   "expected_lon": -99.14781951904297,
+   "tolerance_km": 2.0,
+   "proximity": [
+    -99.140301,
+    19.42764
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "MX",
+    "metro": "mexico_city",
+    "chain": "OXXO"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 1.228,
+    "chain_instances_in_metro_box": 473,
+    "chain_instances_within_2km": 32,
+    "nearest_instance_km": 0.331
+   }
+  },
+  {
+   "id": "prox:mexico_city:7-eleven",
+   "kind": "place",
+   "query": "7-Eleven",
+   "query_style": "chain_proximity",
+   "expected_name": "7-Eleven",
+   "alt_names": [],
+   "expected_gers_id": "edd17b8d-087c-44e9-9d7e-415649a1d12f",
+   "expected_lat": 19.415664672851562,
+   "expected_lon": -99.14862060546875,
+   "tolerance_km": 2.0,
+   "proximity": [
+    -99.15844,
+    19.427954
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "MX",
+    "metro": "mexico_city",
+    "chain": "7-Eleven"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 1.713,
+    "chain_instances_in_metro_box": 280,
+    "chain_instances_within_2km": 35,
+    "nearest_instance_km": 0.119
+   }
+  },
+  {
+   "id": "prox:sao_paulo:drogasil",
+   "kind": "place",
+   "query": "Drogasil",
+   "query_style": "chain_proximity",
+   "expected_name": "Drogasil",
+   "alt_names": [],
+   "expected_gers_id": "e4146a7c-18f5-4ff5-bc73-2cc6b4878acb",
+   "expected_lat": -23.563579559326172,
+   "expected_lon": -46.632686614990234,
+   "tolerance_km": 2.0,
+   "proximity": [
+    -46.638151,
+    -23.55178
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "BR",
+    "metro": "sao_paulo",
+    "chain": "Drogasil"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 1.427,
+    "chain_instances_in_metro_box": 237,
+    "chain_instances_within_2km": 17,
+    "nearest_instance_km": 0.435
+   }
+  },
+  {
+   "id": "prox:sao_paulo:mcdonald-s",
+   "kind": "place",
+   "query": "McDonald's",
+   "query_style": "chain_proximity",
+   "expected_name": "McDonald's",
+   "alt_names": [],
+   "expected_gers_id": "8e08f453-1e30-454d-81f0-50fcc0f63e06",
+   "expected_lat": -23.563888549804688,
+   "expected_lon": -46.63888168334961,
+   "tolerance_km": 2.0,
+   "proximity": [
+    -46.635417,
+    -23.575741
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "BR",
+    "metro": "sao_paulo",
+    "chain": "McDonald's"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 1.366,
+    "chain_instances_in_metro_box": 197,
+    "chain_instances_within_2km": 12,
+    "nearest_instance_km": 0.491
+   }
+  },
+  {
+   "id": "prox:london:costa-coffee",
+   "kind": "place",
+   "query": "Costa Coffee",
+   "query_style": "chain_proximity",
+   "expected_name": "Costa Coffee",
+   "alt_names": [],
+   "expected_gers_id": "c6c46107-9b45-4bef-bbaa-48737e20f497",
+   "expected_lat": 51.51106262207031,
+   "expected_lon": -0.10335300117731094,
+   "tolerance_km": 2.0,
+   "proximity": [
+    -0.094597,
+    51.518563
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "GB",
+    "metro": "london",
+    "chain": "Costa Coffee"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 1.032,
+    "chain_instances_in_metro_box": 293,
+    "chain_instances_within_2km": 47,
+    "nearest_instance_km": 0.338
+   }
+  },
+  {
+   "id": "prox:london:pret-a-manger",
+   "kind": "place",
+   "query": "Pret A Manger",
+   "query_style": "chain_proximity",
+   "expected_name": "Pret A Manger",
+   "alt_names": [],
+   "expected_gers_id": "286c8665-7ef4-42d6-96fa-8028d3afc6ea",
+   "expected_lat": 51.51203536987305,
+   "expected_lon": -0.09772688150405884,
+   "tolerance_km": 2.0,
+   "proximity": [
+    -0.085322,
+    51.513818
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "GB",
+    "metro": "london",
+    "chain": "Pret A Manger"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 0.882,
+    "chain_instances_in_metro_box": 198,
+    "chain_instances_within_2km": 49,
+    "nearest_instance_km": 0.197
+   }
+  },
+  {
+   "id": "prox:london:starbucks",
+   "kind": "place",
+   "query": "Starbucks",
+   "query_style": "chain_proximity",
+   "expected_name": "Starbucks",
+   "alt_names": [],
+   "expected_gers_id": "c6773803-8609-4960-84ac-352957447d56",
+   "expected_lat": 51.50813293457031,
+   "expected_lon": -0.10182519257068634,
+   "tolerance_km": 2.0,
+   "proximity": [
+    -0.089061,
+    51.505855
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "GB",
+    "metro": "london",
+    "chain": "Starbucks"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 0.92,
+    "chain_instances_in_metro_box": 180,
+    "chain_instances_within_2km": 31,
+    "nearest_instance_km": 0.033
+   }
+  },
+  {
+   "id": "prox:paris:carrefour-city",
+   "kind": "place",
+   "query": "Carrefour City",
+   "query_style": "chain_proximity",
+   "expected_name": "Carrefour City",
+   "alt_names": [],
+   "expected_gers_id": "10adfe27-1b98-4aa0-b483-26992d017fe4",
+   "expected_lat": 48.85929870605469,
+   "expected_lon": 2.3491947650909424,
+   "tolerance_km": 2.0,
+   "proximity": [
+    2.364803,
+    48.853607
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "FR",
+    "metro": "paris",
+    "chain": "Carrefour City"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 1.307,
+    "chain_instances_in_metro_box": 142,
+    "chain_instances_within_2km": 20,
+    "nearest_instance_km": 0.286
+   }
+  },
+  {
+   "id": "prox:paris:monoprix",
+   "kind": "place",
+   "query": "Monoprix",
+   "query_style": "chain_proximity",
+   "expected_name": "Monoprix",
+   "alt_names": [],
+   "expected_gers_id": "4ee5a715-7f30-44ae-96f0-f833910ffbf8",
+   "expected_lat": 48.86140823364258,
+   "expected_lon": 2.3473899364471436,
+   "tolerance_km": 2.0,
+   "proximity": [
+    2.365568,
+    48.856818
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "FR",
+    "metro": "paris",
+    "chain": "Monoprix"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 1.426,
+    "chain_instances_in_metro_box": 108,
+    "chain_instances_within_2km": 13,
+    "nearest_instance_km": 0.323
+   }
+  },
+  {
+   "id": "prox:paris:mcdonald-s",
+   "kind": "place",
+   "query": "McDonald's",
+   "query_style": "chain_proximity",
+   "expected_name": "McDonald's",
+   "alt_names": [],
+   "expected_gers_id": "b1012643-cdf0-409d-ac84-4555c15077ae",
+   "expected_lat": 48.860816955566406,
+   "expected_lon": 2.3486859798431396,
+   "tolerance_km": 2.0,
+   "proximity": [
+    2.342189,
+    48.858639
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "FR",
+    "metro": "paris",
+    "chain": "McDonald's"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 0.534,
+    "chain_instances_in_metro_box": 119,
+    "chain_instances_within_2km": 18,
+    "nearest_instance_km": 0.295
+   }
+  },
+  {
+   "id": "prox:berlin:rewe",
+   "kind": "place",
+   "query": "REWE",
+   "query_style": "chain_proximity",
+   "expected_name": "REWE",
+   "alt_names": [],
+   "expected_gers_id": "c9d0d70e-d02f-4f91-bfd9-7c57a8033e77",
+   "expected_lat": 52.51292037963867,
+   "expected_lon": 13.39075756072998,
+   "tolerance_km": 2.0,
+   "proximity": [
+    13.392914,
+    52.518185
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "DE",
+    "metro": "berlin",
+    "chain": "REWE"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 0.604,
+    "chain_instances_in_metro_box": 121,
+    "chain_instances_within_2km": 11,
+    "nearest_instance_km": 0.399
+   }
+  },
+  {
+   "id": "prox:berlin:lidl",
+   "kind": "place",
+   "query": "Lidl",
+   "query_style": "chain_proximity",
+   "expected_name": "Lidl",
+   "alt_names": [],
+   "expected_gers_id": "25978d37-0b9e-492e-84ae-5a08062f45c7",
+   "expected_lat": 52.51060104370117,
+   "expected_lon": 13.39500617980957,
+   "tolerance_km": 2.0,
+   "proximity": [
+    13.395354,
+    52.498476
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "DE",
+    "metro": "berlin",
+    "chain": "Lidl"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 1.35,
+    "chain_instances_in_metro_box": 106,
+    "chain_instances_within_2km": 11,
+    "nearest_instance_km": 0.768
+   }
+  },
+  {
+   "id": "prox:madrid:mercadona",
+   "kind": "place",
+   "query": "Mercadona",
+   "query_style": "chain_proximity",
+   "expected_name": "Mercadona",
+   "alt_names": [],
+   "expected_gers_id": "a95c5954-6a2a-4005-a0a9-99d83e4e7e8e",
+   "expected_lat": 40.42509841918945,
+   "expected_lon": -3.7014641761779785,
+   "tolerance_km": 2.0,
+   "proximity": [
+    -3.706229,
+    40.409387
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "ES",
+    "metro": "madrid",
+    "chain": "Mercadona"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 1.795,
+    "chain_instances_in_metro_box": 76,
+    "chain_instances_within_2km": 10,
+    "nearest_instance_km": 0.51
+   }
+  },
+  {
+   "id": "prox:madrid:burger-king",
+   "kind": "place",
+   "query": "Burger King",
+   "query_style": "chain_proximity",
+   "expected_name": "Burger King",
+   "alt_names": [],
+   "expected_gers_id": "5b012ee5-eb0b-4d5b-810a-5616e0f10124",
+   "expected_lat": 40.42037582397461,
+   "expected_lon": -3.7049336433410645,
+   "tolerance_km": 2.0,
+   "proximity": [
+    -3.710251,
+    40.410356
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "ES",
+    "metro": "madrid",
+    "chain": "Burger King"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 1.203,
+    "chain_instances_in_metro_box": 102,
+    "chain_instances_within_2km": 20,
+    "nearest_instance_km": 0.545
+   }
+  },
+  {
+   "id": "prox:stockholm:pressbyran",
+   "kind": "place",
+   "query": "Pressbyrån",
+   "query_style": "chain_proximity",
+   "expected_name": "Pressbyrån",
+   "alt_names": [],
+   "expected_gers_id": "12481838-b8e4-4b06-b813-514f70eeea39",
+   "expected_lat": 59.339290618896484,
+   "expected_lon": 18.082218170166016,
+   "tolerance_km": 2.0,
+   "proximity": [
+    18.082734,
+    59.344305
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "SE",
+    "metro": "stockholm",
+    "chain": "Pressbyrån"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 0.559,
+    "chain_instances_in_metro_box": 90,
+    "chain_instances_within_2km": 24,
+    "nearest_instance_km": 0.558
+   }
+  },
+  {
+   "id": "prox:stockholm:7-eleven",
+   "kind": "place",
+   "query": "7-Eleven",
+   "query_style": "chain_proximity",
+   "expected_name": "7-Eleven",
+   "alt_names": [],
+   "expected_gers_id": "a7619cc4-1d2a-4226-9c39-e408ccab098a",
+   "expected_lat": 59.340633392333984,
+   "expected_lon": 18.07646369934082,
+   "tolerance_km": 2.0,
+   "proximity": [
+    18.110314,
+    59.335684
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "SE",
+    "metro": "stockholm",
+    "chain": "7-Eleven"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 1.999,
+    "chain_instances_in_metro_box": 67,
+    "chain_instances_within_2km": 9,
+    "nearest_instance_km": 0.576
+   }
+  },
+  {
+   "id": "prox:warsaw:zabka",
+   "kind": "place",
+   "query": "Żabka",
+   "query_style": "chain_proximity",
+   "expected_name": "Żabka",
+   "alt_names": [],
+   "expected_gers_id": "cb45174c-f126-4128-a0b7-4b9be64b3f49",
+   "expected_lat": 52.2264518737793,
+   "expected_lon": 20.996925354003906,
+   "tolerance_km": 2.0,
+   "proximity": [
+    20.979945,
+    52.240255
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "PL",
+    "metro": "warsaw",
+    "chain": "Żabka"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 1.924,
+    "chain_instances_in_metro_box": 663,
+    "chain_instances_within_2km": 91,
+    "nearest_instance_km": 0.074
+   }
+  },
+  {
+   "id": "prox:warsaw:costa-coffee",
+   "kind": "place",
+   "query": "Costa Coffee",
+   "query_style": "chain_proximity",
+   "expected_name": "Costa Coffee",
+   "alt_names": [],
+   "expected_gers_id": "89ce2ec7-d1d3-4836-a27a-3247bd8f9fe2",
+   "expected_lat": 52.226409912109375,
+   "expected_lon": 21.00351333618164,
+   "tolerance_km": 2.0,
+   "proximity": [
+    21.002546,
+    52.209433
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "PL",
+    "metro": "warsaw",
+    "chain": "Costa Coffee"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 1.891,
+    "chain_instances_in_metro_box": 65,
+    "chain_instances_within_2km": 8,
+    "nearest_instance_km": 0.674
+   }
+  },
+  {
+   "id": "prox:istanbul:sok",
+   "kind": "place",
+   "query": "Şok",
+   "query_style": "chain_proximity",
+   "expected_name": "Şok",
+   "alt_names": [],
+   "expected_gers_id": "f1b7b7e6-5d78-475d-b89d-17f50f8b3f6f",
+   "expected_lat": 41.04305648803711,
+   "expected_lon": 29.002666473388672,
+   "tolerance_km": 2.0,
+   "proximity": [
+    29.011188,
+    41.027148
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "TR",
+    "metro": "istanbul",
+    "chain": "Şok"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 1.91,
+    "chain_instances_in_metro_box": 422,
+    "chain_instances_within_2km": 20,
+    "nearest_instance_km": 0.538
+   }
+  },
+  {
+   "id": "prox:istanbul:migros",
+   "kind": "place",
+   "query": "Migros",
+   "query_style": "chain_proximity",
+   "expected_name": "Migros",
+   "alt_names": [],
+   "expected_gers_id": "18413931-dff6-4862-84aa-1ca9a6788641",
+   "expected_lat": 41.043087005615234,
+   "expected_lon": 29.002519607543945,
+   "tolerance_km": 2.0,
+   "proximity": [
+    28.986729,
+    41.043295
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "TR",
+    "metro": "istanbul",
+    "chain": "Migros"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 1.326,
+    "chain_instances_in_metro_box": 98,
+    "chain_instances_within_2km": 15,
+    "nearest_instance_km": 0.422
+   }
+  },
+  {
+   "id": "prox:tokyo:967962",
+   "kind": "place",
+   "query": "ローソン",
+   "query_style": "chain_proximity",
+   "expected_name": "ローソン",
+   "alt_names": [],
+   "expected_gers_id": "d51d889f-2161-45f4-aa36-a2a023c3c779",
+   "expected_lat": 35.67976760864258,
+   "expected_lon": 139.76968383789062,
+   "tolerance_km": 2.0,
+   "proximity": [
+    139.764904,
+    35.694258
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "JP",
+    "metro": "tokyo",
+    "chain": "ローソン"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 1.67,
+    "chain_instances_in_metro_box": 1342,
+    "chain_instances_within_2km": 54,
+    "nearest_instance_km": 0.318
+   }
+  },
+  {
+   "id": "prox:tokyo:starbucks",
+   "kind": "place",
+   "query": "Starbucks",
+   "query_style": "chain_proximity",
+   "expected_name": "Starbucks",
+   "alt_names": [],
+   "expected_gers_id": "f504809c-dc08-4131-a3fb-82aeb2109d81",
+   "expected_lat": 35.679107666015625,
+   "expected_lon": 139.76882934570312,
+   "tolerance_km": 2.0,
+   "proximity": [
+    139.762361,
+    35.683675
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "JP",
+    "metro": "tokyo",
+    "chain": "Starbucks"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 0.775,
+    "chain_instances_in_metro_box": 266,
+    "chain_instances_within_2km": 40,
+    "nearest_instance_km": 0.126
+   }
+  },
+  {
+   "id": "prox:bangkok:7-eleven",
+   "kind": "place",
+   "query": "7-Eleven",
+   "query_style": "chain_proximity",
+   "expected_name": "7-Eleven",
+   "alt_names": [],
+   "expected_gers_id": "2f25e9b6-dbc8-4393-9dd5-82ead88fac9e",
+   "expected_lat": 13.751984596252441,
+   "expected_lon": 100.53489685058594,
+   "tolerance_km": 2.0,
+   "proximity": [
+    100.548563,
+    13.743364
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "TH",
+    "metro": "bangkok",
+    "chain": "7-Eleven"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 1.762,
+    "chain_instances_in_metro_box": 870,
+    "chain_instances_within_2km": 57,
+    "nearest_instance_km": 0.088
+   }
+  },
+  {
+   "id": "prox:bangkok:kfc",
+   "kind": "place",
+   "query": "KFC",
+   "query_style": "chain_proximity",
+   "expected_name": "KFC",
+   "alt_names": [],
+   "expected_gers_id": "736f06f8-b6b5-483c-afb0-946c839b41ea",
+   "expected_lat": 13.745872497558594,
+   "expected_lon": 100.53504180908203,
+   "tolerance_km": 2.0,
+   "proximity": [
+    100.542457,
+    13.740445
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "TH",
+    "metro": "bangkok",
+    "chain": "KFC"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 1.004,
+    "chain_instances_in_metro_box": 210,
+    "chain_instances_within_2km": 21,
+    "nearest_instance_km": 0.668
+   }
+  },
+  {
+   "id": "prox:singapore:7-eleven",
+   "kind": "place",
+   "query": "7-Eleven",
+   "query_style": "chain_proximity",
+   "expected_name": "7-Eleven",
+   "alt_names": [],
+   "expected_gers_id": "bfe6b5bc-fe72-4215-b0e2-7b5eeecaf04f",
+   "expected_lat": 1.3257668018341064,
+   "expected_lon": 103.84965515136719,
+   "tolerance_km": 2.0,
+   "proximity": [
+    103.861889,
+    1.319535
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "SG",
+    "metro": "singapore",
+    "chain": "7-Eleven"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 1.528,
+    "chain_instances_in_metro_box": 236,
+    "chain_instances_within_2km": 27,
+    "nearest_instance_km": 0.064
+   }
+  },
+  {
+   "id": "prox:singapore:subway",
+   "kind": "place",
+   "query": "Subway",
+   "query_style": "chain_proximity",
+   "expected_name": "Subway",
+   "alt_names": [],
+   "expected_gers_id": "43eb514a-35eb-4792-9f54-ad1adb0af8a5",
+   "expected_lat": 1.326986312866211,
+   "expected_lon": 103.84640502929688,
+   "tolerance_km": 2.0,
+   "proximity": [
+    103.852418,
+    1.333902
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "SG",
+    "metro": "singapore",
+    "chain": "Subway"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 1.02,
+    "chain_instances_in_metro_box": 108,
+    "chain_instances_within_2km": 7,
+    "nearest_instance_km": 0.53
+   }
+  },
+  {
+   "id": "prox:sydney:woolworths",
+   "kind": "place",
+   "query": "Woolworths",
+   "query_style": "chain_proximity",
+   "expected_name": "Woolworths",
+   "alt_names": [],
+   "expected_gers_id": "828f385c-9fc2-4b1f-a297-924d95d1488f",
+   "expected_lat": -33.8679313659668,
+   "expected_lon": 151.2056884765625,
+   "tolerance_km": 2.0,
+   "proximity": [
+    151.215615,
+    -33.862579
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "AU",
+    "metro": "sydney",
+    "chain": "Woolworths"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 1.094,
+    "chain_instances_in_metro_box": 26,
+    "chain_instances_within_2km": 2,
+    "nearest_instance_km": 0.893
+   }
+  },
+  {
+   "id": "prox:sydney:7-eleven",
+   "kind": "place",
+   "query": "7-Eleven",
+   "query_style": "chain_proximity",
+   "expected_name": "7-Eleven",
+   "alt_names": [],
+   "expected_gers_id": "a5d8afbf-b21f-473b-be57-a94fe909d50c",
+   "expected_lat": -33.87750244140625,
+   "expected_lon": 151.20449829101562,
+   "tolerance_km": 2.0,
+   "proximity": [
+    151.192785,
+    -33.881042
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "AU",
+    "metro": "sydney",
+    "chain": "7-Eleven"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 1.152,
+    "chain_instances_in_metro_box": 40,
+    "chain_instances_within_2km": 14,
+    "nearest_instance_km": 1.011
+   }
+  },
+  {
+   "id": "prox:johannesburg:kfc",
+   "kind": "place",
+   "query": "KFC",
+   "query_style": "chain_proximity",
+   "expected_name": "KFC",
+   "alt_names": [],
+   "expected_gers_id": "87868aeb-4efb-41c8-aeca-facb58938de1",
+   "expected_lat": -26.189144134521484,
+   "expected_lon": 28.04826545715332,
+   "tolerance_km": 2.0,
+   "proximity": [
+    28.053467,
+    -26.205421
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "ZA",
+    "metro": "johannesburg",
+    "chain": "KFC"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 1.885,
+    "chain_instances_in_metro_box": 79,
+    "chain_instances_within_2km": 12,
+    "nearest_instance_km": 0.356
+   }
+  },
+  {
+   "id": "prox:johannesburg:pick-n-pay",
+   "kind": "place",
+   "query": "Pick n Pay",
+   "query_style": "chain_proximity",
+   "expected_name": "Pick n Pay",
+   "alt_names": [],
+   "expected_gers_id": "2b7ece00-d9fc-450a-966f-4d13007bd86f",
+   "expected_lat": -26.197851181030273,
+   "expected_lon": 28.045297622680664,
+   "tolerance_km": 2.0,
+   "proximity": [
+    28.041703,
+    -26.206254
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "ZA",
+    "metro": "johannesburg",
+    "chain": "Pick n Pay"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 1.002,
+    "chain_instances_in_metro_box": 42,
+    "chain_instances_within_2km": 4,
+    "nearest_instance_km": 0.483
+   }
+  },
+  {
+   "id": "prox:mumbai:subway",
+   "kind": "place",
+   "query": "Subway",
+   "query_style": "chain_proximity",
+   "expected_name": "Subway",
+   "alt_names": [],
+   "expected_gers_id": "47d3d36c-cf94-4077-bca5-d7e18d281468",
+   "expected_lat": 19.044519424438477,
+   "expected_lon": 72.87450408935547,
+   "tolerance_km": 2.0,
+   "proximity": [
+    72.882626,
+    19.048099
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "IN",
+    "metro": "mumbai",
+    "chain": "Subway"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 0.943,
+    "chain_instances_in_metro_box": 66,
+    "chain_instances_within_2km": 2,
+    "nearest_instance_km": 0.723
+   }
+  },
+  {
+   "id": "prox:mumbai:starbucks",
+   "kind": "place",
+   "query": "Starbucks",
+   "query_style": "chain_proximity",
+   "expected_name": "Starbucks",
+   "alt_names": [],
+   "expected_gers_id": "1b6b3d9f-96bb-46ba-b603-8530b593894f",
+   "expected_lat": 19.039501190185547,
+   "expected_lon": 72.87921142578125,
+   "tolerance_km": 2.0,
+   "proximity": [
+    72.887511,
+    19.038399
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "IN",
+    "metro": "mumbai",
+    "chain": "Starbucks"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 0.882,
+    "chain_instances_in_metro_box": 72,
+    "chain_instances_within_2km": 1,
+    "nearest_instance_km": 0.881
+   }
+  },
+  {
+   "id": "prox:jakarta:indomaret",
+   "kind": "place",
+   "query": "Indomaret",
+   "query_style": "chain_proximity",
+   "expected_name": "Indomaret",
+   "alt_names": [],
+   "expected_gers_id": "995ec316-9efe-4445-a359-19cb35b7d023",
+   "expected_lat": -6.203489780426025,
+   "expected_lon": 106.85713958740234,
+   "tolerance_km": 2.0,
+   "proximity": [
+    106.868743,
+    -6.204499
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "ID",
+    "metro": "jakarta",
+    "chain": "Indomaret"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 1.289,
+    "chain_instances_in_metro_box": 139,
+    "chain_instances_within_2km": 6,
+    "nearest_instance_km": 0.746
+   }
+  },
+  {
+   "id": "prox:jakarta:kfc",
+   "kind": "place",
+   "query": "KFC",
+   "query_style": "chain_proximity",
+   "expected_name": "KFC",
+   "alt_names": [],
+   "expected_gers_id": "fb18d1c5-f535-44ea-9cf5-7f9d02167a70",
+   "expected_lat": -6.210197925567627,
+   "expected_lon": 106.85043334960938,
+   "tolerance_km": 2.0,
+   "proximity": [
+    106.84477,
+    -6.213716
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "ID",
+    "metro": "jakarta",
+    "chain": "KFC"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 0.739,
+    "chain_instances_in_metro_box": 257,
+    "chain_instances_within_2km": 11,
+    "nearest_instance_km": 0.566
+   }
+  },
+  {
+   "id": "prox:manila:jollibee",
+   "kind": "place",
+   "query": "Jollibee",
+   "query_style": "chain_proximity",
+   "expected_name": "Jollibee",
+   "alt_names": [],
+   "expected_gers_id": "8a17b305-c6ac-4fd9-9601-63c53220c18b",
+   "expected_lat": 14.600433349609375,
+   "expected_lon": 121.0240478515625,
+   "tolerance_km": 2.0,
+   "proximity": [
+    121.018664,
+    14.596363
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "PH",
+    "metro": "manila",
+    "chain": "Jollibee"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 0.736,
+    "chain_instances_in_metro_box": 448,
+    "chain_instances_within_2km": 23,
+    "nearest_instance_km": 0.586
+   }
+  },
+  {
+   "id": "prox:manila:7-eleven",
+   "kind": "place",
+   "query": "7-Eleven",
+   "query_style": "chain_proximity",
+   "expected_name": "7-Eleven",
+   "alt_names": [],
+   "expected_gers_id": "a5511c16-9526-4205-8965-60768c6ba708",
+   "expected_lat": 14.603936195373535,
+   "expected_lon": 121.02733612060547,
+   "tolerance_km": 2.0,
+   "proximity": [
+    121.035117,
+    14.601196
+   ],
+   "strata": {
+    "scope": "proximity",
+    "country": "PH",
+    "metro": "manila",
+    "chain": "7-Eleven"
+   },
+   "proximity_assert": {
+    "nearest_within_km": 2.0,
+    "offset_km": 0.892,
+    "chain_instances_in_metro_box": 863,
+    "chain_instances_within_2km": 61,
+    "nearest_instance_km": 0.055
+   }
+  }
+ ]
+}

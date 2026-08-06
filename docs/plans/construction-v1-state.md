@@ -99,9 +99,9 @@ candidate, and it rides on the June corpus** — no release move ahead of it.
 
 **2026-08-06 UPDATE.** A four-track failure-mode review
 (`2026-08-06-places-failure-mode-review.md`) reframed the quality roadmap.
-Three findings change priorities: (1) 92 of 130 everyday misses are
-registry-legal-name gold absent from all map data — the instrument, not the
-geocoder, and production sits at ~65% of that set's achievable ceiling;
+Three findings change priorities: (1) a bounded corpus probe labels 92 of 130
+everyday misses `ABSENT`, largely registry-legal-name gold not found in map
+data — an instrument problem with the probe caveats measured below;
 (2) the proximity lane is broken end to end and measured by zero benchmark
 cases — `q=starbucks` at Times Square returns nearest-24 km because
 `place_score` has no distance term and the routed cell posting evicts by cap
@@ -115,6 +115,38 @@ into the v5 rebuild beside phrase admission (whose PENDING sizing join must
 be computed first), scope the theme=base landmark import. The
 `prominence_rank = 0` phrase admission remains sanctioned but is a gold-set
 lever (~7.5% of everyday misses), not the strategy.
+
+**2026-08-06 INSTRUMENT FOLLOW-UP.** The first two missing strata are now
+frozen against production build `2026-08-03.0`; see
+`benchmarks/2026-08-06-proximity-variant-baseline-v1.json` and its case files.
+The proximity baseline is **3/40 at rank 1 and 22/40 at rank 10** for a
+permissive chain-name match within 2 km; a chain appears somewhere in the top
+10 for 40/40. The 3/40 is conservative/flattering as an entity metric because
+Sydney credits `Woolworths Riley Street Car Park`, but it still establishes the
+broken nearest-chain baseline the Worker wave must beat. The sampled anchor is
+a construction aid, not gold: displacement makes it non-nearest in 38/40, so
+the case-file contract explicitly forbids stock exact-GERS anchor scoring.
+
+The everyday denominator re-baseline is also frozen in
+`benchmarks/2026-08-06-everyday-denominator-rebaseline-v1.json`. Quarantining
+92 `ABSENT AND production-miss` cases changes 0.345/0.350 (n=200) to
+**0.639/0.648 (n=108), but those figures are upper bounds, not a simple
+denominator correction**. The ABSENT probe was wrong for 2/70 production hits;
+applying that observed rate to the quarantine gives a sensitivity estimate of
+about **0.622/0.631 (n=111)**. Quarantine is not missing at random: CO falls
+20->0 cases, AU 25->7, and KR 20->7, while 94/108 kept cases are from HK, TW,
+SG, MX, or JP. Any headline must carry both the probe-blindness and population
+shift caveats.
+
+The initial variant stratum remains diagnostic rather than a headline metric.
+Four of five apostrophe controls return no candidates, and the three apparent
+control misses for Domino's, Søstrene Grene, and Phương Đông are global-
+homonym/distance failures rather than proximity evidence. Two targeted
+lower-population hyphen divisions supplement the five population-leading
+localities: `Monte Carlo` / `Monte-Carlo` misses the Monaco division under
+both spellings while returning a 9,351 km POI; `Opa locka` retrieves its
+locality at rank 9 versus rank 1 for `Opa-locka`. This is evidence of a ranking
+effect, but the current small mixed stratum is not suitable for a global rate.
 
 The justification is measured, not aesthetic. Against the build promoted today:
 

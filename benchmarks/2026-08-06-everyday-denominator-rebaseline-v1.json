@@ -1,0 +1,272 @@
+{
+ "schema": "everyday-denominator-rebaseline-v1",
+ "inputs": {
+  "run": "benchmarks/2026-08-04-everyday-poi-post-additive-wave.json",
+  "interrogation": "benchmarks/2026-08-04-everyday-head-miss-interrogation-v1.json",
+  "build": "2026-08-03.0"
+ },
+ "quarantine_rule": "verdict == ABSENT (no name-matching Overture record within 2x tolerance of the gold point, min 1 km, on the production 2026-06-17.0 corpus) AND production did not hit the case; a production hit proves existence and overrides ABSENT",
+ "upper_bound_note": "The corrected 0.639/0.648 rates are upper bounds, not a simple denominator correction: ABSENT is a bounded name probe and was wrong for 2 of the 70 production hits (2.9%). Applying that observed rate to 92 quarantines restores about 3 misses; the sensitivity estimate is approximately 0.622/0.631 (n=111).",
+ "absent_probe_sensitivity": {
+  "absent_verdict_hits": 2,
+  "production_hits_at_10": 70,
+  "observed_false_absent_rate_among_hits": 0.029,
+  "estimated_false_quarantines": 3,
+  "estimated_scoreboard": {
+   "n": 111,
+   "found_at_1": 69,
+   "found_at_10": 70,
+   "recall_at_1": 0.622,
+   "recall_at_10": 0.631
+  }
+ },
+ "population_shift_note": "Quarantine is not missing at random. CO falls 20->0 cases, AU 25->7, and KR 20->7; 94/108 kept cases (87%) are from HK, TW, SG, MX, or JP. The corrected rate therefore describes a materially different country population from the original 200.",
+ "kept_concentration": {
+  "countries": [
+   "HK",
+   "JP",
+   "MX",
+   "SG",
+   "TW"
+  ],
+  "cases": 94,
+  "share": 0.87
+ },
+ "quarantined_count": 92,
+ "kept_count": 108,
+ "absent_verdict_but_production_hit": [
+  "everyday-hk-28",
+  "everyday-kr-PHMA220043000034021200001"
+ ],
+ "verdict_counts_all": {
+  "IN_HEAD": 90,
+  "NOT_ADMITTED": 16,
+  "ABSENT": 94
+ },
+ "old_scoreboard": {
+  "n": 200,
+  "found_at_1": 69,
+  "found_at_10": 70,
+  "recall_at_1": 0.345,
+  "recall_at_10": 0.35
+ },
+ "corrected_scoreboard": {
+  "n": 108,
+  "found_at_1": 69,
+  "found_at_10": 70,
+  "recall_at_1": 0.639,
+  "recall_at_10": 0.648
+ },
+ "old_by_country": {
+  "AU": {
+   "n": 25,
+   "found_at_1": 2,
+   "found_at_10": 2,
+   "recall_at_1": 0.08,
+   "recall_at_10": 0.08
+  },
+  "CO": {
+   "n": 20,
+   "found_at_1": 0,
+   "found_at_10": 0,
+   "recall_at_1": 0.0,
+   "recall_at_10": 0.0
+  },
+  "HK": {
+   "n": 20,
+   "found_at_1": 15,
+   "found_at_10": 16,
+   "recall_at_1": 0.75,
+   "recall_at_10": 0.8
+  },
+  "JP": {
+   "n": 30,
+   "found_at_1": 15,
+   "found_at_10": 15,
+   "recall_at_1": 0.5,
+   "recall_at_10": 0.5
+  },
+  "KR": {
+   "n": 20,
+   "found_at_1": 5,
+   "found_at_10": 5,
+   "recall_at_1": 0.25,
+   "recall_at_10": 0.25
+  },
+  "MX": {
+   "n": 35,
+   "found_at_1": 0,
+   "found_at_10": 0,
+   "recall_at_1": 0.0,
+   "recall_at_10": 0.0
+  },
+  "SG": {
+   "n": 20,
+   "found_at_1": 10,
+   "found_at_10": 10,
+   "recall_at_1": 0.5,
+   "recall_at_10": 0.5
+  },
+  "TW": {
+   "n": 30,
+   "found_at_1": 22,
+   "found_at_10": 22,
+   "recall_at_1": 0.733,
+   "recall_at_10": 0.733
+  }
+ },
+ "corrected_by_country": {
+  "AU": {
+   "n": 7,
+   "found_at_1": 2,
+   "found_at_10": 2,
+   "recall_at_1": 0.286,
+   "recall_at_10": 0.286
+  },
+  "HK": {
+   "n": 20,
+   "found_at_1": 15,
+   "found_at_10": 16,
+   "recall_at_1": 0.75,
+   "recall_at_10": 0.8
+  },
+  "JP": {
+   "n": 15,
+   "found_at_1": 15,
+   "found_at_10": 15,
+   "recall_at_1": 1.0,
+   "recall_at_10": 1.0
+  },
+  "KR": {
+   "n": 7,
+   "found_at_1": 5,
+   "found_at_10": 5,
+   "recall_at_1": 0.714,
+   "recall_at_10": 0.714
+  },
+  "MX": {
+   "n": 17,
+   "found_at_1": 0,
+   "found_at_10": 0,
+   "recall_at_1": 0.0,
+   "recall_at_10": 0.0
+  },
+  "SG": {
+   "n": 19,
+   "found_at_1": 10,
+   "found_at_10": 10,
+   "recall_at_1": 0.526,
+   "recall_at_10": 0.526
+  },
+  "TW": {
+   "n": 23,
+   "found_at_1": 22,
+   "found_at_10": 22,
+   "recall_at_1": 0.957,
+   "recall_at_10": 0.957
+  }
+ },
+ "quarantined_case_ids": [
+  "everyday-au-01e3e5f469ccfbb4e5817f23ef68fac033dec0d2",
+  "everyday-au-05c2135d682827c2443e18208a98c27a49254038",
+  "everyday-au-1f31df1323fe1a701bd570860ec61d597e628bba",
+  "everyday-au-2823aaec760fce01b9eedf71fd9d5484c0db9951",
+  "everyday-au-2a73f15995959a174e5f5a1d6dd55be084c0eb6d",
+  "everyday-au-3510d00d35672b00b3db5c73c668eb99639a234d",
+  "everyday-au-41e89cc49682207b453703c2157cd0fb66361c32",
+  "everyday-au-625a78220cb02f985dea45b2b2097cec3eda111e",
+  "everyday-au-847f08d1589077e7327d75461df40c9565a14fea",
+  "everyday-au-8be3a162213c07b0f1bbc7255f8ba15d2b5071bb",
+  "everyday-au-92affd29602cdc089104cebd688ce8d2e07d4ba3",
+  "everyday-au-9b86448594e8014d805feb46d111007ec9cc5160",
+  "everyday-au-a79ceab69fccfc40354bfbf2761730c4ba847c4d",
+  "everyday-au-aee1a2224208db6e248ca81b8823d1cf179ce768",
+  "everyday-au-e02d7d11cc7b4d4fba2aa7671e6b0c7d58ff7a4a",
+  "everyday-au-e31d8b14d1e137f255168dd67225336734bfb7a8",
+  "everyday-au-faba65873ed70e414987e2def0149aeb9c8b0b67",
+  "everyday-au-fb57afd9c1cad41fc3bed8cadf672e114be9fce6",
+  "everyday-co-2407",
+  "everyday-co-2419",
+  "everyday-co-2430",
+  "everyday-co-2434",
+  "everyday-co-2435",
+  "everyday-co-2438",
+  "everyday-co-2448",
+  "everyday-co-2452",
+  "everyday-co-2460",
+  "everyday-co-2462",
+  "everyday-co-2472",
+  "everyday-co-2475",
+  "everyday-co-2477",
+  "everyday-co-2479",
+  "everyday-co-2482",
+  "everyday-co-2487",
+  "everyday-co-2500",
+  "everyday-co-2504",
+  "everyday-co-2510",
+  "everyday-co-2513",
+  "everyday-jp-131041900045",
+  "everyday-jp-131041900204",
+  "everyday-jp-131041900236",
+  "everyday-jp-131041900238",
+  "everyday-jp-131041900289",
+  "everyday-jp-131041900398",
+  "everyday-jp-131041900460",
+  "everyday-jp-131041900490",
+  "everyday-jp-131041900502",
+  "everyday-jp-131041900553",
+  "everyday-jp-131041900556",
+  "everyday-jp-131041900607",
+  "everyday-jp-131041900672",
+  "everyday-jp-131041900704",
+  "everyday-jp-131041900738",
+  "everyday-kr-PHMA219763160034021200005",
+  "everyday-kr-PHMA219903220033021200001",
+  "everyday-kr-PHMA220053240033021200004",
+  "everyday-kr-PHMA220073210034021200001",
+  "everyday-kr-PHMA220123220033021200006",
+  "everyday-kr-PHMA220123240033021200001",
+  "everyday-kr-PHMA220203110032021200001",
+  "everyday-kr-PHMA220203220033021200002",
+  "everyday-kr-PHMA220213140033021200001",
+  "everyday-kr-PHMA220213160034021200001",
+  "everyday-kr-PHMA220223090033021200003",
+  "everyday-kr-PHMA220223200033021200001",
+  "everyday-kr-PHMA220223230034021200005",
+  "everyday-mx-1002420",
+  "everyday-mx-10170469",
+  "everyday-mx-10558119",
+  "everyday-mx-10632194",
+  "everyday-mx-11109922",
+  "everyday-mx-6325165",
+  "everyday-mx-6810207",
+  "everyday-mx-7816471",
+  "everyday-mx-793743",
+  "everyday-mx-811127",
+  "everyday-mx-8260289",
+  "everyday-mx-844080",
+  "everyday-mx-857595",
+  "everyday-mx-8652847",
+  "everyday-mx-9509655",
+  "everyday-mx-952818",
+  "everyday-mx-9722871",
+  "everyday-mx-9951898",
+  "everyday-sg-21431",
+  "everyday-tw-Restaurant_395000000A_001057",
+  "everyday-tw-Restaurant_395000000A_001151",
+  "everyday-tw-Restaurant_395000000A_001477",
+  "everyday-tw-Restaurant_395000000A_001489",
+  "everyday-tw-Restaurant_395000000A_001539",
+  "everyday-tw-Restaurant_395000000A_001964",
+  "everyday-tw-Restaurant_395000000A_002003"
+ ],
+ "quarantined_by_country": {
+  "SG": 1,
+  "TW": 7,
+  "KR": 13,
+  "CO": 20,
+  "AU": 18,
+  "JP": 15,
+  "MX": 18
+ }
+}
