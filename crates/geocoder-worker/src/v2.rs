@@ -28,8 +28,8 @@ use crate::places_construction_v1::{
     MAX_PLACES_ROUTING_BYTES, ROUTED_QUERY_TOKEN_CAP,
 };
 use crate::places_pages::{
-    cjk_query_expansion, query_terms, PlaceProjection, PlacesClause, MAX_CATALOG_OBJECT_BYTES,
-    TOKENIZER_VERSION,
+    cjk_query_expansion, fold_for_scoring, query_terms, PlaceProjection, PlacesClause,
+    MAX_CATALOG_OBJECT_BYTES, TOKENIZER_VERSION,
 };
 use crate::reverse_construction_v1::{ReverseFamily, ReverseHit};
 use crate::stac::cache::{CATALOG_CACHE_TTL, IMMUTABLE_CACHE_TTL, TEXT_MEMO_TTL_MS};
@@ -1738,10 +1738,29 @@ fn effective_place_prominence(place: &PlaceProjection) -> f64 {
     }
 }
 
+/// Build the rank-time query for the places lane.
+///
+/// This is the ONLY constructor the places scoring path may use: retrieval
+/// tokenization is NFKD-based (`places_pages::normalized_words`, mirroring the
+/// `nfkd-lower-stripmark-cjk-bigram-v4` build tokenizer), so the rank-time
+/// comparison must fold the query the same way or a record retrieval proved
+/// (`skoda` matches the indexed token of "Škoda") scores `match_quality = 0`
+/// and is floored by the quality gate. The fold runs once per query here, not
+/// once per candidate.
+fn poi_normalized_query(query: &str) -> NormalizedQuery {
+    NormalizedQuery::new(&fold_for_scoring(query))
+}
+
 fn poi_match_quality(primary_name: &str, query: &NormalizedQuery) -> f64 {
-    let quality = geocoder_core::query::match_quality(primary_name, query);
+    // Fold the candidate name with the SAME NFKD scoring fold the query got
+    // in `poi_normalized_query` (once per candidate, reused by both the
+    // ladder and the token comparison below). The core ladder's own
+    // `normalize_for_match` then runs on already-folded text, where it is a
+    // no-op.
+    let folded_name = fold_for_scoring(primary_name);
+    let quality = geocoder_core::query::match_quality(&folded_name, query);
     let query_tokens = query_terms(query.as_str());
-    let name_tokens = query_terms(primary_name);
+    let name_tokens = query_terms(&folded_name);
 
     // The shared ladder intentionally comma-truncates display names. Preserve
     // exact full-name equality at 1.0 while putting comma-qualified names on a
@@ -2721,7 +2740,7 @@ pub(crate) async fn handle_forward(
                 places_prefix_head_fallback = prefix_head_fallback_metadata(&tokens);
             }
         }
-        let normalized = NormalizedQuery::new(&effective_query);
+        let normalized = poi_normalized_query(&effective_query);
         let normalized = (!normalized.is_empty()).then_some(normalized);
         ranked.extend(
             places
@@ -2966,7 +2985,8 @@ pub(crate) async fn handle_id(
 #[cfg(test)]
 mod seam_tests {
     use super::{
-        effective_place_prominence, place_score, poi_match_quality, NormalizedQuery, POI_PRIOR_CAP,
+        effective_place_prominence, place_score, poi_match_quality, poi_normalized_query,
+        NormalizedQuery, POI_PRIOR_CAP,
     };
     use crate::places_pages::PlaceProjection;
 
@@ -3073,6 +3093,195 @@ mod seam_tests {
 
         assert!(exact_entity > foundation);
         assert!(exact_entity < 0.8);
+    }
+
+    /// Retrieval tokenization is NFKD (build tokenizer
+    /// `nfkd-lower-stripmark-cjk-bigram-v4`, mirrored by
+    /// `places_pages::normalized_words`), so `skoda` retrieves "Škoda Muzeum".
+    /// Rank-time match quality must agree, or the retrieved record scores 0
+    /// and is floored. Czech/Polish/Turkish exact hits were structurally
+    /// unable to rank before the scoring fold matched retrieval.
+    #[test]
+    fn nfkd_scoring_parity_ascii_query_scores_diacritic_name_exact() {
+        let cases = [
+            // Czech: š decomposes under NFKD.
+            ("Škoda Muzeum", "skoda muzeum"),
+            // Polish: ó/ź decompose; ł is stroked (non-decomposable) and is
+            // folded by the explicit one-to-one scoring fold.
+            ("Łódź Kaliska", "lodz kaliska"),
+            // Turkish İ: NFKD → I + combining dot above → lowercase i.
+            ("İstanbul Modern", "istanbul modern"),
+            // Turkish dotless ı: non-decomposable, explicit one-to-one fold.
+            ("Kızılay Meydanı", "kizilay meydani"),
+            // Romanian ţ and Hungarian ő decompose under NFKD.
+            ("Piaţa Unirii", "piata unirii"),
+            ("Hősök tere", "hosok tere"),
+        ];
+        for (name, query) in cases {
+            let quality = poi_match_quality(name, &poi_normalized_query(query));
+            assert_eq!(
+                quality, 1.0,
+                "{query:?} is an exact NFKD hit on {name:?} and must score 1.0, got {quality}"
+            );
+        }
+    }
+
+    /// Folding the query is as important as folding the candidate: users may
+    /// type the native spelling as well as its ASCII approximation. If
+    /// `poi_normalized_query` regresses to a bare `NormalizedQuery`, the name
+    /// side remains folded and these exact self-matches fall to zero.
+    #[test]
+    fn nfkd_scoring_parity_preserves_native_query_spellings() {
+        for name in [
+            "Škoda Muzeum",
+            "Łódź Kaliska",
+            "Kızılay Meydanı",
+            "Hősök tere",
+            "Piaţa Unirii",
+        ] {
+            let quality = poi_match_quality(name, &poi_normalized_query(name));
+            assert_eq!(quality, 1.0, "native query {name:?} scored {quality}");
+        }
+    }
+
+    /// NFKD maps several compatibility comma forms to ASCII `,`, but ASCII
+    /// comma is syntax to the scoring ladder: it truncates both a
+    /// `NormalizedQuery` and a candidate name. The scoring fold guards those
+    /// compatibility forms so it cannot invent a truncation point that the
+    /// raw text did not contain.
+    #[test]
+    fn compatibility_commas_do_not_truncate_places_scoring() {
+        for comma in ['\u{fe10}', '\u{fe50}', '\u{ff0c}'] {
+            let name = format!("東京{comma}渋谷店");
+            let query = poi_normalized_query(&name);
+            assert!(!query.is_empty(), "compatibility comma emptied {name:?}");
+            assert_eq!(poi_match_quality(&name, &query), 1.0, "{name:?}");
+
+            let leading = poi_normalized_query(&format!("{comma}東京"));
+            assert!(
+                !leading.is_empty(),
+                "leading compatibility comma collapsed the places lane"
+            );
+        }
+    }
+
+    /// The build/query tokenizer folds Greek final sigma to ordinary sigma.
+    /// Scoring must do the same on both sides of the comparison.
+    #[test]
+    fn scoring_fold_preserves_final_sigma_parity() {
+        let quality = poi_match_quality("ΟΣ", &poi_normalized_query("ος"));
+        assert_eq!(quality, 1.0);
+    }
+
+    /// Lowercasing and combining-mark removal are explicit stages of the
+    /// tokenizer contract. U+0130 exercises both and must end as one `i`, not
+    /// an `i` followed by a combining dot.
+    #[test]
+    fn scoring_fold_strips_marks_from_lowercase_output() {
+        assert_eq!(super::fold_for_scoring("İ"), "i");
+    }
+
+    /// Real `names.primary` values from the production corpus (2026-06-17.0,
+    /// pulled 2026-08-06), one per newly-covered character class, paired with
+    /// the ASCII spelling a user actually types. Every pair is a full-name
+    /// query, so parity means exactly 1.0 — before the fix each scored 0 and
+    /// was floored by the `quality > 0.0` gate. 2,612,396 corpus records
+    /// (3.45%) contain at least one character in this class.
+    #[test]
+    fn corpus_names_with_nfkd_only_characters_score_for_ascii_queries() {
+        let cases = [
+            ("Marković Winery and Estate", "markovic winery and estate"), // ć
+            ("Kovačić Renting", "kovacic renting"),                       // č
+            ("Kaple Tří králů", "kaple tri kralu"),                       // ř, í, ů
+            ("Małgorzata Sikora", "malgorzata sikora"),                   // ł
+            ("Radio Na Góralską Nutę", "radio na goralska nute"),         // ą, ę
+            ("Gia đình Nazareth", "gia dinh nazareth"),                   // đ, ì
+            ("Turunç Pınarı Koyu", "turunc pinari koyu"),                 // ı
+            ("İsmailin Yeri", "ismailin yeri"),                           // İ
+            ("Parcul Naţional Zion", "parcul national zion"),             // ţ
+            ("Orașul Artelor și Științei", "orasul artelor si stiintei"), // ș, ț
+            ("Gerincjóga Győr", "gerincjoga gyor"),                       // ő
+            ("Sanela Kanjiža Real Estate", "sanela kanjiza real estate"), // ž
+            ("Nutricionista Juraj Botoš", "nutricionista juraj botos"),   // š
+            ("Uterqűe Main Office", "uterque main office"),               // ű
+            ("Dubaj Letiště", "dubaj letiste"),                           // ě
+        ];
+        for (name, query) in cases {
+            let quality = poi_match_quality(name, &poi_normalized_query(query));
+            assert!(quality > 0.0, "{name:?} floored for {query:?}");
+            assert_eq!(
+                quality, 1.0,
+                "{query:?} is the full ASCII spelling of {name:?}, got {quality}"
+            );
+        }
+        // The lower ladder rungs work through the fold too: a single-word
+        // ASCII query is a word-boundary prefix of the folded name.
+        let quality = poi_match_quality("Małgorzata Sikora", &poi_normalized_query("malgorzata"));
+        assert_eq!(quality, 0.9);
+    }
+
+    /// Control: the small Western-European fold table already handled é-class
+    /// names. That behavior must hold before AND after the NFKD parity fix.
+    #[test]
+    fn western_european_diacritics_already_scored_and_still_do() {
+        for (name, query) in [
+            ("Café de Flore", "cafe de flore"),
+            ("Zürich Hauptbahnhof", "zurich hauptbahnhof"),
+            ("São Paulo Fan Fest", "sao paulo fan fest"),
+        ] {
+            let quality = poi_match_quality(name, &poi_normalized_query(query));
+            assert_eq!(quality, 1.0, "{name:?} vs {query:?} scored {quality}");
+        }
+    }
+
+    /// The query-side scoring fold must be identity on ASCII: with the same
+    /// name-side fold used by both calls, every rung produces the same value
+    /// through `poi_normalized_query` as through a bare `NormalizedQuery`.
+    /// This pins the query seam; the non-ASCII tests above pin the name seam.
+    #[test]
+    fn nfkd_scoring_fold_is_identity_on_ascii() {
+        let names = [
+            "Seattle",
+            "Seattle Bank",
+            "The UPS Store",
+            "Taj Mahal",
+            "Taj Mahal, Agra, India",
+            "SickKids",
+            "SickKids Foundation",
+            "Eiffel Tower",
+            "Hotel Eiffel Blomet",
+            "Space Needle",
+            "McDonald's",
+            "H&M",
+            "Big Ben",
+            "Paris Township",
+            "Parisville",
+            "Paradise",
+            "1st Avenue Deli",
+        ];
+        let queries = [
+            "Seattle",
+            "seattle bank",
+            "Taj Mahal",
+            "SickKids Toronto",
+            "Eiffel Tower",
+            "space needle",
+            "mcdonalds",
+            "h and m",
+            "big ben london",
+            "paris",
+            "1st avenue",
+        ];
+        for name in names {
+            for query in queries {
+                let through_fold = poi_match_quality(name, &poi_normalized_query(query));
+                let bare = poi_match_quality(name, &NormalizedQuery::new(query));
+                assert_eq!(
+                    through_fold, bare,
+                    "ASCII identity violated for name {name:?} query {query:?}"
+                );
+            }
+        }
     }
 
     #[test]
