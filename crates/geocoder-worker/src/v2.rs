@@ -21,11 +21,11 @@ use crate::address_construction_v1::{
 use crate::places_construction_v1::{
     compose_entity_phrase_candidates, construction_cell, entity_phrase_key,
     entity_phrase_token_groups, head_shard_id, head_shard_lookup, merge_head_candidates,
-    merge_routed_candidates, prefix_head_fallback_split, record_projection,
-    retain_records_proving_dropped_tokens, retain_records_proving_query_run, routed_fetch_plan,
-    supports_places_construction_format, validate_entity_phrase_records, HeadRoutingManifest,
-    PlacesRouting, HEAD_QUERY_TOKEN_CAP, MAX_HEAD_SHARD_BYTES, MAX_PLACES_HEAD_ROUTING_BYTES,
-    MAX_PLACES_ROUTING_BYTES, ROUTED_QUERY_TOKEN_CAP,
+    merge_routed_candidates, neighbor_construction_cells, prefix_head_fallback_split,
+    record_projection, retain_records_proving_dropped_tokens, retain_records_proving_query_run,
+    routed_fetch_plan, supports_places_construction_format, validate_entity_phrase_records,
+    HeadRoutingManifest, PlacesRouting, HEAD_QUERY_TOKEN_CAP, MAX_HEAD_SHARD_BYTES,
+    MAX_PLACES_HEAD_ROUTING_BYTES, MAX_PLACES_ROUTING_BYTES, ROUTED_QUERY_TOKEN_CAP,
 };
 use crate::places_pages::{
     cjk_query_expansion, fold_for_scoring, query_terms, PlaceProjection, PlacesClause,
@@ -1671,6 +1671,55 @@ fn division_feature(result: &geocoder_core::GeocoderResult) -> (f64, Value) {
     )
 }
 
+/// The proximity-aware division/POI seam.
+///
+/// The live defect: `q=McDonald's&proximity=<Times Square>` ranked McDonald
+/// County, MO (relevance 0.5749) above every actual McDonald's (0.5199),
+/// because the division lane ignores proximity entirely in the cross-lane
+/// merge. When the user has stated a location, a division a continent away
+/// with no distance relevance should not outrank an exact-name POI nearby.
+///
+/// This is deliberately narrow so the measured division/POI seam calibration
+/// (t@1 0.261 -> 0.587) cannot move. The demotion fires only when all three
+/// conditions hold:
+///
+/// - the request carries EXPLICIT proximity (never CF-IP inference, never
+///   locality-inference centroids -- those set no `division_distance_km`);
+/// - the division sits beyond [`DIVISION_PROXIMITY_RELEVANCE_KM`] of the bias
+///   point (a user in a city is tens of km from its centroid; McDonald
+///   County was 1,700 km away);
+/// - the POI lane produced at least one exact-name match within that same
+///   proximity-relevance radius. A global-head fall-through result elsewhere
+///   on the planet must not demote a nearer division.
+///
+/// Every no-proximity query -- the entire calibrated seam -- takes the 1.0
+/// path unchanged, and strong divisions survive the demotion anyway: a big
+/// city at 0.84 demoted to ~0.71 still beats every non-prominent exact POI
+/// (<= ~0.54), while a thin homonym county at 0.57 drops below it.
+const DIVISION_PROXIMITY_RELEVANCE_KM: f64 = 100.0;
+const DIVISION_PROXIMITY_DEMOTION: f64 = 0.85;
+
+/// `poi_match_quality` at or above this counts as an exact-name POI for the
+/// seam: 1.0 is byte-exact, 0.97 is the comma-truncated display of the same
+/// exact name.
+const EXACT_POI_NAME_QUALITY: f64 = 0.97;
+
+/// The multiplier the division lane's score takes in the cross-lane merge.
+fn division_proximity_demotion(
+    division_distance_km: Option<f64>,
+    nearest_exact_named_poi_distance_km: Option<f64>,
+) -> f64 {
+    match (division_distance_km, nearest_exact_named_poi_distance_km) {
+        (Some(division_distance), Some(poi_distance))
+            if division_distance > DIVISION_PROXIMITY_RELEVANCE_KM
+                && poi_distance <= DIVISION_PROXIMITY_RELEVANCE_KM =>
+        {
+            DIVISION_PROXIMITY_DEMOTION
+        }
+        _ => 1.0,
+    }
+}
+
 /// Ceiling on what a POI's static prior may contribute, before the shared /2.
 ///
 /// Overture's per-place `confidence` is an EXISTENCE signal, not a prominence
@@ -1678,11 +1727,12 @@ fn division_feature(result: &geocoder_core::GeocoderResult) -> (f64, Value) {
 /// why `q=Seattle` returned ten chain stores at relevance 1.0 with the city
 /// absent entirely.
 ///
-/// The value is derived, not chosen. `match_quality` is a ladder whose closest
-/// rungs are 0.05 apart (1.0 exact, 0.95 whole-word, 0.9 word-boundary prefix,
-/// 0.85 alt-name prefix, 0.8 bare prefix). For confidence to order ties without
-/// ever overturning a better text match, its maximum contribution
-/// `0.5 * POI_PRIOR_CAP` must stay under that gap: 0.5 * 0.08 = 0.04 < 0.05.
+/// The value is derived, not chosen. The current places ladder is 1.0 exact,
+/// 0.97 comma-qualified full name, 0.9 whole-word, then 0.8 prefix. The
+/// binding semantic gap is 0.07, so confidence can order ties without
+/// overturning that step: 0.5 * 0.08 = 0.04 < 0.07. It may cross the narrower
+/// 0.03 exact/comma sub-rung, where other relevance is intentionally allowed
+/// to order two renderings of the same full name.
 ///
 /// The design note in `2026-07-31-search-quality-and-street-layer.md` proposed
 /// "capped ~0.4"; that would contribute up to 0.2 and let a confident prefix
@@ -1693,6 +1743,42 @@ fn division_feature(result: &geocoder_core::GeocoderResult) -> (f64, Value) {
 /// IS a calibrated prominence signal (Wikidata, type prior, damped population)
 /// and is supposed to separate Paris, France from Paris, Texas.
 const POI_PRIOR_CAP: f64 = 0.08;
+
+/// Distance decay band for explicit-proximity ranking, in pre-`/2` quality
+/// units like `POI_PRIOR_CAP`'s `0.5 *` band.
+///
+/// The live defect this exists for: `q=starbucks&proximity=<Times Square>`
+/// returned same-name, same-prior records at 67.0, 38.5, 52.3, 24.1 km in rank
+/// order, because `distance_km` was computed and returned but never ranked on.
+///
+/// The budget follows the exact `POI_PRIOR_CAP` discipline. The current places
+/// ladder is 1.0 exact, 0.97 comma-qualified full name, 0.9 whole-word, then
+/// 0.8 prefix. Everything that is not text quality must stay under the binding
+/// 0.07 semantic gap, so a nearer whole-word match cannot overturn a farther
+/// comma-qualified full-name match. The budget deliberately exceeds the 0.03
+/// exact/comma sub-rung, allowing proximity to choose a nearby qualified
+/// rendering over a far exact rendering. When distance is known the confidence
+/// prior shrinks by
+/// `PROXIMITY_CONFIDENCE_SHRINK` (distance is a real relevance signal under
+/// explicit proximity; confidence is an existence byte), and the two together
+/// stay between those gaps:
+/// `0.03 < 0.0375 + 0.5 * 0.25 * 0.08 = 0.0475 < 0.07`.
+/// Within a rung, the distance band (0.0375) dominates the shrunken
+/// confidence band (0.01), which is what makes "nearer wins" decisive among
+/// near-equal text matches instead of an arbitrary tie.
+const PROXIMITY_DISTANCE_BAND: f64 = 0.0375;
+const PROXIMITY_CONFIDENCE_SHRINK: f64 = 0.25;
+
+/// Half-value distance of the decay: a record this far away keeps half the
+/// band. 2 km is "near me" scale -- city blocks matter, and by ~20 km the
+/// bonus is nearly spent, which matches the proximity lane's own cell radius.
+const PROXIMITY_HALF_DISTANCE_KM: f64 = 2.0;
+
+/// Monotone decay in (0, 1]: 1 at the bias point, 1/2 at
+/// `PROXIMITY_HALF_DISTANCE_KM`, asymptotically 0.
+fn proximity_distance_decay(distance_km: f64) -> f64 {
+    PROXIMITY_HALF_DISTANCE_KM / (PROXIMITY_HALF_DISTANCE_KM + distance_km.max(0.0))
+}
 
 fn primary_category_prior(category: &str) -> Option<f64> {
     Some(match category {
@@ -1807,12 +1893,36 @@ fn place_score(place: &PlaceProjection, query: Option<&NormalizedQuery>) -> f64 
             // wherever no prominence is available (PCSH pages, PLHD0002
             // shards), so this reproduces the measured fix-2 behaviour there
             // exactly rather than silently re-ranking already-published data.
-            let prior = if prominence > 0.0 {
-                prominence
-            } else {
-                POI_PRIOR_CAP * confidence
+            //
+            // `distance_km` is present exactly when a proximity point routed
+            // the lookup. There it joins the sub-rung band: the confidence
+            // prior shrinks so distance dominates it, while calibrated
+            // prominence keeps its full band -- fame still separates the
+            // Casino de Monte-Carlo from a nearby snack bar, but among
+            // near-equal text matches the nearer record now wins
+            // deterministically instead of by producer order.
+            let (prior, distance_component) = match place.distance_km {
+                Some(distance) => {
+                    let prior = if prominence > 0.0 {
+                        prominence
+                    } else {
+                        PROXIMITY_CONFIDENCE_SHRINK * POI_PRIOR_CAP * confidence
+                    };
+                    (
+                        prior,
+                        PROXIMITY_DISTANCE_BAND * proximity_distance_decay(distance),
+                    )
+                }
+                None => {
+                    let prior = if prominence > 0.0 {
+                        prominence
+                    } else {
+                        POI_PRIOR_CAP * confidence
+                    };
+                    (prior, 0.0)
+                }
             };
-            ((quality + 0.5 * prior) / 2.0).clamp(0.0, 1.0)
+            ((quality + 0.5 * prior + distance_component) / 2.0).clamp(0.0, 1.0)
         }
         None => confidence,
     }
@@ -2142,6 +2252,7 @@ async fn search_places_construction(
     entrypoint: &ArtifactIdentity,
     query: &str,
     proximity: Option<(f64, f64)>,
+    proximity_is_explicit: bool,
 ) -> Result<Vec<PlaceProjection>> {
     const SUFFIX: &str = "/routing.json";
     let object_root = entrypoint
@@ -2156,31 +2267,76 @@ async fn search_places_construction(
         .lookup_places_construction_routing(&entrypoint.object_key)
         .await?;
     if let Some((longitude, latitude)) = proximity {
-        let Some(cell) = construction_cell(longitude, latitude) else {
-            return Ok(Vec::new());
-        };
-        let mut records =
-            places_construction_routed_records(loader, object_root, &routing, &cell, &tokens)
-                .await?;
-        // Additive CJK recovery, on an otherwise-empty routed answer only. An
-        // unsegmented CJK query is one word, and the index holds that whole run
-        // only for a record named exactly it; the run's bigrams ARE indexed for
-        // longer names. Re-probe with them, then keep only candidates whose own
-        // stored name carries the run. Bounded by the same four-clause cap, so
-        // this costs at most one extra routed plan and four token reads, and it
-        // can never displace a result the exact clauses produced.
-        if records.is_empty() {
-            if let Some(expansion) = cjk_query_expansion(query, ROUTED_QUERY_TOKEN_CAP) {
-                let candidates = places_construction_routed_records(
+        let mut records = Vec::new();
+        if let Some(cell) = construction_cell(longitude, latitude) {
+            records =
+                places_construction_routed_records(loader, object_root, &routing, &cell, &tokens)
+                    .await?;
+            // Additive CJK recovery, on an otherwise-empty routed answer only. An
+            // unsegmented CJK query is one word, and the index holds that whole run
+            // only for a record named exactly it; the run's bigrams ARE indexed for
+            // longer names. Re-probe with them, then keep only candidates whose own
+            // stored name carries the run. Bounded by the same four-clause cap, so
+            // this costs at most one extra routed plan and four token reads, and it
+            // can never displace a result the exact clauses produced.
+            if records.is_empty() {
+                if let Some(expansion) = cjk_query_expansion(query, ROUTED_QUERY_TOKEN_CAP) {
+                    let candidates = places_construction_routed_records(
+                        loader,
+                        object_root,
+                        &routing,
+                        &cell,
+                        &expansion,
+                    )
+                    .await?;
+                    records = retain_records_proving_query_run(candidates, query);
+                }
+            }
+            // Neighbor-cell probe: a bias point near a cell edge (or in a cell
+            // that answered nothing) also asks the adjacent cell(s). Bounded at
+            // two extra cells, chosen by proximity to the edges; records are
+            // cell-partitioned so the union cannot double-count, but identity
+            // dedup below keeps that a checked property rather than a hope.
+            // For a head-servable query an empty primary routed cell will fall
+            // through to the global head, so do not first spend two
+            // unconditional nearest-neighbor probes. Four-token queries cannot
+            // use the head and retain that bounded rescue path. Ordinary
+            // edge-neighbor probes remain active for every token count.
+            let expand_empty_primary = records.is_empty() && tokens.len() > HEAD_QUERY_TOKEN_CAP;
+            for neighbor in neighbor_construction_cells(longitude, latitude, expand_empty_primary) {
+                let extra = places_construction_routed_records(
                     loader,
                     object_root,
                     &routing,
-                    &cell,
-                    &expansion,
+                    &neighbor,
+                    &tokens,
                 )
                 .await?;
-                records = retain_records_proving_query_run(candidates, query);
+                records.extend(extra);
             }
+            let mut seen = HashSet::new();
+            records.retain(|record| {
+                seen.insert((
+                    record.id.clone(),
+                    record.source_object_index,
+                    record.source_row_group,
+                    record.source_row_index,
+                ))
+            });
+        }
+        // Empty-cell fall-through: explicit proximity biases, it must not
+        // veto. When the routed lane (primary cell, CJK recovery, and neighbor
+        // probes together) yields nothing, answer from the global head exactly
+        // as the no-proximity lane would, with distances attached so the
+        // distance term still orders what comes back. A proximity query for a
+        // distant landmark now answers instead of returning empty.
+        if routed_lane_falls_through_to_head(
+            proximity_is_explicit,
+            records.is_empty(),
+            tokens.len(),
+        ) {
+            records =
+                places_construction_head_records(loader, object_root, &routing, &tokens).await?;
         }
         let mut results: Vec<PlaceProjection> = records.iter().map(record_projection).collect();
         for place in &mut results {
@@ -2198,6 +2354,27 @@ async fn search_places_construction(
     }
     let records = places_construction_head_records(loader, object_root, &routing, &tokens).await?;
     Ok(records.iter().map(record_projection).collect())
+}
+
+/// Whether an empty routed (proximity) answer may be served by the global
+/// head instead. EXPLICIT proximity is a bias, not a hard filter: it must never
+/// turn a query the no-proximity lane could answer into an empty response. The
+/// head keeps its own token cap; wider queries continue to the additive
+/// prefix-head last resort in `handle_forward`.
+///
+/// An INFERRED locality centroid (`proximity_is_explicit` false) is excluded,
+/// and that exclusion is load-bearing rather than cosmetic. The centroid lane
+/// is a routing decision, not a user statement, and `handle_forward`'s bounded
+/// homonym retry reads the routed answer's emptiness as its signal to try the
+/// next locality: falling an empty Rochester, MN through to the global head
+/// would make attempt 0 non-empty, kill the retry, and label a global head
+/// answer as `routing: locality_centroid` for the wrong division.
+fn routed_lane_falls_through_to_head(
+    proximity_is_explicit: bool,
+    routed_is_empty: bool,
+    token_count: usize,
+) -> bool {
+    proximity_is_explicit && routed_is_empty && (1..=HEAD_QUERY_TOKEN_CAP).contains(&token_count)
 }
 
 /// Resolve one routed (proximity) clause set inside `cell`.
@@ -2334,6 +2511,7 @@ async fn search_places_prefix_head_fallback(
     loader: &ShardLoader,
     family: &FamilyReference,
     query: &str,
+    proximity: Option<(f64, f64)>,
 ) -> Result<Vec<PlaceProjection>> {
     if !supports_places_construction_format(&family.versions.format) {
         return Ok(Vec::new());
@@ -2355,7 +2533,20 @@ async fn search_places_prefix_head_fallback(
     let records =
         places_construction_head_records(loader, object_root, &routing, head_tokens).await?;
     let verified = retain_records_proving_dropped_tokens(records, dropped);
-    Ok(verified.iter().map(record_projection).collect())
+    let mut results: Vec<PlaceProjection> = verified.iter().map(record_projection).collect();
+    // When explicit proximity reaches this last resort (its routed lane came
+    // back empty), attach distances so the distance term orders the answer.
+    if let Some((longitude, latitude)) = proximity {
+        for place in &mut results {
+            place.distance_km = Some(haversine_km(
+                latitude,
+                longitude,
+                f64::from(place.latitude),
+                f64::from(place.longitude),
+            ));
+        }
+    }
+    Ok(results)
 }
 
 async fn search_places(
@@ -2363,6 +2554,10 @@ async fn search_places(
     family: &FamilyReference,
     query: &str,
     proximity: Option<(f64, f64)>,
+    // False when `proximity` is an inferred locality centroid rather than a
+    // point the request stated. Only the head fall-through reads it; see
+    // `routed_lane_falls_through_to_head`.
+    proximity_is_explicit: bool,
     autocomplete: bool,
     limit: usize,
 ) -> Result<Vec<PlaceProjection>> {
@@ -2371,7 +2566,14 @@ async fn search_places(
         .get("forward")
         .ok_or_else(|| Error::RustError("v2 Places family omits its forward entrypoint".into()))?;
     if supports_places_construction_format(&family.versions.format) {
-        return search_places_construction(loader, entrypoint, query, proximity).await;
+        return search_places_construction(
+            loader,
+            entrypoint,
+            query,
+            proximity,
+            proximity_is_explicit,
+        )
+        .await;
     }
     const SUFFIX: &str = "/catalog.pcat";
     let object_root = entrypoint
@@ -2625,7 +2827,10 @@ pub(crate) async fn handle_forward(
         .filter(|value| DIVISION_TYPES.contains(&value.as_str()))
         .cloned()
         .collect();
-    let mut ranked = Vec::new();
+    // Division candidates carry their distance from the EXPLICIT proximity
+    // point (None without one) so the proximity-aware seam below can weigh
+    // them against exact-name POIs before the cross-lane merge.
+    let mut division_candidates: Vec<(f64, Value, Option<f64>)> = Vec::new();
     if !division_types.is_empty() {
         let mut user_location = UserLocation::from_request(&req);
         if let Some((longitude, latitude)) = proximity {
@@ -2653,10 +2858,18 @@ pub(crate) async fn handle_forward(
         let search = loader
             .search_version(release.core_version(), &query, &user_location, false)
             .await?;
-        ranked.extend(search.results.iter().map(division_feature));
+        division_candidates.extend(search.results.iter().map(|result| {
+            let (score, feature) = division_feature(result);
+            let distance_km = proximity.map(|(longitude, latitude)| {
+                haversine_km(latitude, longitude, result.lat, result.lon)
+            });
+            (score, feature, distance_km)
+        }));
     }
     let mut places_locality_inference = None;
     let mut places_prefix_head_fallback = None;
+    let mut poi_ranked: Vec<(f64, Value)> = Vec::new();
+    let mut nearest_exact_named_poi_distance_km = None;
     if types.contains("poi") {
         let places_family = release
             .families
@@ -2666,7 +2879,10 @@ pub(crate) async fn handle_forward(
             if params.contains_key("types") {
                 return json_error("capability_unavailable", "Places data is unavailable", 503);
             }
-            let features = ranked.into_iter().map(|(_, feature)| feature).collect();
+            let features = division_candidates
+                .into_iter()
+                .map(|(_, feature, _)| feature)
+                .collect();
             let body = data_version_body(
                 &release.data_version,
                 features,
@@ -2679,6 +2895,7 @@ pub(crate) async fn handle_forward(
             family,
             query.as_str(),
             proximity,
+            true,
             autocomplete,
             limit,
         )
@@ -2708,6 +2925,9 @@ pub(crate) async fn handle_forward(
                 family,
                 &place_query,
                 Some((inference.longitude, inference.latitude)),
+                // An inferred centroid, not a stated point: no head
+                // fall-through, so an empty attempt stays the retry's signal.
+                false,
                 false,
                 limit,
             )
@@ -2726,10 +2946,14 @@ pub(crate) async fn handle_forward(
         // Additive last resort. It runs only when the whole response is still
         // empty -- no division candidate, no POI from the head/phrase lanes, and
         // no locality-inferred routed result -- so it cannot displace, reorder,
-        // or regress anything the ordinary lanes produced.
-        if ranked.is_empty() && places.is_empty() && proximity.is_none() {
+        // or regress anything the ordinary lanes produced. Explicit proximity
+        // no longer vetoes it: a 4-6-token proximity query whose routed lane
+        // (and head fall-through) found nothing deserves the same last-resort
+        // answer a no-proximity query gets, with distances attached.
+        if division_candidates.is_empty() && places.is_empty() {
             let fallback =
-                search_places_prefix_head_fallback(&loader, family, query.as_str()).await?;
+                search_places_prefix_head_fallback(&loader, family, query.as_str(), proximity)
+                    .await?;
             if !fallback.is_empty() {
                 places = fallback;
                 // These results answer the full query and were never routed
@@ -2742,12 +2966,34 @@ pub(crate) async fn handle_forward(
         }
         let normalized = poi_normalized_query(&effective_query);
         let normalized = (!normalized.is_empty()).then_some(normalized);
-        ranked.extend(
+        nearest_exact_named_poi_distance_km = normalized.as_ref().and_then(|query| {
+            places
+                .iter()
+                .filter(|place| poi_match_quality(&place.name, query) >= EXACT_POI_NAME_QUALITY)
+                .filter_map(|place| place.distance_km)
+                .min_by(|left, right| left.total_cmp(right))
+        });
+        poi_ranked.extend(
             places
                 .iter()
                 .map(|place| place_feature(place, normalized.as_ref())),
         );
     }
+    // Cross-lane merge. Divisions keep their calibrated seam score except in
+    // the narrow proximity-aware case `division_proximity_demotion` documents;
+    // they are pushed first so score ties keep the historical division-first
+    // order under the stable sort.
+    let mut ranked: Vec<(f64, Value)> = Vec::new();
+    for (score, mut feature, division_distance_km) in division_candidates {
+        let demotion =
+            division_proximity_demotion(division_distance_km, nearest_exact_named_poi_distance_km);
+        let score = score * demotion;
+        if demotion != 1.0 {
+            feature["properties"]["relevance"] = json!(score);
+        }
+        ranked.push((score, feature));
+    }
+    ranked.extend(poi_ranked);
     ranked.sort_by(|left, right| right.0.total_cmp(&left.0));
     let mut seen = HashSet::new();
     ranked.retain(|(_, feature)| {
@@ -2982,11 +3228,251 @@ pub(crate) async fn handle_id(
     versioned_json_response(&body, &release.data_version, 200)
 }
 
+/// Local before/after evidence for the proximity-lane wave over a real
+/// promoted slice (the Monaco harness output of
+/// `scripts/promote_construction_slice.py`), mirroring
+/// `search_places_construction`'s routed/head flow with filesystem reads in
+/// place of the `ShardLoader`. `#[ignore]`d like the other local-slice
+/// harnesses; drive it with:
+///
+/// `PLACES_PROMOTED_FAMILY_DIR` -- the promoted `.../families/places` dir.
+/// `PROXIMITY_EXPERIMENT_QUERY` -- the query text.
+/// `PROXIMITY_EXPERIMENT_POINT` -- `longitude,latitude` bias point.
+#[cfg(test)]
+mod proximity_experiment {
+    use super::{place_score, NormalizedQuery};
+    use crate::places_construction_v1::{
+        compose_entity_phrase_candidates, construction_cell, entity_phrase_key,
+        entity_phrase_token_groups, head_shard_id, head_shard_lookup, merge_head_candidates,
+        merge_routed_candidates, neighbor_construction_cells, record_projection, routed_fetch_plan,
+        routed_lookup, HeadRoutingManifest, PlacesRouting, PlacesV1Record, HEAD_QUERY_TOKEN_CAP,
+    };
+    use crate::places_pages::{query_terms, PlaceProjection};
+    use std::path::Path;
+
+    fn local_routed_records(
+        root: &Path,
+        routing: &PlacesRouting,
+        cell: &str,
+        tokens: &[String],
+    ) -> Vec<PlacesV1Record> {
+        let Some(plan) = routed_fetch_plan(routing, cell, tokens).expect("tiling holds") else {
+            return Vec::new();
+        };
+        let mut per_token: Vec<Option<Vec<PlacesV1Record>>> =
+            (0..tokens.len()).map(|_| None).collect();
+        for (object, token_indexes) in plan {
+            let bytes = std::fs::read(root.join("objects").join(object)).expect("routed object");
+            for index in token_indexes {
+                let records = routed_lookup(&bytes, cell, &tokens[index]).expect("routed decode");
+                if records.is_empty() {
+                    return Vec::new();
+                }
+                per_token[index] = Some(records);
+            }
+        }
+        let per_token: Vec<_> = per_token.into_iter().map(Option::unwrap).collect();
+        merge_routed_candidates(tokens, per_token).expect("routed merge")
+    }
+
+    fn local_head_records(
+        root: &Path,
+        head: &HeadRoutingManifest,
+        tokens: &[String],
+    ) -> Vec<PlacesV1Record> {
+        if tokens.is_empty() || tokens.len() > HEAD_QUERY_TOKEN_CAP {
+            return Vec::new();
+        }
+        let mut phrase_groups = Vec::new();
+        if head.admits_entity_phrases() {
+            for phrase_tokens in entity_phrase_token_groups(tokens) {
+                let mut phrase_records = Vec::new();
+                if let Some(phrase_key) = entity_phrase_key(phrase_tokens) {
+                    let shard_id = head_shard_id(&phrase_key, head.shard_bits);
+                    if let Some(shard) = head.shard(shard_id) {
+                        let bytes = std::fs::read(root.join("objects").join(&shard.path))
+                            .expect("head shard");
+                        let records =
+                            head_shard_lookup(&bytes, shard_id, head.shard_bits, &phrase_key)
+                                .expect("head decode");
+                        phrase_records =
+                            super::validate_entity_phrase_records(phrase_tokens, records);
+                    }
+                }
+                phrase_groups.push(phrase_records);
+            }
+        }
+        let mut per_token = Vec::with_capacity(tokens.len());
+        let mut ordinary_complete = true;
+        for token in tokens {
+            let shard_id = head_shard_id(token, head.shard_bits);
+            let Some(shard) = head.shard(shard_id) else {
+                ordinary_complete = false;
+                break;
+            };
+            let bytes = std::fs::read(root.join("objects").join(&shard.path)).expect("head shard");
+            let records =
+                head_shard_lookup(&bytes, shard_id, head.shard_bits, token).expect("head decode");
+            if records.is_empty() {
+                ordinary_complete = false;
+                break;
+            }
+            per_token.push(records);
+        }
+        let ordinary = if ordinary_complete {
+            merge_head_candidates(tokens, per_token).expect("head merge")
+        } else {
+            Vec::new()
+        };
+        compose_entity_phrase_candidates(phrase_groups, ordinary).expect("phrase composition")
+    }
+
+    fn projections(
+        records: &[PlacesV1Record],
+        longitude: f64,
+        latitude: f64,
+    ) -> Vec<PlaceProjection> {
+        let mut results: Vec<PlaceProjection> = records.iter().map(record_projection).collect();
+        for place in &mut results {
+            place.distance_km = Some(super::haversine_km(
+                latitude,
+                longitude,
+                f64::from(place.latitude),
+                f64::from(place.longitude),
+            ));
+        }
+        results
+    }
+
+    fn print_ranking(label: &str, places: &[PlaceProjection], query: &NormalizedQuery) {
+        let mut scored: Vec<(f64, &PlaceProjection)> = places
+            .iter()
+            .map(|place| (place_score(place, Some(query)), place))
+            .collect();
+        scored.sort_by(|left, right| right.0.total_cmp(&left.0));
+        println!("== {label}: {} candidates", scored.len());
+        for (rank, (score, place)) in scored.iter().take(10).enumerate() {
+            println!(
+                "  {:>2}. score {:.4}  {:>7.2} km  {}",
+                rank + 1,
+                score,
+                place.distance_km.unwrap_or(f64::NAN),
+                place.name
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "requires a locally promoted slice; driven manually"]
+    fn local_promoted_slice_proximity_experiment() {
+        let root = std::path::PathBuf::from(
+            std::env::var("PLACES_PROMOTED_FAMILY_DIR")
+                .expect("PLACES_PROMOTED_FAMILY_DIR is required"),
+        );
+        let query_text = std::env::var("PROXIMITY_EXPERIMENT_QUERY").expect("query is required");
+        let point = std::env::var("PROXIMITY_EXPERIMENT_POINT").expect("point is required");
+        let (longitude, latitude) = point
+            .split_once(',')
+            .map(|(lon, lat)| {
+                (
+                    lon.trim().parse::<f64>().expect("longitude"),
+                    lat.trim().parse::<f64>().expect("latitude"),
+                )
+            })
+            .expect("point is longitude,latitude");
+        let routing_text =
+            std::fs::read_to_string(root.join("routing.json")).expect("read routing.json");
+        let routing = PlacesRouting::parse(&routing_text).expect("routing parses");
+        let head_text =
+            std::fs::read_to_string(root.join("objects").join(&routing.head.manifest_object))
+                .expect("read head routing manifest");
+        let head = HeadRoutingManifest::parse(&head_text).expect("head manifest parses");
+        assert!(head.agrees_with(&routing.head));
+        let tokens = query_terms(&query_text);
+        // Keep this constructor aligned with the production places scoring
+        // seam. When composed with `places-scoring-nfkd-parity`, this harness
+        // must use that branch's `poi_normalized_query` too.
+        let normalized = NormalizedQuery::new(&query_text);
+        println!(
+            "query {query_text:?} at ({longitude}, {latitude}), tokens {tokens:?}, cell {:?}",
+            construction_cell(longitude, latitude)
+        );
+
+        // BEFORE: one construction cell, no fall-through, no distance term.
+        // The pre-wave score is exactly `place_score` with distance_km None;
+        // the true distance is shown alongside so the arbitrary ordering is
+        // visible for what it is.
+        let before_records = construction_cell(longitude, latitude)
+            .map(|cell| local_routed_records(&root, &routing, &cell, &tokens))
+            .unwrap_or_default();
+        let before = projections(&before_records, longitude, latitude);
+        let mut before_scored: Vec<(f64, &PlaceProjection)> = before
+            .iter()
+            .map(|place| {
+                let mut pre_wave = place.clone();
+                pre_wave.distance_km = None;
+                (place_score(&pre_wave, Some(&normalized)), place)
+            })
+            .collect();
+        before_scored.sort_by(|left, right| right.0.total_cmp(&left.0));
+        println!(
+            "== BEFORE (single cell, no distance term): {} candidates",
+            before_scored.len()
+        );
+        for (rank, (score, place)) in before_scored.iter().take(10).enumerate() {
+            println!(
+                "  {:>2}. score {:.4}  {:>7.2} km  {}",
+                rank + 1,
+                score,
+                place.distance_km.unwrap_or(f64::NAN),
+                place.name
+            );
+        }
+
+        // AFTER: primary cell + neighbor probe + head fall-through, distance
+        // term active.
+        let mut after_records = Vec::new();
+        let mut lane = "routed";
+        if let Some(cell) = construction_cell(longitude, latitude) {
+            after_records = local_routed_records(&root, &routing, &cell, &tokens);
+            let expand_empty_primary =
+                after_records.is_empty() && tokens.len() > super::HEAD_QUERY_TOKEN_CAP;
+            let neighbors = neighbor_construction_cells(longitude, latitude, expand_empty_primary);
+            println!("neighbor cells probed: {neighbors:?}");
+            for neighbor in &neighbors {
+                after_records.extend(local_routed_records(&root, &routing, neighbor, &tokens));
+            }
+            let mut seen = std::collections::HashSet::new();
+            after_records.retain(|record| {
+                seen.insert((
+                    record.id.clone(),
+                    record.source_object_index,
+                    record.source_row_group,
+                    record.source_row_index,
+                ))
+            });
+        }
+        if super::routed_lane_falls_through_to_head(true, after_records.is_empty(), tokens.len()) {
+            lane = "head fall-through";
+            after_records = local_head_records(&root, &head, &tokens);
+        }
+        let after = projections(&after_records, longitude, latitude);
+        println!("lane: {lane}");
+        print_ranking(
+            "AFTER (neighbor probe + fall-through + distance term)",
+            &after,
+            &normalized,
+        );
+    }
+}
+
 #[cfg(test)]
 mod seam_tests {
     use super::{
-        effective_place_prominence, place_score, poi_match_quality, poi_normalized_query,
-        NormalizedQuery, POI_PRIOR_CAP,
+        division_proximity_demotion, effective_place_prominence, place_score, poi_match_quality,
+        poi_normalized_query, routed_lane_falls_through_to_head, NormalizedQuery,
+        DIVISION_PROXIMITY_DEMOTION, POI_PRIOR_CAP, PROXIMITY_CONFIDENCE_SHRINK,
+        PROXIMITY_DISTANCE_BAND,
     };
     use crate::places_pages::PlaceProjection;
 
@@ -3282,6 +3768,203 @@ mod seam_tests {
                 );
             }
         }
+    }
+
+    fn place_at(name: &str, confidence: f32, distance_km: f64) -> PlaceProjection {
+        let mut place = place(name, confidence);
+        place.distance_km = Some(distance_km);
+        place
+    }
+
+    fn prominent_place_at(
+        name: &str,
+        confidence: f32,
+        prominence: f32,
+        distance_km: f64,
+    ) -> PlaceProjection {
+        let mut place = place_at(name, confidence, distance_km);
+        place.prominence = prominence;
+        place
+    }
+
+    /// The live Times Square failure: ten same-name, same-prior Starbucks tied
+    /// on score and ordered arbitrarily at 67.0, 38.5, 52.3, 24.1 km. With a
+    /// distance term, nearer wins deterministically.
+    #[test]
+    fn nearer_wins_decisively_among_equal_text_matches() {
+        let query = NormalizedQuery::new("starbucks");
+        let near = place_score(&place_at("Starbucks", 0.77, 0.5), Some(&query));
+        let far = place_score(&place_at("Starbucks", 0.77, 24.1), Some(&query));
+        assert!(
+            near > far,
+            "equal text matches must order by distance: near {near} vs far {far}"
+        );
+    }
+
+    /// Confidence is an existence byte; under explicit proximity it must not
+    /// outvote distance among same-name records. The shrink guarantees the
+    /// distance band (0.0375) dominates the confidence band (0.01).
+    #[test]
+    fn distance_outvotes_confidence_noise_among_same_names() {
+        let query = NormalizedQuery::new("starbucks");
+        let near_low_confidence = place_score(&place_at("Starbucks", 0.0, 0.5), Some(&query));
+        let far_high_confidence = place_score(&place_at("Starbucks", 1.0, 24.1), Some(&query));
+        assert!(
+            near_low_confidence > far_high_confidence,
+            "a nearby record must beat a distant one regardless of confidence: \
+             {near_low_confidence} vs {far_high_confidence}"
+        );
+        let sub_rung_budget =
+            PROXIMITY_DISTANCE_BAND + 0.5 * PROXIMITY_CONFIDENCE_SHRINK * POI_PRIOR_CAP;
+        assert!(
+            sub_rung_budget > 0.03 && sub_rung_budget < 0.07,
+            "the sub-rung budget ({sub_rung_budget}) must cross only the 0.03 comma sub-rung"
+        );
+    }
+
+    /// The POI_PRIOR_CAP discipline extends to distance: the whole non-text
+    /// band stays under the binding 0.07 gap between a comma-qualified full
+    /// name and a whole-word match.
+    #[test]
+    fn a_distance_bonus_cannot_overturn_a_match_quality_step() {
+        let query = NormalizedQuery::new("Taj Mahal");
+        let qualified_far = place_score(&place_at("Taj Mahal, Agra", 0.0, 1000.0), Some(&query));
+        let whole_word_at_zero = place_score(&place_at("Taj Mahal Hotel", 1.0, 0.0), Some(&query));
+        assert_eq!(poi_match_quality("Taj Mahal, Agra", &query), 0.97);
+        assert_eq!(poi_match_quality("Taj Mahal Hotel", &query), 0.9);
+        assert!(
+            qualified_far > whole_word_at_zero,
+            "a qualified full-name match must survive the maximum bonus a whole-word match earns: \
+             {qualified_far} vs {whole_word_at_zero}"
+        );
+    }
+
+    /// The distance budget intentionally crosses the 0.03 exact/comma
+    /// sub-rung: explicit proximity may prefer a nearby qualified rendering of
+    /// the same name over an exact rendering hundreds of kilometres away.
+    #[test]
+    fn proximity_can_cross_the_exact_comma_sub_rung() {
+        let query = NormalizedQuery::new("Taj Mahal");
+        let exact_far = place_score(&place_at("Taj Mahal", 0.0, 500.0), Some(&query));
+        let qualified_near = place_score(&place_at("Taj Mahal, Agra", 0.0, 0.0), Some(&query));
+        assert!(qualified_near > exact_far);
+    }
+
+    /// Calibrated prominence deliberately keeps its full band. This residual
+    /// is pre-existing and documented: at the current constants a same-name
+    /// sibling with prominence 0.08 can narrowly beat a much nearer sibling
+    /// with no prominence. The proximity wave narrows, but does not eliminate,
+    /// that fame-versus-distance tradeoff.
+    #[test]
+    fn calibrated_prominence_can_still_outvote_distance_among_siblings() {
+        let query = NormalizedQuery::new("starbucks");
+        let near = place_score(&place_at("Starbucks", 0.77, 0.5), Some(&query));
+        let far_prominent = place_score(
+            &prominent_place_at("Starbucks", 0.77, 0.08, 67.0),
+            Some(&query),
+        );
+        assert!(far_prominent > near);
+    }
+
+    /// Without a distance (every no-proximity query), the score is
+    /// byte-identical to the pre-wave formula -- the calibrated seam and all
+    /// pinned bands above rest on this.
+    #[test]
+    fn scores_without_distance_are_the_pre_wave_scores() {
+        let query = NormalizedQuery::new("Seattle");
+        let exact = place_score(&place("Seattle", 1.0), Some(&query));
+        assert!((exact - (1.0 + 0.5 * POI_PRIOR_CAP) / 2.0).abs() < 1e-9);
+        let unrelated = place_score(&place("The UPS Store", 1.0), Some(&query));
+        assert!((unrelated - 0.5 * POI_PRIOR_CAP / 2.0).abs() < 1e-9);
+    }
+
+    /// Explicit proximity is a bias, never a veto: an empty routed answer for
+    /// a head-servable query falls through to the head; wider queries are left
+    /// to the additive prefix-head last resort; a non-empty routed answer is
+    /// authoritative.
+    #[test]
+    fn empty_routed_lane_falls_through_only_for_head_servable_queries() {
+        assert!(routed_lane_falls_through_to_head(true, true, 1));
+        assert!(routed_lane_falls_through_to_head(true, true, 3));
+        assert!(!routed_lane_falls_through_to_head(true, true, 4));
+        assert!(!routed_lane_falls_through_to_head(true, false, 2));
+    }
+
+    /// An INFERRED locality centroid never falls through. `handle_forward`'s
+    /// bounded homonym retry reads an empty routed attempt as "try the next
+    /// locality"; a global-head answer there would end the retry at attempt 0
+    /// and be reported as `routing: locality_centroid` for the wrong division.
+    #[test]
+    fn an_inferred_locality_centroid_never_falls_through_to_the_head() {
+        for token_count in 1..=3 {
+            assert!(!routed_lane_falls_through_to_head(false, true, token_count));
+            assert!(routed_lane_falls_through_to_head(true, true, token_count));
+        }
+    }
+
+    /// The demotion is deliberately narrow: it needs explicit proximity, a
+    /// division beyond distance relevance, AND an exact-name POI to weigh it
+    /// against. Everything else -- the whole calibrated no-proximity seam --
+    /// keeps its score to the last bit.
+    #[test]
+    fn the_division_demotion_fires_only_with_all_three_conditions() {
+        assert_eq!(division_proximity_demotion(None, Some(20.0)), 1.0);
+        assert_eq!(division_proximity_demotion(Some(20.0), Some(20.0)), 1.0);
+        assert_eq!(division_proximity_demotion(Some(1700.0), None), 1.0);
+        assert_eq!(division_proximity_demotion(Some(1700.0), Some(1200.0)), 1.0);
+        assert_eq!(
+            division_proximity_demotion(Some(1700.0), Some(20.0)),
+            DIVISION_PROXIMITY_DEMOTION
+        );
+    }
+
+    /// A global-head fall-through can surface an exact-name POI anywhere on
+    /// Earth. That distant POI must not trigger demotion of a division that is
+    /// itself nearer to the stated bias point (the Springfield-shaped
+    /// interaction found in review).
+    #[test]
+    fn a_far_head_poi_does_not_demote_a_nearer_division() {
+        assert_eq!(division_proximity_demotion(Some(200.0), Some(1300.0)), 1.0);
+    }
+
+    /// The division demotion is intentionally a hard relevance-radius rule.
+    /// Pin its current division-vs-division consequence so a future smoothing
+    /// change is measured rather than accidental.
+    #[test]
+    fn division_demotion_radius_can_reorder_nearby_division_scores() {
+        let nearby_exact_poi = Some(1.0);
+        let inside = 0.57 * division_proximity_demotion(Some(99.0), nearby_exact_poi);
+        let outside = 0.60 * division_proximity_demotion(Some(101.0), nearby_exact_poi);
+        assert!(inside > outside);
+    }
+
+    /// The live McDonald defect, in the live numbers: McDonald County, MO
+    /// (relevance 0.5749, 1,700 km from Times Square) outranked every actual
+    /// McDonald's (0.5199). Demoted, the county drops below the POI; a major
+    /// city inside the relevance radius is untouched and still wins.
+    #[test]
+    fn a_distant_homonym_division_no_longer_beats_a_nearby_exact_poi() {
+        const COUNTY_SCORE: f64 = 0.5749;
+        const POI_SCORE: f64 = 0.5199;
+        let (county, poi) = (COUNTY_SCORE, POI_SCORE);
+        assert!(county > poi, "the pre-wave defect");
+        let demoted = COUNTY_SCORE * division_proximity_demotion(Some(1700.0), Some(24.1));
+        assert!(
+            demoted < POI_SCORE,
+            "the demoted county ({demoted}) must rank below the exact-name POI ({POI_SCORE})"
+        );
+        // A big city queried by its own name with proximity inside it keeps
+        // its score entirely...
+        let city = SEATTLE_DIVISION_SCORE * division_proximity_demotion(Some(15.0), Some(0.5));
+        assert_eq!(city, SEATTLE_DIVISION_SCORE);
+        // ...and even a big city OUTSIDE the radius still beats the strongest
+        // non-prominent exact-name POI after demotion, so `q=chicago` with
+        // NYC proximity cannot surface a pizza joint above the city.
+        let distant_city =
+            SEATTLE_DIVISION_SCORE * division_proximity_demotion(Some(1200.0), Some(0.5));
+        let query = NormalizedQuery::new("Seattle");
+        let strongest_nearby_poi = place_score(&place_at("Seattle", 1.0, 0.0), Some(&query));
+        assert!(distant_city > strongest_nearby_poi);
     }
 
     #[test]
