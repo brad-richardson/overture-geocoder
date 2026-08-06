@@ -3240,7 +3240,7 @@ pub(crate) async fn handle_id(
 /// `PROXIMITY_EXPERIMENT_POINT` -- `longitude,latitude` bias point.
 #[cfg(test)]
 mod proximity_experiment {
-    use super::{place_score, NormalizedQuery};
+    use super::{place_score, poi_normalized_query, NormalizedQuery};
     use crate::places_construction_v1::{
         compose_entity_phrase_candidates, construction_cell, entity_phrase_key,
         entity_phrase_token_groups, head_shard_id, head_shard_lookup, merge_head_candidates,
@@ -3390,9 +3390,8 @@ mod proximity_experiment {
         assert!(head.agrees_with(&routing.head));
         let tokens = query_terms(&query_text);
         // Keep this constructor aligned with the production places scoring
-        // seam. When composed with `places-scoring-nfkd-parity`, this harness
-        // must use that branch's `poi_normalized_query` too.
-        let normalized = NormalizedQuery::new(&query_text);
+        // seam so non-ASCII local evidence uses the retrieval-compatible fold.
+        let normalized = poi_normalized_query(&query_text);
         println!(
             "query {query_text:?} at ({longitude}, {latitude}), tokens {tokens:?}, cell {:?}",
             construction_cell(longitude, latitude)
