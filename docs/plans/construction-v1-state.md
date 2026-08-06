@@ -1,13 +1,13 @@
 # construction-v1: current state
 
-Last updated 2026-08-04 after the accepted v4 candidate was published and
-promoted to production without dropping any live operation. Build
-`2026-08-03.0` now serves the bounded phrase-admission result; the catalog CAS,
-all six forward/reverse production smokes, and independent live phrase and
-reverse probes passed. It also incorporates the independent correctness audit,
-fresh v4 formal evidence, sidecar Phase 0's cross-release identity measurement,
-completion of the 200-case everyday-POI tripwire, and its current-OSM presence
-control.
+Last updated 2026-08-06 after the Worker-only proximity wave was deployed,
+measured, corrected for one locality-inference regression, and accepted. Build
+`2026-08-03.0` still serves the bounded phrase-admission data; Worker commit
+`00bc46c` now serves the proximity result recorded below. It also incorporates
+the independent correctness audit, fresh v4 formal evidence, sidecar Phase 0's
+cross-release identity measurement, completion of the 200-case everyday-POI
+tripwire and its current-OSM presence control, and the new proximity/variant
+strata.
 Read, in order: "Planet Places rebuild and promotion, 2026-08-02", "Head
 saturated-posting correction, 2026-08-02", "RC3 and remaining admission split,
 2026-08-02", "First RC3 live result and locality interaction, 2026-08-02",
@@ -153,6 +153,31 @@ localities: `Monte Carlo` / `Monte-Carlo` misses the Monaco division under
 both spellings while returning a 9,351 km POI; `Opa locka` retrieves its
 locality at rank 9 versus rank 1 for `Opa-locka`. This is evidence of a ranking
 effect, but the current small mixed stratum is not suitable for a global rate.
+
+**2026-08-06 WORKER PROXIMITY RESULT.** The Worker-only proximity wave is live
+from merged `main` commit `00bc46c` (Cloudflare Worker version
+`4d82dbd8-f2c7-4138-97a5-36eaa8d64844`); the v2 data build remains
+`2026-08-03.0`. Final evidence is
+`benchmarks/2026-08-06-proximity-variant-post-worker-00bc46c.json`.
+Against the frozen 40-case baseline, a chain-name match within 2 km moved
+**3 -> 28 at rank 1 and 22 -> 40 at rank 10**, with zero empty responses.
+Median top-1 distance fell **8.771 -> 0.817 km** and the maximum fell
+**8,356.476 -> 28.827 km**. The 22-case variant/control diagnostic is unchanged
+(12 controls and 6 typed variants at rank 10), as expected for index-time
+tokenizer gaps rather than Worker scoring/retrieval fixes.
+
+The first deployment exposed one locality-inference regression before the
+larger gate was allowed to proceed: neighbor-cell expansion also ran for an
+internally inferred centroid and pushed `Plaza Hotel New York` beyond the
+ten-result cap. PR #256 restricted neighbor probes to explicit user proximity;
+independent review, full Rust fmt/clippy/tests, wasm32 compilation, a release
+Worker build, and post-deploy smoke all passed. The corrected 55-case exact-ID
+gold run is unchanged at **31/55 rank 1 and 40/55 rank 10**, and the 200-case
+everyday tripwire is unchanged at **69/200 rank 1 and 70/200 rank 10**, both
+with zero errors and no threshold regressions. Everyday top-1 type composition
+improved 0.465 -> 0.475 and type starvation fell 107 -> 105. Evidence is
+`benchmarks/2026-08-06-forward-gold-post-worker-00bc46c.json` and
+`benchmarks/2026-08-06-everyday-poi-post-worker-00bc46c.json`.
 
 The justification is measured, not aesthetic. Against the build promoted today:
 
