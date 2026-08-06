@@ -811,6 +811,77 @@ pub(crate) fn construction_cell(longitude: f64, latitude: f64) -> Option<String>
     Some(format!("{y:02x}{x:02x}"))
 }
 
+/// How close (as a fraction of the cell span) the bias point must sit to a
+/// cell edge before the adjacent cell is probed. A level-4 cell spans 1.40625
+/// degrees of longitude, so 0.2 is roughly 22 km at mid latitudes -- the range
+/// inside which "near me" results plausibly live across the edge.
+const NEIGHBOR_CELL_EDGE_FRACTION: f64 = 0.2;
+
+/// The bounded set of adjacent construction cells worth probing for one
+/// proximity query: at most one east/west neighbor plus one north/south
+/// neighbor (never a diagonal), so the routed lane's fetch fan-out grows by at
+/// most two cells.
+///
+/// A proximity user standing meters from a cell edge could previously not see
+/// across it at all -- the routed lane served exactly one cell. An axis
+/// contributes its neighbor when the point sits within
+/// [`NEIGHBOR_CELL_EDGE_FRACTION`] of that edge, or -- when the primary cell
+/// produced nothing (`primary_is_empty`) -- unconditionally, choosing the
+/// nearer side. Longitude wraps across the antimeridian; latitude clamps at
+/// the grid rim, matching [`point_quadkey`]'s own clamp.
+pub(crate) fn neighbor_construction_cells(
+    longitude: f64,
+    latitude: f64,
+    primary_is_empty: bool,
+) -> Vec<String> {
+    if !(-180.0..=180.0).contains(&longitude) || !(-90.0..=90.0).contains(&latitude) {
+        return Vec::new();
+    }
+    let grid = f64::from(1_u32 << 8);
+    // The exact floor-and-clamp `point_quadkey` performs, so the fractional
+    // offsets below are measured inside the same cell `construction_cell`
+    // derives for this point.
+    let position = |value: f64| -> (u32, f64) {
+        let scaled = value * grid;
+        let index = (scaled.floor() as i64).clamp(0, 255) as u32;
+        (index, (scaled - f64::from(index)).clamp(0.0, 1.0))
+    };
+    let (x, fraction_x) = position((longitude + 180.0) / 360.0);
+    let (y, fraction_y) = position((latitude + 90.0) / 180.0);
+    let axis_neighbor = |fraction: f64| -> Option<i32> {
+        if fraction < NEIGHBOR_CELL_EDGE_FRACTION {
+            Some(-1)
+        } else if fraction > 1.0 - NEIGHBOR_CELL_EDGE_FRACTION {
+            Some(1)
+        } else if primary_is_empty {
+            Some(if fraction < 0.5 { -1 } else { 1 })
+        } else {
+            None
+        }
+    };
+    let mut neighbors = Vec::new();
+    if let Some(step) = axis_neighbor(fraction_x) {
+        // Longitude wraps: cell x 0 and x 255 are adjacent across the
+        // antimeridian.
+        let neighbor_x = (i64::from(x) + i64::from(step)).rem_euclid(256) as u32;
+        neighbors.push(format!("{y:02x}{neighbor_x:02x}"));
+    }
+    if let Some(step) = axis_neighbor(fraction_y) {
+        // Latitude does not wrap. If an EMPTY polar-rim cell first points
+        // outward, fall back to the only real neighbor (inward); otherwise an
+        // empty cell above about 89.6 degrees would lose its latitude rescue
+        // entirely.
+        let mut neighbor_y = i64::from(y) + i64::from(step);
+        if !(0..256).contains(&neighbor_y) && primary_is_empty {
+            neighbor_y = if y == 0 { 1 } else { 254 };
+        }
+        if (0..256).contains(&neighbor_y) {
+            neighbors.push(format!("{neighbor_y:02x}{x:02x}"));
+        }
+    }
+    neighbors
+}
+
 fn valid_sha256_hex(value: &str) -> bool {
     value.len() == 64
         && value
@@ -1839,13 +1910,14 @@ mod tests {
         compose_entity_phrase_candidates, construction_cell, decode_routed_range_payload,
         entity_phrase_key, entity_phrase_token_groups, head_shard_id, head_shard_lookup,
         index_hash, lookup_head_shard, merge_head_candidates, merge_routed_candidates,
-        parse_routed_range_header, parse_routed_range_index, prefix_head_fallback_split, query_key,
-        ranged_index_candidates, record_projection, retain_records_proving_dropped_tokens,
-        retain_records_proving_query_run, routed_fetch_plan, routed_lookup, routed_token_hash,
-        validate_entity_phrase_records, validate_routed_range_payload_extent, HeadRoutingManifest,
-        PlacesRouting, PlacesV1Artifact, PlacesV1Mode, PlacesV1RangeIndex, PlacesV1Record,
-        PlacesV1Version, ENTITY_PHRASE_ADMISSION, MAX_ARTIFACT_ENTRY_BYTES,
-        PLACES_HEAD_MANIFEST_SCHEMA, PLACES_ROUTING_SCHEMA, ROUTED_QUERY_TOKEN_CAP,
+        neighbor_construction_cells, parse_routed_range_header, parse_routed_range_index,
+        prefix_head_fallback_split, query_key, ranged_index_candidates, record_projection,
+        retain_records_proving_dropped_tokens, retain_records_proving_query_run, routed_fetch_plan,
+        routed_lookup, routed_token_hash, validate_entity_phrase_records,
+        validate_routed_range_payload_extent, HeadRoutingManifest, PlacesRouting, PlacesV1Artifact,
+        PlacesV1Mode, PlacesV1RangeIndex, PlacesV1Record, PlacesV1Version, ENTITY_PHRASE_ADMISSION,
+        MAX_ARTIFACT_ENTRY_BYTES, PLACES_HEAD_MANIFEST_SCHEMA, PLACES_ROUTING_SCHEMA,
+        ROUTED_QUERY_TOKEN_CAP,
     };
     use serde_json::{json, Value};
     use sha2::{Digest, Sha256};
@@ -2403,6 +2475,55 @@ mod tests {
                 "cell mismatch at ({longitude}, {latitude})"
             );
         }
+    }
+
+    /// The neighbor probe exists because a proximity user meters from a cell
+    /// edge could not see across it. The selection must agree byte-for-byte
+    /// with `construction_cell` about which cell sits across each edge.
+    #[test]
+    fn neighbor_cells_are_the_cells_across_the_nearby_edges() {
+        // Monaco sits at cell be85 with fractional offsets (~0.28, ~0.21) --
+        // interior on both axes, so a populated primary cell probes nothing.
+        assert_eq!(construction_cell(7.4288, 43.7394).as_deref(), Some("be85"));
+        assert!(neighbor_construction_cells(7.4288, 43.7394, false).is_empty());
+        // An EMPTY primary cell probes the nearest neighbor on each axis.
+        assert_eq!(
+            neighbor_construction_cells(7.4288, 43.7394, true),
+            vec!["be84".to_string(), "bd85".to_string()]
+        );
+        // Near the western edge of be85 (edge at 7.03125 E): the probe names
+        // exactly the cell a point across that edge belongs to.
+        let west = neighbor_construction_cells(7.1, 43.7394, false);
+        assert_eq!(west, vec!["be84".to_string()]);
+        assert_eq!(construction_cell(7.0, 43.7394).as_deref(), Some("be84"));
+        // A corner point (near the west AND south edges of be85) probes both
+        // axes -- and never more than two cells.
+        let corner = neighbor_construction_cells(7.1, 43.6, false);
+        assert_eq!(corner, vec!["be84".to_string(), "bd85".to_string()]);
+        assert_eq!(construction_cell(7.1, 43.5).as_deref(), Some("bd85"));
+    }
+
+    #[test]
+    fn neighbor_cells_wrap_longitude_and_clamp_latitude() {
+        // Across the antimeridian, cell x 00 borders cell x ff.
+        assert_eq!(construction_cell(-179.9, 0.3).as_deref(), Some("8000"));
+        assert_eq!(
+            neighbor_construction_cells(-179.9, 0.3, false),
+            vec!["80ff".to_string()]
+        );
+        assert_eq!(construction_cell(179.9, 0.3).as_deref(), Some("80ff"));
+        // At the grid rim there is no cell beyond the pole. An empty primary
+        // falls back to the only real latitude neighbor, inward.
+        let south = neighbor_construction_cells(7.4288, -89.95, true);
+        assert_eq!(south.len(), 2);
+        assert!(south[0].starts_with("00"));
+        assert!(south[1].starts_with("01"));
+        let north = neighbor_construction_cells(7.4288, 89.95, true);
+        assert_eq!(north.len(), 2);
+        assert!(north[0].starts_with("ff"));
+        assert!(north[1].starts_with("fe"));
+        // Out-of-range points fail closed like construction_cell does.
+        assert!(neighbor_construction_cells(181.0, 0.0, true).is_empty());
     }
 
     fn head_block(populated_shards: usize, manifest_object: &str) -> Value {
