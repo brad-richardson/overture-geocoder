@@ -97,6 +97,25 @@ release move is not a quality lever, 2026-08-04" below. **The
 `prominence_rank = 0` phrase-lane admission change is now the sole remaining
 candidate, and it rides on the June corpus** — no release move ahead of it.
 
+**2026-08-06 UPDATE.** A four-track failure-mode review
+(`2026-08-06-places-failure-mode-review.md`) reframed the quality roadmap.
+Three findings change priorities: (1) 92 of 130 everyday misses are
+registry-legal-name gold absent from all map data — the instrument, not the
+geocoder, and production sits at ~65% of that set's achievable ceiling;
+(2) the proximity lane is broken end to end and measured by zero benchmark
+cases — `q=starbucks` at Times Square returns nearest-24 km because
+`place_score` has no distance term and the routed cell posting evicts by cap
+order, all Worker-fixable; (3) tokenizer variant holes (apostrophes 2.55M
+records, ampersands 2.81M, non-decomposable Latin 640k, Thai/Lao/Khmer/
+Myanmar 1.63M, ≥4-word names 21.1M) are structural misses no lane recovers,
+and the confirmed Monte-Carlo divisions gap (~89k hyphenated localities) also
+explains the Novotel/Casino de Monte-Carlo gold misses. Recommended order:
+fix the instrument, ship a Worker-only proximity wave, fold variant folding
+into the v5 rebuild beside phrase admission (whose PENDING sizing join must
+be computed first), scope the theme=base landmark import. The
+`prominence_rank = 0` phrase admission remains sanctioned but is a gold-set
+lever (~7.5% of everyday misses), not the strategy.
+
 The justification is measured, not aesthetic. Against the build promoted today:
 
 - `q=Seattle&limit=10` returns ten POIs at relevance 1.0 -- UPS Store, Verizon,
