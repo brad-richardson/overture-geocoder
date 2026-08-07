@@ -1,7 +1,9 @@
 # construction-v1: current state
 
 Last updated 2026-08-07 after the PENDING phrase-admission sizing join was
-computed and §3.2 was closed on it (see "Phrase admission is sized, and §3.2 is
+computed and §3.2 was closed on it, the apostrophe-folding locus was settled
+(`2026-08-07-apostrophe-folding-locus.md`), and the theme=base import was
+scoped and reframed as a coverage lever (see "Phrase admission is sized, and §3.2 is
 closed, 2026-08-07"), on top of the 2026-08-06 state: the Worker-only proximity
 wave deployed, measured, corrected for one locality-inference regression, and
 accepted. Build
@@ -730,6 +732,38 @@ have a name-matching record inside the quarantine rule's own radius, so they are
 not ABSENT. The rebaseline's equal-blind-rate scenario predicted exactly 3 false
 quarantines; that extrapolation is now independently measured at 3, and the
 corrected everyday denominator should be read as **n=111**, not n=108.
+
+### theme=base is a coverage lever, not the fame lever, 2026-08-07
+
+Scoped in `2026-08-07-base-theme-landmark-import-scope.md`; inventory in
+`benchmarks/2026-08-07-base-theme-import-inventory-v1.json`.
+
+Two corrections to the citation in the 2026-08-06 review, which called this
+"the only living fame lever" on 14 gold rows "all currently unservable":
+
+- the 14 rows are **10 distinct landmarks** (the gold set carries `name` and
+  `name_locality` variants of each), and **production already serves 6 of
+  them**. The incremental gold yield is **4**: Golden Gate Bridge, Times
+  Square, The Royal Children's Hospital, Mayo Clinic;
+- **12 of the 26 exact base name matches are transit stops named AFTER the
+  landmark** — `Harrods` matches a bus stop, `Colosseum` and `Brandenburg
+  Gate` match subway stations, `Louvre Museum` a ferry terminal. Any admission
+  set must exclude `subtype = transit`, or landmark queries start returning
+  stops.
+
+What base really offers is coverage of classes Places does not carry (bridges,
+peaks, islands, plazas, parks) and **`names.common` on 2,602,578 named rows**
+against Places' zero. A class-scoped admission set sized from where the genuine
+gold landmarks live is 4,707,069 rows, an upper bound of **+14.0% of head
+records** — 54% of which is bridges, so +6.4% without them.
+
+**The homonym/fame class therefore still has no open mechanism.** Using base as
+a prominence signal instead of as records would be cross-theme entity
+resolution, which is what killed the P1968 sidecar; it is explicitly not
+recommended. Before this is committed, measure the duplicate rate against
+Places (six of ten gold landmarks are already served, i.e. already duplicated)
+and build a stratum for the natural-feature classes, which neither frozen set
+tests.
 
 ### If the head cap is ever raised, it is contract-bound
 
