@@ -24,10 +24,23 @@ name: R2 One-Time Cleanup
 # any of them cannot be read or does not match its recorded sha256.
 #
 # PROTECTED_PREFIXES is asserted against every computed target before any
-# delete in any phase. 2026-07-18.0 is a frozen unpromoted construction-v1
-# core (PENDING_WORK.md forbids cleanup against it), 2026-07-13.0 is the live
-# latest, 2026-07-02.3 is the id-index-bearing rollback, backups/ holds the
-# catalog backups this workflow itself writes.
+# delete in any phase. 2026-07-28.0 is the v1 catalog's live latest AND the
+# legacy core bound by the live v2 build 2026-08-07.0, 2026-07-18.0 is the
+# legacy core the four older v2 releases still bind (and a frozen
+# construction-v1 core PENDING_WORK.md forbids cleanup against), 2026-07-13.0
+# and 2026-07-02.3 remain v1 catalog children, 2026-07-02.3 also carrying the
+# id-index for rollback, and backups/ holds the catalog backups this workflow
+# itself writes.
+#
+# THIS LIST IS STATIC AND HAS GONE STALE BEFORE. It was written when
+# 2026-07-13.0 was the live latest; by 2026-08-07 the latest was 2026-07-28.0
+# and it was absent from the list entirely — an omission in the one guard whose
+# whole job is refusing to delete live data. Re-derive it from both catalog
+# roots whenever the live version moves. It is belt-and-braces only: the
+# authority for bucket-root prefixes is scripts/v2_retention_guard.py, which
+# resolves the v2 chain and fails closed. Deliberately NOT listed here: the
+# slice-* prefixes, because a static list of those would go stale every single
+# build; the guard covers them, and phases 3 and 5 consult it.
 
 on:
   workflow_dispatch:
@@ -76,8 +89,10 @@ env:
   PRUNE_VERSIONS: "2026-07-02.1"
   # Phase 4: the only subtree phase 4 may ever delete, relative to the prefix
   ADDRESSES_SUBTREE: "immutable/map/addresses/objects/"
-  # Never deletable by any phase, at any depth, in either direction
-  PROTECTED_PREFIXES: "2026-07-13.0 2026-07-18.0 2026-07-02.3 backups"
+  # Never deletable by any phase, at any depth, in either direction.
+  # Re-derive from BOTH catalog roots when the live version moves; see the
+  # staleness note in the header comment.
+  PROTECTED_PREFIXES: "2026-07-28.0 2026-07-18.0 2026-07-13.0 2026-07-02.3 backups"
 
 jobs:
   cleanup:
