@@ -830,20 +830,26 @@ jobs:
           # execute would actually parse, fit the matrix, and fit the budget.
           case "$FAMILY_KEY" in
             addresses)
-              INVENTORY=benchmarks/address-construction-v1-data/inventory/addresses.json
+              # Single source of truth, same rule the spec path below follows: the
+              # INVENTORY is threaded from the admission-pinned contract, never a
+              # hardcoded path. It moves with the build release, and a hardcoded
+              # one would silently project the ATTESTED release's row-group
+              # ranges and ETags over a different release's objects.
+              INVENTORY="$(jq -er '.families.addresses.inventory' control/contract.json)"
               python scripts/experiment_hosted_rowgroups.py --validate-only \
                 --release "$RELEASE" --family addresses --inventory-report "$INVENTORY" \
                 --task-index "$TASK_INDEX" --json-out "dryrun/validate-${TASK_INDEX}.json" \
                 --target-rowgroup-uncompressed-bytes 400000000 --max-rows 4000000 --max-groups 72
               ;;
             places)
-              INVENTORY=benchmarks/places-construction-v1-data/inventory/places.json
+              INVENTORY="$(jq -er '.families.places.inventory' control/contract.json)"
               # Single source of truth: the evidence-spec path is threaded from
               # the admission-pinned contract (construction_v1_control.py), never
               # a hardcoded constant, so a spec version bump cannot silently
               # diverge from the sha the admission gate verified.
               SPEC="$(jq -er '.families.places.spec' control/contract.json)"
               python scripts/project_places_construction_v1.py --validate-only \
+                --release "$RELEASE" \
                 --inventory "$INVENTORY" --evidence-spec "$SPEC" \
                 --task-index "$TASK_INDEX" --report "dryrun/validate-${TASK_INDEX}.json" \
                 --max-rows 4000000 --max-groups 72 \
@@ -967,7 +973,7 @@ jobs:
             case "$FAMILY_KEY" in
               addresses)
                 TRANSFORM="$BINDIR/address-transform-v1"; PROOF="$BINDIR/address-proof-directory"
-                INVENTORY=benchmarks/address-construction-v1-data/inventory/addresses.json
+                INVENTORY="$(jq -er '.families.addresses.inventory' control/contract.json)"
                 /usr/bin/time -v python scripts/experiment_hosted_rowgroups.py \
                   --release "$RELEASE" --family "$FAMILY_KEY" --inventory-report "$INVENTORY" \
                   --task-index "$TASK_INDEX" --output work/projected.parquet \
@@ -980,11 +986,12 @@ jobs:
                 # etag/byte identity pins verified pre- AND post-read); the
                 # address row-group experiment has no Places code path.
                 TRANSFORM="$BINDIR/places-transform-v1"; PROOF="$BINDIR/places-proof-directory"
-                INVENTORY=benchmarks/places-construction-v1-data/inventory/places.json
+                INVENTORY="$(jq -er '.families.places.inventory' control/contract.json)"
                 # Spec path threaded from the admission-pinned contract (see the
                 # dry-run branch); never a hardcoded version constant.
                 SPEC="$(jq -er '.families.places.spec' control/contract.json)"
                 /usr/bin/time -v python scripts/project_places_construction_v1.py \
+                  --release "$RELEASE" \
                   --inventory "$INVENTORY" --evidence-spec "$SPEC" \
                   --task-index "$TASK_INDEX" --output work/projected.parquet \
                   --report work/projection.json --max-rows 4000000 --max-groups 72 \

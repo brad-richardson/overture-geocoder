@@ -787,3 +787,30 @@ def test_no_phase_falls_back_to_the_superseded_remote_operation_cap():
                      {"caps": {"max_remote_operations": "400000"}}):
         with pytest.raises(SystemExit, match="max_remote_operations"):
             HOSTED._required_remote_operation_cap(contract)
+
+
+# --------------------------------------------------------------------------- #
+# The LIVE inventory, not the attested one
+# --------------------------------------------------------------------------- #
+# Everything above projects the ATTESTED release, because that is what the frozen
+# evidence describes. But the cap that can actually kill a run is charged against
+# the release the build READS -- and since the attestation envelope let those two
+# diverge, projecting only the attested one leaves the real finalize unmeasured.
+# This is the arithmetic that has to hold for the release the control points at.
+LIVE_PROJECTED_OPERATIONS = {"places": 264_247, "addresses": 261_014}
+
+
+@pytest.mark.parametrize("family", ["places", "addresses"])
+def test_the_live_release_projection_also_fits_the_admitted_cap(tmp_path, capsys, family):
+    inventory = ROOT / CONTROL.FAMILIES[family]["inventory"]
+    assert json.loads(inventory.read_text())["release"] == CONTROL.DEFAULT_RELEASE
+    cap = CONTROL.CAPS["max_remote_operations"]
+    out = _predict(_contract(tmp_path, max_remote_operations=cap), family, inventory, capsys)
+    budget = out["publication_budget"]
+    assert budget["projected_remote_operations"] == LIVE_PROJECTED_OPERATIONS[family]
+    assert budget["within_cap"] is True
+    # Smaller than the attested release in the same direction the envelope
+    # admits it, which is the envelope's own claim landing on the cost gate.
+    assert budget["projected_remote_operations"] < PLANET_PROJECTED_OPERATIONS[family]
+    tasks = HOSTED._inventory_task_count(json.loads(inventory.read_text()))
+    assert tasks == (88 if family == "places" else 126)
