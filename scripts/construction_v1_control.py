@@ -83,10 +83,10 @@ FAMILIES = {
         # from constants retyped here -- the spec is already verified byte for
         # byte above, so it is the strongest reference available.
         "task_caps": {
-            "max_task_rows": ("acceptance_gates", "input_rows_hard_cap"),
-            "max_task_row_groups": ("acceptance_gates", "row_groups_hard_cap"),
-            "max_task_selected_compressed_bytes": ("acceptance_gates", "selected_compressed_bytes_hard_cap"),
-            "max_task_selected_uncompressed_bytes": ("acceptance_gates", "selected_uncompressed_bytes_hard_cap"),
+            "max_task_rows": ["acceptance_gates", "input_rows_hard_cap"],
+            "max_task_row_groups": ["acceptance_gates", "row_groups_hard_cap"],
+            "max_task_selected_compressed_bytes": ["acceptance_gates", "selected_compressed_bytes_hard_cap"],
+            "max_task_selected_uncompressed_bytes": ["acceptance_gates", "selected_uncompressed_bytes_hard_cap"],
         },
         "schema_fingerprint_sha256": "05260dc6878478fe750a82ad3fb9ddd2fdffcda3f25c00f950acfccca132d7e0",
         "spec": "benchmarks/address-construction-v1-evidence-spec-v3.json",
@@ -119,9 +119,9 @@ FAMILIES = {
         # compressed cap has nothing to check and is deliberately absent rather
         # than checked against a None.
         "task_caps": {
-            "max_task_rows": ("acceptance_gates", "input", "rows_hard_cap"),
-            "max_task_row_groups": ("acceptance_gates", "input", "row_groups_hard_cap"),
-            "max_task_selected_uncompressed_bytes": ("acceptance_gates", "input", "selected_uncompressed_bytes_hard_cap"),
+            "max_task_rows": ["acceptance_gates", "input", "rows_hard_cap"],
+            "max_task_row_groups": ["acceptance_gates", "input", "row_groups_hard_cap"],
+            "max_task_selected_uncompressed_bytes": ["acceptance_gates", "input", "selected_uncompressed_bytes_hard_cap"],
         },
         "schema_fingerprint_sha256": "31809dbadf976783e7863d2694d2cfe870f53665ef81d007076144c55bf64e67",
         "spec": "benchmarks/places-construction-v1-evidence-spec-v4.json",
