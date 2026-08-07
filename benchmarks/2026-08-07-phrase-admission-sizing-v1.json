@@ -1,0 +1,1748 @@
+{
+  "schema": "phrase-admission-sizing-v1",
+  "inputs": {
+    "corpus": "overture places 2026-06-17.0 (local mirror)",
+    "head_artifact": "local planet build of 2026-06-17.0",
+    "worker_commit_under_test": "00bc46c",
+    "data_build": "2026-08-03.0"
+  },
+  "head": {
+    "total_records": 33604005,
+    "total_bytes": 5141583720,
+    "shards": 4096,
+    "bytes_per_record": 153.0050873400358,
+    "mean_shard_bytes": 1255269.462890625,
+    "cap_per_token": 10
+  },
+  "cost": {
+    "corpus_shape": [
+      {
+        "prominent": false,
+        "words": "1",
+        "records": 9223086
+      },
+      {
+        "prominent": false,
+        "words": "2-3",
+        "records": 39010100
+      },
+      {
+        "prominent": false,
+        "words": "4+",
+        "records": 21600335
+      },
+      {
+        "prominent": true,
+        "words": "1",
+        "records": 622085
+      },
+      {
+        "prominent": true,
+        "words": "2-3",
+        "records": 2942617
+      },
+      {
+        "prominent": true,
+        "words": "4+",
+        "records": 2244066
+      }
+    ],
+    "replication_crosscheck": {
+      "note": "predicted from source vs emitted by the real planet build into head-candidates; keys are the admission unit",
+      "predicted_phrase_rows": 2942617,
+      "emitted_phrase_rows": 2892165,
+      "predicted_phrase_keys": 2381840,
+      "emitted_phrase_keys": 2381564,
+      "key_agreement": 0.9998841097698823
+    },
+    "option_3_1_e4_keys_prominent_only": {
+      "new_keys": 892625,
+      "candidate_rows": 1059609,
+      "new_head_records": 999815,
+      "new_head_bytes": 152976781,
+      "head_growth_fraction": 0.029752852375780802
+    },
+    "option_3_2_admission_softening": {
+      "new_keys": 28325914,
+      "new_head_records": 34457893,
+      "new_head_bytes": 5272232928,
+      "head_growth_fraction": 1.025410304515786
+    },
+    "option_3_2_bounded_cost_curve": [
+      {
+        "admit_only_keys_shared_by_at_most": 1,
+        "keys_gaining_records": 25527353,
+        "new_head_records": 25527353,
+        "new_head_bytes": 3905814875,
+        "head_growth_fraction": 0.7596521009921288
+      },
+      {
+        "admit_only_keys_shared_by_at_most": 2,
+        "keys_gaining_records": 27453455,
+        "new_head_records": 29267230,
+        "new_head_bytes": 4478035082,
+        "head_growth_fraction": 0.8709446984072285
+      },
+      {
+        "admit_only_keys_shared_by_at_most": 3,
+        "keys_gaining_records": 27933707,
+        "new_head_records": 30652474,
+        "new_head_bytes": 4689984462,
+        "head_growth_fraction": 0.9121672848221514
+      },
+      {
+        "admit_only_keys_shared_by_at_most": 5,
+        "keys_gaining_records": 28248952,
+        "new_head_records": 31964097,
+        "new_head_bytes": 4890669453,
+        "head_growth_fraction": 0.9511990311869076
+      },
+      {
+        "admit_only_keys_shared_by_at_most": 10,
+        "keys_gaining_records": 28441599,
+        "new_head_records": 33311860,
+        "new_head_bytes": 5096884049,
+        "head_growth_fraction": 0.9913062445979282
+      },
+      {
+        "admit_only_keys_shared_by_at_most": null,
+        "keys_gaining_records": 28567837,
+        "new_head_records": 34457893,
+        "new_head_bytes": 5272232928,
+        "head_growth_fraction": 1.025410304515786
+      }
+    ]
+  },
+  "yield": {
+    "runs": {
+      "everyday": "benchmarks/2026-08-06-everyday-poi-post-worker-00bc46c.json",
+      "gold": "benchmarks/2026-08-06-forward-gold-post-worker-00bc46c.json"
+    },
+    "misses_at_rank_10": 145,
+    "verdicts": {
+      "no_name_match_near_gold": 119,
+      "claimed_by_3_1": 3,
+      "claimed_by_3_2": 19,
+      "phrase_ineligible_long_name": 2,
+      "already_admitted_prominent": 2
+    },
+    "verdicts_by_scope": {
+      "everyday": {
+        "no_name_match_near_gold": 108,
+        "claimed_by_3_1": 2,
+        "claimed_by_3_2": 18,
+        "phrase_ineligible_long_name": 2
+      },
+      "gold": {
+        "no_name_match_near_gold": 11,
+        "already_admitted_prominent": 2,
+        "claimed_by_3_2": 1,
+        "claimed_by_3_1": 1
+      }
+    },
+    "claimed_by_3_2_but_quarantined_absent": [
+      "everyday-au-41e89cc49682207b453703c2157cd0fb66361c32",
+      "everyday-au-2a73f15995959a174e5f5a1d6dd55be084c0eb6d",
+      "everyday-au-9b86448594e8014d805feb46d111007ec9cc5160"
+    ],
+    "upper_bound_note": "A claim means the phrase key would exist and the record is refused today. It does not mean the case would rank; scoring is a separate step this probe does not measure.",
+    "cases": [
+      {
+        "scope": "everyday",
+        "case_id": "everyday-sg-21193",
+        "query": "GEYLANG BAHRU MRT STATION",
+        "normalized_word_count": 4,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-sg-21727",
+        "query": "LABRADOR PARK MRT STATION",
+        "normalized_word_count": 4,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-sg-21302",
+        "query": "UPPER THOMSON MRT STATION",
+        "normalized_word_count": 4,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-sg-21587",
+        "query": "TECK LEE LRT STATION",
+        "normalized_word_count": 4,
+        "near_gold_name_matches": 1,
+        "near_gold_prominent": 1,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "claimed_by_3_1"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-sg-21125",
+        "query": "MARSILING MRT STATION",
+        "normalized_word_count": 3,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-sg-21222",
+        "query": "MARINE PARADE MRT STATION",
+        "normalized_word_count": 4,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-sg-21492",
+        "query": "SEMBAWANG MRT STATION",
+        "normalized_word_count": 3,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-sg-21185",
+        "query": "BUKIT PANJANG MRT STATION",
+        "normalized_word_count": 4,
+        "near_gold_name_matches": 1,
+        "near_gold_prominent": 1,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "claimed_by_3_1"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-sg-21139",
+        "query": "GREAT WORLD MRT STATION",
+        "normalized_word_count": 4,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-sg-21431",
+        "query": "DOVER MRT STATION",
+        "normalized_word_count": 3,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-tw-Restaurant_395000000A_001151",
+        "query": "\u8766\u5230\u7206",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-tw-Restaurant_395000000A_001459",
+        "query": "\u8a31\u5bb6\u8766\u4ec1\u8089\u5713/\u828b\u7cbf",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 1,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "claimed_by_3_2"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-tw-Restaurant_395000000A_001489",
+        "query": "\u68ee\u8302\u7897\u7cbf(\u958b\u5c71\u5e97)",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-tw-Restaurant_395000000A_001477",
+        "query": "\u7a84\u9580\u5496\u5561\u9928",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-tw-Restaurant_395000000A_001057",
+        "query": "\u53f0\u5357\u5ea6\u5c0f\u6708\u64d4\u4ed4\u9eb5\u539f\u59cb\u5e97\u672c\u8216",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-tw-Restaurant_395000000A_002003",
+        "query": "\u6771\u6771\u5bb4\u6703\u5f0f\u5834-\u83ef\u5e73\u56cd\u5ac1\u9928",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-tw-Restaurant_395000000A_001539",
+        "query": "\u5b89\u5f92\u751f\u5496\u5561\u9928",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-tw-Restaurant_395000000A_001964",
+        "query": "\u5477\u9738\u6d6e\u6c34\u9b5a\u7fb9",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-hk-32",
+        "query": "\u8056\u6bcd\u91ab\u9662",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-hk-17",
+        "query": "\u5c6f\u9580\u91ab\u9662",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-hk-4",
+        "query": "\u9ea5\u7406\u6d69\u5fa9\u5eb7\u9662",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-hk-38",
+        "query": "\u9999\u6e2f\u5152\u7ae5\u91ab\u9662",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-kr-PHMA220043190033021200001",
+        "query": "\uc911\uc559\ub300\ud559\uad50\ubcd1\uc6d0",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-kr-PHMA220123240033021200001",
+        "query": "\uacf5\uc548\uacfc\ubcd1\uc6d0",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-kr-PHMA220213160034021200001",
+        "query": "\ub0a8\uc11c\uc6b8\uc694\uc591\ubcd1\uc6d0",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-kr-PHMA220123220033021200006",
+        "query": "\ud2bc\ud2bc\ubcd1\uc6d0",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-kr-PHMA219903220033021200001",
+        "query": "\ucc28\uc758\uacfc\ud559\ub300\ud559\uad50 \uac15\ub0a8\ucc28\ubcd1\uc6d0",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-kr-PHMA220203220033021200002",
+        "query": "\ub77c\uc774\ube0c\uce58\uacfc\ubcd1\uc6d0",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-kr-PHMA220073110032021200001",
+        "query": "\ud558\ub098\ud6a8\uc694\uc591\ubcd1\uc6d0",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-kr-PHMA220223090033021200003",
+        "query": "\uc790\ud5a5\ud55c\ubc29\ubcd1\uc6d0",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-kr-PHMA219763160034021200005",
+        "query": "\uc758\ub8cc\ubc95\uc778\ub2e4\ub098\uc758\ub8cc\uc7ac\ub2e8\uad6c\ub85c\ub2e4\ub098\ubcd1\uc6d0",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-kr-PHMA220223200033021200001",
+        "query": "\ubc14\ub97c\uc815\ud55c\ubc29\ubcd1\uc6d0",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-kr-PHMA220223230034021200005",
+        "query": "\uc5f0\uc138\uc6b0\ub9ac\ubcd1\uc6d0",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-kr-PHMA220053240033021200004",
+        "query": "\uc591\ubcd1\uc6d0",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-kr-PHMA220073210034021200001",
+        "query": "\uc758\ub8cc\ubc95\uc778 \ubd80\uc6d0\uc758\ub8cc\uc7ac\ub2e8 \uc11c\ucd08\uc694\uc591\ubcd1\uc6d0",
+        "normalized_word_count": 3,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-kr-PHMA220203110032021200001",
+        "query": "\uc774\uc6b0\uc694\uc591\ubcd1\uc6d0",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-kr-PHMA220213140033021200001",
+        "query": "\ubc14\ub978\uc9c0\uc131\ud55c\ubc29\ubcd1\uc6d0",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-co-2475",
+        "query": "Unidad de Servicios de Salud 10 Abastos",
+        "normalized_word_count": 7,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-co-2407",
+        "query": "UNIDAD DE SERVICIOS DE SALUD CRUCES",
+        "normalized_word_count": 6,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-co-2452",
+        "query": "UNIDAD DE SERVICIOS DE SALUD AMBULATORIA - ABRAHAM LINCON",
+        "normalized_word_count": 8,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-co-2477",
+        "query": "Unidad de Servicios de Salud 30 Bomberos",
+        "normalized_word_count": 7,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-co-2482",
+        "query": "Unidad de Servicios de Salud 60 Visi\u00f3n de Colombia",
+        "normalized_word_count": 9,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-co-2460",
+        "query": "UNIDAD DE SERVICIOS DE SALUD USME",
+        "normalized_word_count": 6,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-co-2438",
+        "query": "UNIDAD DE SERVICIOS DE SALUD SAN LUIS",
+        "normalized_word_count": 7,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-co-2479",
+        "query": "Unidad de Servicios de Salud 36 Asunci\u00f3n Bochica",
+        "normalized_word_count": 8,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-co-2513",
+        "query": "Unidad de Servicios de Salud Nuevas Delicias",
+        "normalized_word_count": 7,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-co-2434",
+        "query": "UNIDAD DE SERVICIOS DE SALUD GAITANA I",
+        "normalized_word_count": 7,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-co-2448",
+        "query": "UNIDAD DE SERVICIOS DE SALUD MEISSEN",
+        "normalized_word_count": 6,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-co-2504",
+        "query": "Unidad de Servicios de Salud San Bernardino",
+        "normalized_word_count": 7,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-co-2462",
+        "query": "UNIDAD DE SERVICIOS DE SALUD LA REFORMA",
+        "normalized_word_count": 7,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-co-2487",
+        "query": "Unidad de Servicios de Salud 79 Carvajal",
+        "normalized_word_count": 7,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-co-2435",
+        "query": "UNIDAD DE SERVICIOS DE SALUD PRADO VERANIEGO",
+        "normalized_word_count": 7,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-co-2419",
+        "query": "LIBERTADORES",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-co-2510",
+        "query": "Unidad de Servicios de Salud Olarte",
+        "normalized_word_count": 6,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-co-2430",
+        "query": "UNIDAD DE SERVICIOS DE SALUD ALAMOS",
+        "normalized_word_count": 6,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-co-2500",
+        "query": "Unidad de Servicios de Salud Terminal A\u00e9reo",
+        "normalized_word_count": 7,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-co-2472",
+        "query": "Unidad de Servicios de Salud Mental Floralia",
+        "normalized_word_count": 7,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-au-41e89cc49682207b453703c2157cd0fb66361c32",
+        "query": "Rapha Australia",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 1,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "claimed_by_3_2"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-au-e31d8b14d1e137f255168dd67225336734bfb7a8",
+        "query": "Sub-Zero Group Australia Pty Ltd",
+        "normalized_word_count": 6,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-au-224c48b242355b00d960b6a9eef94494e2da33ee",
+        "query": "Australian Diamond Company",
+        "normalized_word_count": 3,
+        "near_gold_name_matches": 1,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "claimed_by_3_2"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-au-fb57afd9c1cad41fc3bed8cadf672e114be9fce6",
+        "query": "13 Demarzo",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-au-01e3e5f469ccfbb4e5817f23ef68fac033dec0d2",
+        "query": "Rossi Clothing Pty Ltd",
+        "normalized_word_count": 4,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-au-3510d00d35672b00b3db5c73c668eb99639a234d",
+        "query": "Taylor Family Meats",
+        "normalized_word_count": 3,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-au-a79ceab69fccfc40354bfbf2761730c4ba847c4d",
+        "query": "Swords Select",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-au-19ce76543e11521c819e46620ff527297de17701",
+        "query": "Moko Select",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 1,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "claimed_by_3_2"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-au-847f08d1589077e7327d75461df40c9565a14fea",
+        "query": "Matchbox",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-au-375a74267cd52f955cb3ca8c8b5d6a26c41a7adf",
+        "query": "Spencer Street Pharmacy",
+        "normalized_word_count": 3,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-au-a2ca9a6817ec1fc2cbd44f227d74b0290fb627ea",
+        "query": "St Station",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 1,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "claimed_by_3_2"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-au-625a78220cb02f985dea45b2b2097cec3eda111e",
+        "query": "NBA Store",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-au-8be3a162213c07b0f1bbc7255f8ba15d2b5071bb",
+        "query": "Kidstuff",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-au-05c2135d682827c2443e18208a98c27a49254038",
+        "query": "The Vault 389",
+        "normalized_word_count": 3,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-au-92affd29602cdc089104cebd688ce8d2e07d4ba3",
+        "query": "Innisfree",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-au-2a73f15995959a174e5f5a1d6dd55be084c0eb6d",
+        "query": "DOC Delicatessen",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 1,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "claimed_by_3_2"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-au-e02d7d11cc7b4d4fba2aa7671e6b0c7d58ff7a4a",
+        "query": "Pado Collection",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-au-faba65873ed70e414987e2def0149aeb9c8b0b67",
+        "query": "White November",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-au-2823aaec760fce01b9eedf71fd9d5484c0db9951",
+        "query": "Provincial",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-au-9680b5f36577de407891803b8ac2a7e821c949c3",
+        "query": "Arc'teryx",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-au-aee1a2224208db6e248ca81b8823d1cf179ce768",
+        "query": "Zezar",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-au-9b86448594e8014d805feb46d111007ec9cc5160",
+        "query": "Unreal Christmas Trees",
+        "normalized_word_count": 3,
+        "near_gold_name_matches": 1,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "claimed_by_3_2"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-au-1f31df1323fe1a701bd570860ec61d597e628bba",
+        "query": "D'Aqua",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-jp-131041900460",
+        "query": "\u4eac\u738b\u767e\u8ca8\u5e97\u773c\u79d1\u30af\u30ea\u30cb\u30c3\u30af",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-jp-131041900289",
+        "query": "\u533b\u7642\u6cd5\u4eba\u793e\u56e3 \u533b\u7cbe\u4f1a\u30de\u30a4\u30b7\u30c6\u30a3\u30af\u30ea\u30cb\u30c3\u30af",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-jp-131041900607",
+        "query": "\u30ab\u30f3\u30ca\u30e0\u7f8e\u5bb9\u5916\u79d1\u65b0\u5bbf\u9662",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-jp-131041900553",
+        "query": "\u533b\u7642\u6cd5\u4eba\u793e\u56e3\u677e\u548c\u4f1a \u671b\u661f\u897f\u65b0\u5bbf\u8a3a\u7642\u6240",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-jp-131041900672",
+        "query": "\u611b\u5150\u30af\u30ea\u30cb\u30c3\u30af",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-jp-131041900738",
+        "query": "\u8033\u9f3b\u3044\u3093\u3053\u3046\u79d1 \u5c71\u897f\u30af\u30ea\u30cb\u30c3\u30af",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-jp-131041900556",
+        "query": "\u897f\u65b0\u5bbf\uff15\u4e01\u76ee\u99c5\u524d\u773c\u79d1",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-jp-131041900238",
+        "query": "\uff33\uff25\uff2c\uff25\uff23\uff34 \uff23\uff2c\uff29\uff2e\uff29\uff23\u65b0\u5bbf\u9662",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-jp-131041900502",
+        "query": "\u533b\u7642\u6cd5\u4eba\u793e\u56e3\u65b0\u5149\u4f1a \u65b0\u5bbf\u5357\u53e3\u76ae\u819a\u79d1",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-jp-131041900045",
+        "query": "\u533b\u7642\u6cd5\u4eba\u793e\u56e3\u6176\u5e78\u4f1a \u6771\u65b0\u5bbf\u30af\u30ea\u30cb\u30c3\u30af",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-jp-131041900490",
+        "query": "\u533b\u7642\u6cd5\u4eba\u793e\u56e3\u897f\u7f8e\u4f1a\u3082\u3068\u3073\u7f8e\u5bb9\u5916\u79d1\u30af\u30ea\u30cb\u30c3\u30af",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-jp-131041900204",
+        "query": "\u533b\u7642\u6cd5\u4eba\u793e\u56e3\u5e78\u697d\u4f1a \u5e78\u697d\u30e1\u30c7\u30a3\u30ab\u30eb\u30af\u30ea\u30cb\u30c3\u30af",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-jp-131041900704",
+        "query": "\u533b\u7642\u6cd5\u4eba\u793e\u56e3\u6c38\u5eb7\u4f1a \u56db\u30c4\u8c37\u814e\u30af\u30ea\u30cb\u30c3\u30af",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-jp-131041900398",
+        "query": "\u3042\u3086\u307f\u30ec\u30c7\u30a3\u30fc\u30b9\u30af\u30ea\u30cb\u30c3\u30af\u9ad8\u7530\u99ac\u5834",
+        "normalized_word_count": 1,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-jp-131041900236",
+        "query": "\u533b\u7642\u6cd5\u4eba\u793e\u56e3\u96ea\u7114\u4f1a \u30c8\u30a4\u30c8\u30a4\u30c8\u30a4\u30af\u30ea\u30cb\u30c3\u30af\u65b0\u5bbf\u9662",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-10953881",
+        "query": "HOTEL DEL ANGEL",
+        "normalized_word_count": 3,
+        "near_gold_name_matches": 2,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "claimed_by_3_2"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-10558119",
+        "query": "CITY EXPRESS BY MARRIOT CDMX LA VILLA",
+        "normalized_word_count": 7,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-6259112",
+        "query": "HOTEL GAMA",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 1,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "claimed_by_3_2"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-6325252",
+        "query": "HOTEL MONARCA",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 1,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "claimed_by_3_2"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-6305055",
+        "query": "HOTEL NAYARIT",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-6313837",
+        "query": "HOTEL PORTO NOVO",
+        "normalized_word_count": 3,
+        "near_gold_name_matches": 1,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "claimed_by_3_2"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-1002420",
+        "query": "HOTEL AMIGO SUITES",
+        "normalized_word_count": 3,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-6317273",
+        "query": "HOTEL LUA",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 1,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "claimed_by_3_2"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-6325182",
+        "query": "HOTEL HABANA",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 1,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "claimed_by_3_2"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-9722871",
+        "query": "HOSTAL ROTAMUNDOS",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-6259237",
+        "query": "HOTEL CENTRAL",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-6325165",
+        "query": "MOTEL BOUTIQUE RIALTO",
+        "normalized_word_count": 3,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-7733488",
+        "query": "THE GALLERY",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-6313854",
+        "query": "HOTEL HARARE",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 1,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "claimed_by_3_2"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-6324958",
+        "query": "HOTEL ANTENAS",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 1,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "claimed_by_3_2"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-6323674",
+        "query": "HOTEL REAL AZTECA",
+        "normalized_word_count": 3,
+        "near_gold_name_matches": 1,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "claimed_by_3_2"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-6325352",
+        "query": "HOTEL PENSIL",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 1,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "claimed_by_3_2"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-6810207",
+        "query": "BEL AIR UNIQUE CDMX WTC",
+        "normalized_word_count": 5,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-6306983",
+        "query": "HOTEL MOCTEZUMA LA VILLA",
+        "normalized_word_count": 4,
+        "near_gold_name_matches": 1,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "phrase_ineligible_long_name"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-6304780",
+        "query": "HOTEL ESTORIL",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 1,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "claimed_by_3_2"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-7747650",
+        "query": "CENTRO INTEGRAL DEL PIE Y LA SALUD",
+        "normalized_word_count": 7,
+        "near_gold_name_matches": 1,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "phrase_ineligible_long_name"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-857595",
+        "query": "TIENDA DE ABARROTES LA QUERETANA",
+        "normalized_word_count": 5,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-793743",
+        "query": "FLORES Y REGALOS FIORELLA",
+        "normalized_word_count": 4,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-11109922",
+        "query": "RECAUDARIA LOS MARQUEZ",
+        "normalized_word_count": 3,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-10170469",
+        "query": "ACUARIO LA CURVA",
+        "normalized_word_count": 3,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-8652847",
+        "query": "DULCERIA MAYOREO",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-844080",
+        "query": "ROSTICERIA DE POLLOS MAX",
+        "normalized_word_count": 4,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-952818",
+        "query": "GRUPO FERRETRO",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-8260289",
+        "query": "MOTOREFACCIONES 101",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-10632194",
+        "query": "MOLINO EL CHINO",
+        "normalized_word_count": 3,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-9951898",
+        "query": "TOCINERIA EL TORITO",
+        "normalized_word_count": 3,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-11671485",
+        "query": "BOUTIQUE ANGIE TIENDA DE ROPA",
+        "normalized_word_count": 5,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-811127",
+        "query": "TLAPALERIA BARRERA",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-9509655",
+        "query": "TORTILLERIA DEL PARQUE",
+        "normalized_word_count": 3,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "everyday",
+        "case_id": "everyday-mx-7816471",
+        "query": "DECORACIONES NICVAL",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": true,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "gold",
+        "case_id": "gold:name_locality:machu-picchu",
+        "query": "Machu Picchu Cusco",
+        "normalized_word_count": 3,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 4.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "gold",
+        "case_id": "gold:name:brandenburg-gate",
+        "query": "Brandenburg Gate",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 4.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "gold",
+        "case_id": "gold:name_locality:brandenburg-gate",
+        "query": "Brandenburg Gate Berlin",
+        "normalized_word_count": 3,
+        "near_gold_name_matches": 1,
+        "near_gold_prominent": 1,
+        "quarantined_absent": false,
+        "search_radius_km": 4.0,
+        "verdict": "already_admitted_prominent"
+      },
+      {
+        "scope": "gold",
+        "case_id": "gold:brand_branch:din-tai-fung-xinyi",
+        "query": "Din Tai Fung Xinyi",
+        "normalized_word_count": 4,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "gold",
+        "case_id": "gold:named_poi:harrods",
+        "query": "Harrods London",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "gold",
+        "case_id": "gold:brand_branch:ikea-berlin-lichtenberg",
+        "query": "IKEA Lichtenberg Berlin",
+        "normalized_word_count": 3,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 3.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "gold",
+        "case_id": "gold:brand_branch:apple-marunouchi",
+        "query": "Apple Marunouchi Tokyo",
+        "normalized_word_count": 3,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "gold",
+        "case_id": "gold:named_poi:novotel-monte-carlo",
+        "query": "Novotel Monte Carlo",
+        "normalized_word_count": 3,
+        "near_gold_name_matches": 1,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "claimed_by_3_2"
+      },
+      {
+        "scope": "gold",
+        "case_id": "gold:named_poi:mayo-clinic-rochester",
+        "query": "Mayo Clinic Rochester",
+        "normalized_word_count": 3,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 4.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "gold",
+        "case_id": "gold:named_poi:royal-childrens-melbourne",
+        "query": "Royal Childrens Hospital Melbourne",
+        "normalized_word_count": 4,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "gold",
+        "case_id": "gold:named_poi:gpo-dublin",
+        "query": "GPO Dublin",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 2.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "gold",
+        "case_id": "gold:inverse_seam:golden-gate-bridge",
+        "query": "Golden Gate Bridge",
+        "normalized_word_count": 3,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 4.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "gold",
+        "case_id": "gold:inverse_seam:casino-de-monte-carlo",
+        "query": "Casino de Monte-Carlo",
+        "normalized_word_count": 4,
+        "near_gold_name_matches": 2,
+        "near_gold_prominent": 1,
+        "quarantined_absent": false,
+        "search_radius_km": 4.0,
+        "verdict": "claimed_by_3_1"
+      },
+      {
+        "scope": "gold",
+        "case_id": "gold:inverse_seam:times-square",
+        "query": "Times Square",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 0,
+        "near_gold_prominent": 0,
+        "quarantined_absent": false,
+        "search_radius_km": 4.0,
+        "verdict": "no_name_match_near_gold"
+      },
+      {
+        "scope": "gold",
+        "case_id": "gold:inverse_seam:louvre-museum",
+        "query": "Louvre Museum",
+        "normalized_word_count": 2,
+        "near_gold_name_matches": 1,
+        "near_gold_prominent": 1,
+        "quarantined_absent": false,
+        "search_radius_km": 4.0,
+        "verdict": "already_admitted_prominent"
+      }
+    ]
+  },
+  "elapsed_seconds": 33.3
+}

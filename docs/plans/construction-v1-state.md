@@ -1,7 +1,10 @@
 # construction-v1: current state
 
-Last updated 2026-08-06 after the Worker-only proximity wave was deployed,
-measured, corrected for one locality-inference regression, and accepted. Build
+Last updated 2026-08-07 after the PENDING phrase-admission sizing join was
+computed and §3.2 was closed on it (see "Phrase admission is sized, and §3.2 is
+closed, 2026-08-07"), on top of the 2026-08-06 state: the Worker-only proximity
+wave deployed, measured, corrected for one locality-inference regression, and
+accepted. Build
 `2026-08-03.0` still serves the bounded phrase-admission data; Worker commit
 `00bc46c` now serves the proximity result recorded below. It also incorporates
 the independent correctness audit, fresh v4 formal evidence, sidecar Phase 0's
@@ -37,8 +40,11 @@ direct phrase gates passed, the run had zero request errors, and cleanup left
 production untouched. The operation-preserving release publication and catalog
 promotion then passed, including both retained reverse families.** Keep Brandenburg Gate
 and `Machu Picchu Cusco` in their separate follow-up backlogs. Do not widen
-phrase admission again in this generation: the repeated functional rehearsal
-has only 31.7 MB of formal head-byte reserve above the 25% headroom floor.
+phrase admission again in this generation — but the reason has changed and the
+old one was wrong. It is **not** the 31.7 MB head-byte reserve, which gates a
+rehearsal fixture rather than production; it is that softening admission is now
+measured at **+102.5% of the planet head for 19 of 145 current misses**. See
+"Phrase admission is sized, and §3.2 is closed, 2026-08-07".
 
 This is the operational snapshot for construction-v1. It intentionally contains
 only the current milestone, measured blockers, next actions, and frozen
@@ -93,9 +99,12 @@ recorded as "the largest untested quality lever on the board" — is **measured
 and refuted**: +1 case of plain-head reachability across 206 exact-tier
 benchmark cases, against five regressions, two of which production answers
 correctly today. It is not a recall lever and must not gate anything. See "The
-release move is not a quality lever, 2026-08-04" below. **The
+release move is not a quality lever, 2026-08-04" below. ~~**The
 `prominence_rank = 0` phrase-lane admission change is now the sole remaining
-candidate, and it rides on the June corpus** — no release move ahead of it.
+candidate, and it rides on the June corpus** — no release move ahead of it.~~
+**— superseded 2026-08-07: that candidate is sized and closed; the surviving
+phrase-lane candidate is `e4:` keys. See "Phrase admission is sized, and §3.2 is
+closed, 2026-08-07".**
 
 **2026-08-06 UPDATE.** A four-track failure-mode review
 (`2026-08-06-places-failure-mode-review.md`) reframed the quality roadmap.
@@ -112,9 +121,10 @@ and the confirmed Monte-Carlo divisions gap (~89k hyphenated localities) also
 explains the Novotel/Casino de Monte-Carlo gold misses. Recommended order:
 fix the instrument, ship a Worker-only proximity wave, fold variant folding
 into the v5 rebuild beside phrase admission (whose PENDING sizing join must
-be computed first), scope the theme=base landmark import. The
+be computed first), scope the theme=base landmark import. ~~The
 `prominence_rank = 0` phrase admission remains sanctioned but is a gold-set
-lever (~7.5% of everyday misses), not the strategy.
+lever (~7.5% of everyday misses), not the strategy.~~ **— the sizing join is
+now computed and that admission is CLOSED, 2026-08-07; see below.**
 
 **2026-08-06 INSTRUMENT FOLLOW-UP.** The first two missing strata are now
 frozen against production build `2026-08-03.0`; see
@@ -672,6 +682,46 @@ What is known is that Foursquare stores local-script names as the primary (the
 Thai venues are natively `วัดลาดบัวหลวง`). Whether Overture drops localization in
 the Places path or no source supplies it is unresolved, but "no source supplies a
 single alternate for any of 75.6M records" is not a plausible data outcome.
+
+### Phrase admission is sized, and §3.2 is closed, 2026-08-07
+
+The two "Decision input PENDING" lines in `2026-08-04-v5-build-readiness.md`
+§3.1/§3.2 — the join §3.2 itself called "the central v5 product decision" — are
+computed. Probe
+`benchmarks/probes/2026-08-07-phrase-admission-sizing-join.py`, result
+`benchmarks/2026-08-07-phrase-admission-sizing-v1.json`, write-up
+`2026-08-07-phrase-admission-sizing.md`. Offline, 33 seconds, no credentials.
+
+The replication is checked against what the real planet build emitted:
+2,381,840 predicted `e2:`/`e3:` keys against 2,381,564 emitted, **99.988%
+agreement** on the admission unit.
+
+| option | new head records | new head bytes | head growth | claims |
+|---|---|---|---|---|
+| §3.1 `e4:`, prominent only | 999,815 | 152,976,781 | +3.0% | 3 of 145 |
+| §3.2 admit `prominence_rank == 0` | 34,457,893 | 5,272,232,928 | +102.5% | 19 of 145 |
+
+**Operator decision on this evidence: §3.1 is adopted for v5, §3.2 is CLOSED.**
+§3.2 doubles the planet head (5.14 -> 10.41 GB, mean shard object 1.26 ->
+2.54 MB, and every head read transfers the whole object) for 19 claims, 11 of
+which are Mexican registry hotels — non-prominent by design, inside a stratum
+the denominator rebaseline already flags for population shift. Bounding it by
+key rarity does not rescue it: *globally unique* keys alone still cost +76.0%.
+The two options never competed for a budget; they differ by 34×, and the
+budget — the 31.7 MB reserve — was a rehearsal-fixture artifact. **Size any
+future head growth against mean shard object bytes, 1,255,269 B over 4,096
+shards.**
+
+Yield is an upper bound: a claim means the phrase key would exist and the record
+is refused today, not that the case would rank. The cost also ignores head-build
+DuckDB spill, which is what killed the v4 merge at 79%.
+
+Side finding, and it corroborates the instrument work: three quarantined AU
+cases (`everyday-au-41e89cc4…`, `everyday-au-2a73f159…`, `everyday-au-9b864485…`)
+have a name-matching record inside the quarantine rule's own radius, so they are
+not ABSENT. The rebaseline's equal-blind-rate scenario predicted exactly 3 false
+quarantines; that extrapolation is now independently measured at 3, and the
+corrected everyday denominator should be read as **n=111**, not n=108.
 
 ### If the head cap is ever raised, it is contract-bound
 
