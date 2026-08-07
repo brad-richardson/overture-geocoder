@@ -897,16 +897,50 @@ Both halves of the precondition exist:
    recursively rather than enumerating fields** (the v1 guard missed the v2
    chain precisely by enumerating), and it **fails closed** on a missing
    release document, a byte-mismatched one, an unreadable catalog, or a partial
-   target. 19 tests.
+   target. 17 tests of its own, plus the wiring tests below.
 2. **A phase that can match a slice prefix**: phase 3 emits a bare
    `<prefix>/` target for each entry in `ORPHAN_PREFIXES` with no
    version-format restriction, and the guard accepts `slice-YYYY-MM-DD.N` as a
-   bucket-root prefix. `r2-cleanup.yml` fetches the whole v2 chain before any
-   delete and calls the guard in **both** bucket-root delete phases (3 and 5).
+   bucket-root prefix. `r2-cleanup.yml` calls the guard in **both** bucket-root
+   delete phases (3 and 5), fetching the chain before either of them.
+   *Not* "before any delete", as this section first claimed: phases 1 and 2
+   delete before the fetch step. That is sound but for a different reason —
+   they pin their targets to `*/staging/` and
+   `^staging/global-v2/[0-9a-f]{64}/$`, neither of which can be a bucket root.
 
-The wiring is now contract-tested
-(`test_every_bucket_root_delete_phase_consults_the_v2_guard`,
-`test_phase_three_can_target_a_slice_prefix`), so it cannot silently regress.
+**A third half was missing, and it was the dangerous one.**
+`release-slice-families.yml`'s cleanup job ran
+`aws s3 rm "s3://geocoder-shards/${SLICE_VERSION}/" --recursive` behind nothing
+but a shape regex — the very shape zero-copy publishes into. It is `always()`,
+so it ran even when preflight failed and every build job was skipped, and its
+one reference check (`probe_catalog_excludes_slice.sh`) walks the **v1**
+catalog's child links, so it reports "not referenced" for a fully live promoted
+slice, always. Found by adversarial review of this section, 2026-08-07; the job
+now fetches the same chain and calls the same guard before deleting.
+
+The wiring is contract-tested structurally, not by substring count
+(`test_every_delete_is_guarded_or_pinned_below_the_bucket_root`,
+`test_the_guards_verdict_stays_fatal`). Mutation-checked against the four ways
+this regresses in practice: `|| true` on the guard call (including on a
+continuation line), `continue-on-error` on its step, reordering it after the
+delete, and deleting the guard step outright. All four fail the suite.
+
+**Still open, recorded not fixed:**
+
+- **Pre-promotion window.** Between finalize and promotion nothing in the v2
+  chain names the new slice, so the guard correctly reports it unreferenced and
+  would permit deleting a just-completed planet run. The create-only claim at
+  `<version>/claims/<family>.json` is the artifact that proves the namespace is
+  spoken for, and the guard does not read it. Teaching it to would also make
+  abandoned slices undeletable without an explicit override — a real trade-off,
+  not an oversight.
+- **Phase 3 needs a workflow edit to target a slice**: `ORPHAN_PREFIXES` is a
+  hardcoded `env:`, not a dispatch input.
+- **Phase 3 has no cache-TTL wait** (phase 5's 390 s wait is `if: phase5`), so a
+  slice deleted immediately after being dereferenced can 404 for live isolates
+  for up to `CATALOG_CACHE_TTL` = 300 s.
+- **`rebuild-r2-shards.yml`'s retention prune is still v1-only** and can delete
+  a legacy core that a live v2 release binds.
 
 **What remains before flipping `release_slice_version` on is a decision, not an
 engineering gap**: the slice smoke already promotes both layouts and asserts

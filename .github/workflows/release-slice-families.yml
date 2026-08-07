@@ -721,6 +721,48 @@ jobs:
         with:
           persist-credentials: false
 
+      # The shape check in the next step proves the target is a SLICE. It cannot
+      # prove the slice is disposable, and since #205 that gap has teeth:
+      # reverse-v2 -- and now any construction-v1 run dispatched with a
+      # `release_slice_version` -- publishes LIVE SERVING OBJECTS into exactly
+      # `slice-YYYY-MM-DD.N/`. A promoted slice is reachable only through
+      # `v2/catalog.json`, so `probe_catalog_excludes_slice.sh` below, which
+      # walks the v1 catalog's child links, reports "not referenced" for a fully
+      # live slice, always. It is reassurance, not a gate. Nor is this job's
+      # `always()`: it runs even when preflight FAILED and every build job was
+      # skipped, so a failed preflight is not a brake either.
+      #
+      # So ask the real question through the same guard `r2-cleanup.yml` uses,
+      # against the same chain, before the recursive delete. Fail-closed on
+      # purpose: `set -euo pipefail` plus a non-zero guard exit stops the job
+      # here, and an unreadable catalog or release document does the same rather
+      # than letting the delete proceed on a chain this could not read.
+      - name: Refuse to delete a slice any live v2 release still references
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          S3() { aws --endpoint-url "$ENDPOINT" --region auto "$@"; }
+          S3 s3 cp "s3://geocoder-shards/v2/catalog.json" /tmp/v2-catalog.json
+          mkdir -p /tmp/v2-releases
+          # An unavailable-schema catalog legitimately has no releases; the guard
+          # distinguishes that from an unreadable one, so `?` here is safe.
+          jq -r '.releases[]? | "\(.geocoder_build) \(.manifest_key)"' \
+            /tmp/v2-catalog.json > /tmp/v2-release-keys.txt
+          while read -r build key; do
+            [ -n "$build" ] || continue
+            mkdir -p "/tmp/v2-releases/$build"
+            S3 s3 cp "s3://geocoder-shards/$key" "/tmp/v2-releases/$build/release.json"
+          done < /tmp/v2-release-keys.txt
+          python3 scripts/v2_retention_guard.py assert-unreferenced \
+            --v2-catalog /tmp/v2-catalog.json \
+            --releases-dir /tmp/v2-releases --target "$SLICE_VERSION"
+
       - name: Delete the slice prefix and confirm it is empty
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}

@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 
 ROOT = Path(__file__).parents[1]
@@ -240,41 +241,125 @@ def test_list_referenced_reports_every_prefix(chain, capsys):
 
 # --- workflow wiring -------------------------------------------------------
 #
-# The guard only protects what actually calls it. These assert the wiring in
-# `r2-cleanup.yml`, because the failure being prevented -- deleting a live,
-# serving slice -- happens in the workflow, not in this module.
+# The guard only protects what actually calls it, so the wiring is part of the
+# contract: the failure being prevented -- deleting a live, serving slice --
+# happens in the workflow, not in this module.
+#
+# These are deliberately STRUCTURAL rather than substring counts. A count says
+# the guard is mentioned; it does not say the guard runs before the delete, in
+# the same job, with its exit code still fatal. Each of `|| true` on the guard
+# call, `continue-on-error: true` on its step, reordering the guard after the
+# delete, and adding a fresh unguarded delete leaves a count-based test green
+# while reopening the hole, so every one of those is asserted against below.
 
-CLEANUP = Path(__file__).parent.parent / ".github/workflows/r2-cleanup.yml"
+WORKFLOWS = Path(__file__).parent.parent / ".github/workflows"
+CLEANUP = WORKFLOWS / "r2-cleanup.yml"
+SLICE_FAMILIES = WORKFLOWS / "release-slice-families.yml"
+
+GUARD_CALL = "scripts/v2_retention_guard.py assert-unreferenced"
+# Every command in these workflows that can remove a whole prefix. `RM` is
+# r2-cleanup's sourced helper; `aws s3 rm` is the raw form.
+DELETES = ('RM "$target"', "aws s3 rm")
+DEFUSED = ("|| true", "|| :", "|| exit 0")
+
+# A delete needs the guard only if its target could BE a bucket root. These are
+# the literal constraints by which r2-cleanup's phases 1, 2 and 4 pin their
+# targets to a sub-prefix instead; each forces at least one interior `/`, which
+# `is_bucket_root_prefix` rejects outright. Listing them here rather than
+# skipping those phases is the point: a fourth unguarded delete that pins
+# nothing fails this test instead of passing unnoticed.
+SUB_PREFIX_PINS = (
+    'case "$target" in */staging/) ;;',                     # phase 1
+    "'^staging/global-v2/[0-9a-f]{64}/$'",                  # phases 2 and 4
+    'staging/global-v2/*/"$ADDRESSES_SUBTREE") ;;',         # phase 4
+)
 
 
-def test_every_bucket_root_delete_phase_consults_the_v2_guard():
-    """Phases 3 and 5 are the two that delete a whole bucket-root prefix, and
-    both must check the v2 chain -- `prune_catalog assert-unreferenced` sees
-    the v1 catalog only and reports a live slice as unreferenced."""
-    workflow = CLEANUP.read_text()
-    calls = workflow.count("scripts/v2_retention_guard.py assert-unreferenced")
-    assert calls == 2, (
-        "expected the v2 guard in exactly the two bucket-root delete phases "
-        f"(3 and 5); found {calls}"
-    )
-    # It must be given the whole chain, not just the catalog.
-    # >= 2 rather than == 2: a pre-flight `list-referenced` step also passes
-    # the chain, and pinning that count would break on an added diagnostic.
-    assert workflow.count("--releases-dir /tmp/v2-releases") >= 2
-    # And the chain must actually be fetched before any delete.
-    assert 's3 cp "s3://$BUCKET/v2/catalog.json" /tmp/v2-catalog.json' in workflow
+def deleting_jobs(path):
+    """(job name, ordered step list) for every job that deletes a prefix."""
+    workflow = yaml.safe_load(path.read_text())
+    out = []
+    for name, job in workflow["jobs"].items():
+        steps = job.get("steps", [])
+        if any(any(d in s.get("run", "") for d in DELETES) for s in steps):
+            out.append((name, steps))
+    return out
 
 
-def test_phase_three_can_target_a_slice_prefix():
+@pytest.mark.parametrize("path", [CLEANUP, SLICE_FAMILIES])
+def test_every_delete_is_guarded_or_pinned_below_the_bucket_root(path):
+    """Zero-copy promotion publishes LIVE serving objects into
+    `slice-YYYY-MM-DD.N/`, so any delete that can name a bucket root must ask the
+    v2 chain first -- and must ask EARLIER in the job's step order than it
+    deletes, not merely somewhere in the same file."""
+    jobs = deleting_jobs(path)
+    assert jobs, f"{path.name} has no delete job; update this test"
+    for name, steps in jobs:
+        runs = [step.get("run", "") for step in steps]
+        guard_at = next((i for i, run in enumerate(runs) if GUARD_CALL in run), None)
+        for index, run in enumerate(runs):
+            if not any(delete in run for delete in DELETES):
+                continue
+            if any(pin in run for pin in SUB_PREFIX_PINS):
+                continue
+            assert guard_at is not None, (
+                f"{path.name} job {name!r} step {steps[index].get('name')!r} "
+                "deletes an unpinned prefix with no v2 guard; prune_catalog "
+                "sees the v1 catalog only and calls a live slice unreferenced"
+            )
+            if guard_at == index:
+                assert run.index(GUARD_CALL) < min(
+                    run.index(delete) for delete in DELETES if delete in run
+                ), f"{path.name} job {name!r} guards after it deletes"
+            else:
+                assert guard_at < index, (
+                    f"{path.name} job {name!r} runs the guard in step "
+                    f"{guard_at}, after the delete in step {index}"
+                )
+
+
+def test_the_sub_prefix_pins_really_do_exclude_a_bucket_root():
+    """The exemption above is only sound because every pinned shape has an
+    interior `/`. Asserted against the guard's own predicate so the two cannot
+    drift apart."""
+    for pinned in ("2026-07-17.0/staging/", "staging/global-v2/" + "a" * 64 + "/"):
+        assert not GUARD.is_bucket_root_prefix(pinned.rstrip("/"))
+
+
+@pytest.mark.parametrize("path", [CLEANUP, SLICE_FAMILIES])
+def test_the_guards_verdict_stays_fatal(path):
+    """A guard whose non-zero exit is swallowed is decoration. The chain fetch
+    counts too: if it may fail softly, the guard runs against an empty or
+    partial chain and reports a live slice as unreferenced."""
+    for name, steps in deleting_jobs(path):
+        for step in steps:
+            run = step.get("run", "")
+            if GUARD_CALL not in run and "v2-catalog.json" not in run:
+                continue
+            assert step.get("continue-on-error") is not True, (
+                f"{path.name} job {name!r} step {step.get('name')!r} may fail "
+                "softly, so the guard can run on a chain it never read"
+            )
+            assert "set -euo pipefail" in run
+            # Join backslash continuations first: the guard invocation is a
+            # multi-line command, so a `|| true` appended to its LAST line would
+            # be invisible to a naive per-line scan while fully defusing it.
+            for line in run.replace("\\\n", " ").splitlines():
+                if GUARD_CALL in line or "v2/catalog.json" in line:
+                    assert not any(token in line for token in DEFUSED), (
+                        f"{path.name} job {name!r} defuses: {line.strip()}"
+                    )
+
+
+def test_the_guard_accepts_the_shape_zero_copy_promotion_publishes_into():
     """Zero-copy promotion writes serving objects into `slice-YYYY-MM-DD.N/`.
-    An abandoned one has to be removable, or a mistyped `release_slice_version`
-    strands ~45 GiB (Places) or ~114 GiB (Addresses) permanently. Phase 3 emits
-    a bare `<prefix>/` target with no version-format restriction, which is what
-    makes a slice eligible."""
+    An abandoned one has to stay removable, or a mistyped `release_slice_version`
+    strands ~45 GiB (Places) or ~114 GiB (Addresses) permanently -- and phase 3
+    emits a bare `<prefix>/` target with no version-format restriction, which is
+    what makes a slice eligible in the first place."""
     workflow = CLEANUP.read_text()
     assert 'for version in $ORPHAN_PREFIXES; do' in workflow
     assert 'echo "3|$version/" >> /tmp/delete-targets.txt' in workflow
-    # The guard itself must accept the slice shape.
     assert GUARD.is_bucket_root_prefix("slice-2026-08-04.0")
     assert GUARD.is_bucket_root_prefix("2026-07-17.0")
     assert not GUARD.is_bucket_root_prefix("slice-2026-08-04.0/families")
