@@ -597,7 +597,29 @@ def main() -> None:
     parser.add_argument(
         "--skip-head-identity", action="store_true", help=argparse.SUPPRESS
     )
+    # The address projector has always taken --release and refused an inventory
+    # that names a different one. This had no equivalent, which was survivable
+    # only while exactly one inventory existed. It no longer is: the attestation
+    # envelope lets the build release diverge from the attested one, so the
+    # attested and live inventories are now two committed files that differ in
+    # nothing a reader would notice but the release string. Pointed at the wrong
+    # one, this script SUCCEEDS -- reading the attested release's objects and
+    # writing them under a request, contract and slice claim that all name the
+    # other. That is silent wrong-release output, the one failure mode here that
+    # produces corruption rather than an abort. Optional so existing callers keep
+    # working; the hosted workflow always passes it.
+    parser.add_argument(
+        "--release",
+        help="Refuse the inventory unless it names this Overture release.",
+    )
     args = parser.parse_args()
+    if args.release is not None:
+        named = json.loads(args.inventory.read_text()).get("release")
+        if named != args.release:
+            parser.error(
+                f"inventory names release {named!r}, not the requested "
+                f"{args.release!r}"
+            )
     if args.validate_only:
         print(json.dumps(validate_only(args), sort_keys=True))
         return

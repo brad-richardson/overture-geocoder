@@ -861,3 +861,55 @@ def test_needs_graph_is_connected():
     assert jobs["binaries"]["needs"] == "admit"
     assert "binaries" in jobs["head"]["needs"]
     assert "binaries" not in jobs["finalize"]["needs"]
+
+
+def test_the_inventory_path_is_threaded_from_the_contract_never_hardcoded():
+    """The workflow already threads the evidence-spec path from the
+    admission-pinned contract so a version bump cannot diverge from the sha the
+    gate verified. The INVENTORY has to follow the same rule, and for a sharper
+    reason: since the attestation envelope let the build release move off the
+    attested one, the two inventories are different FILES. A hardcoded path
+    projects the attested release's row-group ranges and ETags over a different
+    release's objects -- reading real bytes at offsets that describe other
+    bytes."""
+    body = text()
+    assert "INVENTORY=benchmarks/" not in body, (
+        "hardcoded inventory path: thread it from control/contract.json"
+    )
+    threaded = [
+        line.strip() for line in body.splitlines() if line.strip().startswith("INVENTORY=")
+    ]
+    assert threaded, "no INVENTORY assignment found; update this test"
+    for line in threaded:
+        assert "control/contract.json" in line and "jq -er" in line, line
+        # -e so a missing key is a non-zero exit, not an empty path silently
+        # handed to the projector.
+        assert ".families." in line and ".inventory'" in line, line
+    # Both families, both the dry-run and execute branches.
+    assert sum("addresses" in line for line in threaded) == 2
+    assert sum("places" in line for line in threaded) == 2
+
+
+def test_both_projectors_are_told_which_release_they_are_projecting():
+    """The address projector has always refused an inventory naming a different
+    release; the places one gained that check only when the attestation envelope
+    made two committed inventories possible. Pointed at the wrong file it
+    SUCCEEDS, reading one release's objects under another release's request --
+    silent wrong-release output rather than an abort. Both call sites must pass
+    the release the request names."""
+    body = text()
+    for script in (
+        "scripts/experiment_hosted_rowgroups.py",
+        "scripts/project_places_construction_v1.py",
+    ):
+        invocations = [
+            block for block in body.split("python ") if block.startswith(script)
+        ]
+        assert invocations, f"{script} is not invoked; update this test"
+        for block in invocations:
+            # The invocation runs to the end of its backslash continuations.
+            command = block.split("\n\n")[0]
+            assert '--release "$RELEASE"' in command, (
+                f"{script} invoked without --release:\n{command[:400]}"
+            )
+    assert body.count('RELEASE="$(jq -r \'.release\' control/request.json)"') == 2

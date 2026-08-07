@@ -55,6 +55,81 @@ decisions. Dated documents in this directory preserve the evidence and history;
 they do not override this file unless their findings have been incorporated
 here.
 
+## The release axis is now an envelope, not a re-attestation — 2026-08-07
+
+**A build may run on an Overture release the frozen evidence was not generated
+against, provided the schema is identical and the work is no larger.** This is
+what unpinned the build from `2026-06-17.0`, and it is a narrowing of one axis,
+not a loosening of the gate.
+
+Moving the release used to mean regenerating twelve projections and censuses,
+seven task runs, and the functional rehearsal — on free public runners — to
+re-derive evidence about a producer that had not changed. The coupling that
+forced it was a single pin doing double duty: `inventory_sha256` bound both the
+live inventory and the readiness document. Splitting it into
+`inventory_sha256` (live, moves with the release) and
+`attested_inventory_sha256` (what readiness names, frozen) is the whole change.
+
+**What still binds exactly**: the spec, readiness and scale-evidence hashes;
+`readiness.ready`; the inventory's bytes against its committed file; and the
+**schema fingerprint** against the live inventory. A schema change voids the
+evidence outright — no envelope rescues it.
+
+**What the envelope allows**, one-directional in every dimension:
+
+| dimension | bound against | why |
+|---|---|---|
+| `records`, `selected_uncompressed_bytes`, `map_tasks` | the attested release | totals scale the run's cost and the matrix width |
+| per-task rows / row groups / selected bytes | **the spec's own declared cap** | the evidence asserts the producer stays inside these caps; the largest task that happened to occur is an observation, not a bound |
+
+Per-task bounds went to the spec's caps rather than the attested maxima
+deliberately. Two of twelve July dimensions exceed the attested *observation* —
+addresses by 19 rows, places by 1.33% — so an observation-based envelope would
+refuse the build over noise, and **false refusals are how gates get switched
+off**. The spec cap is also tighter than the address planner's own gate
+(350 MB against 400 MB), which is what stops a within-totals release from
+producing a task the evidence never covered.
+
+`2026-07-22.0` clears every dimension: both schema fingerprints byte-identical,
+places −1.88% records / 89 → 88 tasks, addresses −0.18% records / 127 → 126
+tasks, and every per-task maximum inside its declared cap.
+
+**Honest caveat**: places `totals.bytes` *grew* 3.0% while
+`selected_uncompressed_bytes` shrank 2.69%. The envelope reads the selected
+columns, which is what the producer actually touches — but "the data got
+smaller" is true only of the selected projection, not of the release.
+
+**Not covered, and no proxy exists**: per-task RSS, duplicate multiplicity, and
+`(country, maximum_bucket)` skew are absent from the inventory entirely. The
+July and June task plans are **100% disjoint** — zero shared task digests, zero
+shared source ETags — so June's per-task census attaches to nothing in July. The
+12 GiB runtime `max_rss_bytes` means a skewed task aborts rather than corrupts,
+which is why this is a recorded limit rather than a blocker.
+
+**Two defects this surfaced**, both of which would have wasted or corrupted a
+planet run:
+
+1. Addresses sourced their map matrix from the **readiness document**, which
+   pins the attested release's row-group ranges and ETags permanently. Task 0
+   names ETag `1ca05e7a…`; July's object is `d4cbc779…`. Now read from the live
+   inventory — a no-op on the attested release, since both carried a
+   byte-identical task list, and the difference between correct and corrupt
+   after it moves.
+2. `construction-v1.yml` **hardcoded** the inventory path at four sites while
+   threading the evidence-spec path from the contract. Addresses would have
+   failed closed; places would have **succeeded**, building June data under a
+   request, contract, ledger and slice claim all naming July.
+   `project_places_construction_v1.py` had no release check at all — the address
+   projector has always had one — so the mismatch was silent rather than loud.
+   Both are now threaded from `control/contract.json` and contract-tested.
+
+**Regenerating readiness still works**, and that is why the attested inventory
+stays committed at the path its sha256-pinned spec names. The live inventory
+gets a release-qualified path instead. Overwriting the attested path leaves a
+frozen artifact describing a file that no longer holds what it attests, and
+strands the readiness validators, which require `inventory.release ==
+spec.release`.
+
 ## Current milestone
 
 The previous milestone -- **reverse serving for both families** -- is **MET**

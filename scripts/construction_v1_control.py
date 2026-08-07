@@ -20,20 +20,86 @@ ROOT = Path(__file__).resolve().parents[1]
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 SAFE_ID = re.compile(r"^[a-z0-9][a-z0-9-]{7,63}$")
-RELEASE = "2026-06-17.0"
+RELEASE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.\d+$")
+
+# The Overture release the frozen readiness and scale evidence was GENERATED
+# against. It is provenance, not a target: the evidence documents name this
+# release's inventory, and they keep naming it after a build moves on.
+ATTESTED_RELEASE = "2026-06-17.0"
+
+# The release a build targets when the operator names none.
+DEFAULT_RELEASE = "2026-07-22.0"
+
+# WHY THE ATTESTED RELEASE AND THE BUILD RELEASE ARE ALLOWED TO DIVERGE
+#
+# Every one of the twelve pins below used to be an exact-equality check against a
+# single release, which made a release move a full re-attestation: regenerate
+# twelve projections and censuses, seven task runs, and the functional rehearsal,
+# on free public runners, to re-derive evidence about a producer that did not
+# change. That is ceremony priced far above what it protects.
+#
+# What the readiness and scale evidence actually characterize is a PRODUCER
+# running against a SCHEMA at a SCALE. So those three are what still bind:
+#
+#   * `spec_sha256`, `readiness_file_sha256`, `scale_evidence_sha256` and
+#     `readiness.ready` are unchanged exact checks. The evidence has to be the
+#     reviewed evidence, and it has to say ready.
+#   * `schema_fingerprint_sha256` is an unchanged EXACT check against the LIVE
+#     inventory. A schema change means the evidence describes a different
+#     producer contract, and no envelope rescues that -- re-attest.
+#   * `attested_scale` is the new part, and it is one-directional: the live
+#     inventory may be SMALLER than the release the evidence was measured on,
+#     never larger. Evidence that a producer survived N records and T tasks is
+#     evidence about anything under N and T; it says nothing about more.
+#
+# `inventory_sha256` therefore splits in two. `attested_inventory_sha256` is the
+# inventory the readiness document names, and stays pinned to ATTESTED_RELEASE.
+# `inventory_sha256` is the live inventory this build will actually read, and
+# moves with the release. When they are equal the gate is exactly what it was;
+# when they differ the envelope above is what admits the difference.
+#
+# The two inventories are separate FILES, and that is load-bearing rather than
+# tidy. Each frozen evidence spec names its inventory by path and carries its own
+# `release`, and the spec is sha256-pinned -- so overwriting the attested path
+# with a newer release would leave a frozen artifact pointing at a file that no
+# longer holds what it attests, and would strand the readiness validators, which
+# require `inventory.release == spec.release` to regenerate anything at all.
+# `test_the_frozen_specs_still_point_at_the_inventory_they_attest` holds that
+# line.
+#
+# This is a NARROWING of the release axis, not a removal of the gate. A bigger
+# release, a reshaped schema, a non-ready readiness, or an inventory whose bytes
+# differ from the committed file all still fail closed.
 
 FAMILIES = {
     "addresses": {
-        "inventory": "benchmarks/address-construction-v1-data/inventory/addresses.json",
-        "inventory_file_sha256": "7b13abc149fee69d4931d04dd4f98ed65336e9685d8f3422c6598aa729f1db19",
-        "inventory_sha256": "6a306fc9937dac82602dbc5233952c1f74fdb0f7467ad4cc38dcc559dfc9d34e",
+        "inventory": "benchmarks/address-construction-v1-data/inventory/addresses-2026-07-22.0.json",
+        "attested_inventory": "benchmarks/address-construction-v1-data/inventory/addresses.json",
+        "inventory_file_sha256": "8ab088b39d198097be5dc301d91845360642efe63708d5f6bbed060a3b456d6a",
+        "inventory_sha256": "f153d7d13e54554032185d807c7b57ce617a715e3894c7f9f269b073339f4e92",
+        "attested_inventory_sha256": "6a306fc9937dac82602dbc5233952c1f74fdb0f7467ad4cc38dcc559dfc9d34e",
+        "attested_scale": {"records": 473_576_753, "selected_uncompressed_bytes": 33_172_987_981, "map_tasks": 127},
+        # Per-task bounds come from the spec's OWN declared caps, by path, not
+        # from constants retyped here -- the spec is already verified byte for
+        # byte above, so it is the strongest reference available.
+        "task_caps": {
+            "max_task_rows": ("acceptance_gates", "input_rows_hard_cap"),
+            "max_task_row_groups": ("acceptance_gates", "row_groups_hard_cap"),
+            "max_task_selected_compressed_bytes": ("acceptance_gates", "selected_compressed_bytes_hard_cap"),
+            "max_task_selected_uncompressed_bytes": ("acceptance_gates", "selected_uncompressed_bytes_hard_cap"),
+        },
         "schema_fingerprint_sha256": "05260dc6878478fe750a82ad3fb9ddd2fdffcda3f25c00f950acfccca132d7e0",
         "spec": "benchmarks/address-construction-v1-evidence-spec-v3.json",
         "spec_sha256": "130207f3debde346cc9c1178e5038e2257e883ccd46c5826d1a5ae22c2583af9",
         "readiness": "benchmarks/address-construction-v1-data/evidence/readiness-final-v3.json",
         "readiness_file_sha256": "f3a11863637151eaf255b79993737e3b595a3674f742315bd852691c360e118e",
         "scale_evidence_sha256": "dce535350bcb97b1871fa81e5a3e9c863b9b0ce8969175f743705237a9d980ea",
-        "task_source": "readiness",
+        # The LIVE inventory, not the readiness document. Both carried a
+        # byte-identical task list while the build sat on ATTESTED_RELEASE, so
+        # this is a no-op there -- and it is the difference between correct and
+        # corrupt once the release moves, because readiness names the attested
+        # release's row-group ranges and etags forever.
+        "task_path": ("plan", "tasks"),
         "construction": "address-construction-v1",
     },
     # V4 EVIDENCE GENERATION, 2026-08-03. Prior generations remain on disk as
@@ -43,18 +109,47 @@ FAMILIES = {
     # twelve projections/censuses, seven task runs, and the functional rehearsal
     # were regenerated; readiness is fail-closed and green.
     "places": {
-        "inventory": "benchmarks/places-construction-v1-data/inventory/places.json",
-        "inventory_file_sha256": "643f52eeafced086f333b530334094232219a6fecbcf46ee0565797fa8227570",
-        "inventory_sha256": "9ea4eff665766c3c1146ee7baed413fcf76f097e1724d795c77baabe7dff1795",
+        "inventory": "benchmarks/places-construction-v1-data/inventory/places-2026-07-22.0.json",
+        "attested_inventory": "benchmarks/places-construction-v1-data/inventory/places.json",
+        "inventory_file_sha256": "f40964c7bb43c234372ff8d2cfe14d5b4f09bfbf7297b03e28e6d9e395a39298",
+        "inventory_sha256": "0a89c944623e0f524a3616fd1f4597a6619e1ec94d70bbd00854069c86ee072d",
+        "attested_inventory_sha256": "9ea4eff665766c3c1146ee7baed413fcf76f097e1724d795c77baabe7dff1795",
+        "attested_scale": {"records": 75_642_289, "selected_uncompressed_bytes": 10_604_105_681, "map_tasks": 89},
+        # The places inventory records no per-task compressed size, so the spec's
+        # compressed cap has nothing to check and is deliberately absent rather
+        # than checked against a None.
+        "task_caps": {
+            "max_task_rows": ("acceptance_gates", "input", "rows_hard_cap"),
+            "max_task_row_groups": ("acceptance_gates", "input", "row_groups_hard_cap"),
+            "max_task_selected_uncompressed_bytes": ("acceptance_gates", "input", "selected_uncompressed_bytes_hard_cap"),
+        },
         "schema_fingerprint_sha256": "31809dbadf976783e7863d2694d2cfe870f53665ef81d007076144c55bf64e67",
         "spec": "benchmarks/places-construction-v1-evidence-spec-v4.json",
         "spec_sha256": "77bce6209c9c98ee4243167982fe11b13f7702c042e48bfad90daa6b3b26bfed",
         "readiness": "benchmarks/places-construction-v1-data/evidence/readiness-v4.json",
         "readiness_file_sha256": "312020845eb32dffdc49f6db269e4a45d887c20442734bdf763bfb9453bbeaec",
         "scale_evidence_sha256": "a6d3de90cda567d405c56231070324babc4b9e53715e14cdc136d99d215f2527",
-        "task_source": "inventory",
+        "task_path": ("map_plan", "tasks"),
         "construction": "places-construction-v1",
     },
+}
+
+# The scale dimensions the envelope compares, and where each family's live
+# inventory records them. `map_tasks` is the one that actually moves the work
+# shape -- it is the matrix width every later phase provisions against.
+SCALE_PATHS = {
+    "records": ("totals", "records"),
+    "selected_uncompressed_bytes": ("totals", "selected_uncompressed_bytes"),
+}
+
+# Per-task dimensions, and the task field each reads. `rows` for addresses and
+# `expected_input_records` for places are the same quantity under two names,
+# because the two inventories were written by different generators.
+TASK_SCALE_FIELDS = {
+    "max_task_rows": ("rows", "expected_input_records"),
+    "max_task_selected_compressed_bytes": ("selected_compressed_bytes",),
+    "max_task_selected_uncompressed_bytes": ("selected_uncompressed_bytes",),
+    "max_task_row_groups": ("row_groups",),
 }
 
 VERSIONS = {
@@ -196,7 +291,78 @@ def read_json(relative: str) -> dict[str, Any]:
     return json.loads((ROOT / relative).read_text())
 
 
-def family_status(name: str, contract: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+def live_scale(contract: dict[str, Any], inventory: dict[str, Any]) -> dict[str, int]:
+    """The scale dimensions the envelope compares, read off the live inventory.
+
+    TOTALS ARE NOT ENOUGH, and this is the subtle half. Every hard cap in the
+    evidence specs is PER TASK -- rows, selected bytes, row groups -- and a
+    release can shrink in total while pushing one task past a cap the evidence
+    never covered. The address planner's own gate is wider than the attested
+    per-task byte cap, so that is a reachable state, not a hypothetical. The
+    per-task maxima below are what make the envelope bind where the caps bind.
+    """
+    scale = {
+        field: inventory.get(section, {}).get(key)
+        for field, (section, key) in SCALE_PATHS.items()
+    }
+    section, key = contract["task_path"]
+    scale["map_tasks"] = inventory.get(section, {}).get("task_count")
+    tasks = inventory.get(section, {}).get(key) or []
+    for field, names in TASK_SCALE_FIELDS.items():
+        values = [
+            task[name] for task in tasks for name in names
+            if isinstance(task.get(name), int)
+        ]
+        scale[field] = max(values) if values else None
+    return scale
+
+
+def scale_envelope_errors(name: str, contract: dict[str, Any], inventory: dict[str, Any]) -> list[str]:
+    """Admit a live inventory no larger than the one the evidence was measured on.
+
+    One-directional by construction: `<=` in every dimension. Evidence that a
+    producer survived N records is evidence about anything under N and nothing
+    about more, so a release that GROWS past the attested scale fails closed and
+    demands fresh evidence -- which is the case the ceremony was actually for.
+    """
+    errors: list[str] = []
+    actual = live_scale(contract, inventory)
+    for field, attested in sorted(contract["attested_scale"].items()):
+        measured = actual.get(field)
+        if not isinstance(measured, int):
+            errors.append(f"{name} live inventory does not report {field}")
+        elif measured > attested:
+            errors.append(
+                f"{name} {field} {measured:,} exceeds the attested {attested:,}; "
+                f"regenerate the evidence against this release"
+            )
+    # Per-task dimensions are bound by the SPEC'S DECLARED CAP, not by the
+    # attested release's incidental maximum. The evidence asserts "the producer
+    # stays inside these caps"; the largest task that happened to occur is an
+    # observation, not a bound, and holding a release to it would refuse a build
+    # over a nineteen-row difference -- a false refusal, and false refusals are
+    # how gates get switched off. The cap is also TIGHTER than the address
+    # planner's own gate (350 MB against 400 MB), so this is what stops a
+    # within-totals release from producing a task the evidence never covered.
+    spec = read_json(contract["spec"])
+    for field, path in sorted(contract["task_caps"].items()):
+        cap: Any = spec
+        for key in path:
+            cap = cap.get(key, {}) if isinstance(cap, dict) else {}
+        measured = actual.get(field)
+        if not isinstance(cap, int):
+            errors.append(f"{name} spec declares no cap at {'.'.join(path)}")
+        elif not isinstance(measured, int):
+            errors.append(f"{name} live inventory does not report {field}")
+        elif measured > cap:
+            errors.append(
+                f"{name} {field} {measured:,} exceeds the spec's declared "
+                f"{'.'.join(path)} {cap:,}"
+            )
+    return errors
+
+
+def family_status(name: str, contract: dict[str, Any], release: str) -> tuple[dict[str, Any], list[str]]:
     errors: list[str] = []
     for field in ("inventory", "spec", "readiness"):
         actual = sha256_file(ROOT / contract[field])
@@ -210,17 +376,24 @@ def family_status(name: str, contract: dict[str, Any]) -> tuple[dict[str, Any], 
         **readiness.get("checks", {}).get("canonical_inventory_identity", {}),
         **readiness_identity,
     }
-    if inventory.get("release") != RELEASE:
-        errors.append(f"{name} inventory release differs")
+    if inventory.get("release") != release:
+        errors.append(f"{name} inventory is release {inventory.get('release')}, not {release}")
     if inventory.get("inventory_sha256") != contract["inventory_sha256"]:
         errors.append(f"{name} inventory content identity differs")
     schema = inventory.get("schema_contract", {}).get("fingerprint_sha256")
     if schema != contract["schema_fingerprint_sha256"]:
         errors.append(f"{name} schema fingerprint differs")
-    for field in ("inventory_sha256", "evidence_spec_sha256", "scale_evidence_sha256"):
-        expected = contract["spec_sha256"] if field == "evidence_spec_sha256" else contract[field]
+    # The readiness document names the ATTESTED inventory and always will; the
+    # envelope is what licenses a live inventory that differs from it.
+    for field, expected in (
+        ("inventory_sha256", contract["attested_inventory_sha256"]),
+        ("evidence_spec_sha256", contract["spec_sha256"]),
+        ("scale_evidence_sha256", contract["scale_evidence_sha256"]),
+    ):
         if readiness_identity.get(field) != expected:
             errors.append(f"{name} readiness {field} differs")
+    if contract["inventory_sha256"] != contract["attested_inventory_sha256"]:
+        errors.extend(scale_envelope_errors(name, contract, inventory))
     if readiness.get("ready") is not True:
         reasons = readiness.get("reasons") or readiness.get("blockers") or ["readiness is false"]
         errors.extend(f"{name} readiness: {reason}" for reason in reasons)
@@ -229,10 +402,8 @@ def family_status(name: str, contract: dict[str, Any]) -> tuple[dict[str, Any], 
 
 def map_tasks(name: str, contract: dict[str, Any], readiness: dict[str, Any]) -> list[dict[str, Any]]:
     inventory = read_json(contract["inventory"])
-    if contract["task_source"] == "readiness":
-        tasks = readiness["checks"]["canonical_inventory_identity"]["tasks"]
-    else:
-        tasks = inventory["map_plan"]["tasks"]
+    section, key = contract["task_path"]
+    tasks = inventory[section][key]
     matrix = []
     for task in tasks:
         digest = task.get("task_digest_sha256", task.get("task_digest"))
@@ -280,15 +451,19 @@ def prepare(values: argparse.Namespace) -> tuple[dict[str, Any], bool]:
         blockers.append("prior runner minutes must be a non-negative integer")
     caps = {**CAPS, "prior_runner_minutes": prior_runner_minutes}
 
+    release = getattr(values, "release", None) or DEFAULT_RELEASE
+    if not RELEASE_RE.fullmatch(release):
+        blockers.append("release must use YYYY-MM-DD.N")
+
     readiness: dict[str, Any] = {}
     matrices: dict[str, list[dict[str, Any]]] = {}
     family_contracts: dict[str, Any] = {}
     for name, base in FAMILIES.items():
-        status, errors = family_status(name, base)
+        status, errors = family_status(name, base, release)
         readiness[name] = {"ready": status.get("ready") is True and not errors, "file": base["readiness"], "file_sha256": base["readiness_file_sha256"]}
         blockers.extend(errors)
         matrices[name] = map_tasks(name, base, status)
-        family_contracts[name] = {key: value for key, value in base.items() if key != "task_source"}
+        family_contracts[name] = {key: value for key, value in base.items() if key != "task_path"}
 
     request: dict[str, Any] | None = None
     request_sha: str | None = None
@@ -299,11 +474,20 @@ def prepare(values: argparse.Namespace) -> tuple[dict[str, Any], bool]:
             "mode": "execute",
             "identity": dict(zip(("request_id", "build_id", "slice_id", "staging_id"), ids)),
             "producer_commit": values.producer_commit,
-            "release": RELEASE,
+            "release": release,
+            # What the frozen evidence was measured on, and the rule that lets
+            # this build run on a different release. Recorded in the request so
+            # the divergence is visible to a reviewer rather than implicit in a
+            # constant, and hashed into the request identity so moving the
+            # release mints a fresh staging namespace.
+            "attestation": {
+                "attested_release": ATTESTED_RELEASE,
+                "envelope": "exact schema fingerprint; live inventory scale at or below the attested scale",
+            },
             "lineage": {"genesis": True, "generation": 1, "predecessor": None},
             "legacy_core": {
                 "version": values.legacy_core_version,
-                "release": RELEASE,
+                "release": release,
                 "manifest_key": f"{values.legacy_core_version}/release-manifest.json",
                 "manifest_sha256": values.legacy_core_manifest_sha256,
                 "access": "read-only-head-and-range-get",
@@ -359,6 +543,14 @@ def main() -> int:
         prep.add_argument(f"--{name}", required=True)
     prep.add_argument("--legacy-core-version")
     prep.add_argument("--legacy-core-manifest-sha256")
+    prep.add_argument(
+        "--release",
+        default=DEFAULT_RELEASE,
+        help=(
+            "Overture release to build. Admitted while its inventory keeps the "
+            f"attested schema and stays within the scale measured on {ATTESTED_RELEASE}."
+        ),
+    )
     prep.add_argument("--prior-runner-minutes", type=int, default=0)
     prep.add_argument("--output", type=Path, required=True)
     admit = sub.add_parser("admit-dispatch")
@@ -378,6 +570,12 @@ def main() -> int:
             producer_commit=request.get("producer_commit", ""), legacy_core_version=core.get("version"),
             legacy_core_manifest_sha256=core.get("manifest_sha256"),
             prior_runner_minutes=request.get("caps", {}).get("prior_runner_minutes", 0),
+            # Re-derive against the release the dispatched request NAMES. A
+            # request claiming a release whose committed inventory does not match
+            # it fails the byte-for-byte comparison below, so this cannot be used
+            # to smuggle in an unattested release -- it only lets the gate check
+            # the request the operator actually submitted.
+            release=request.get("release"),
         ))
         actual_sha = sha256_bytes(canonical(request))
         if args.run_attempt != 1:
