@@ -1,0 +1,3323 @@
+{
+  "schema": "benchmark-v2-forward-cases-v1",
+  "collection_status": {
+    "purpose": "Size the theme=base import on the classes it would actually add. Gold is independent of Overture and of both compared providers; the two controls separate an absent entity from an unindexed one.",
+    "controls": {
+      "control_places": "count of name-matching Places records within tolerance, Overture 2026-06-17.0 -- already servable in principle",
+      "control_base": "count of name-matching records within tolerance in the proposed base admission set -- what the import would add"
+    },
+    "caveats": [
+      "Queries are English Wikidata labels. A local-language query is a different measurement this stratum does not make.",
+      "Coordinates are Wikidata P625: a summit for a peak, a centroid for an island, which is why tolerance varies by class.",
+      "The endpoint pool is not stable across Wikidata edits, so this file is frozen rather than rebuilt per run."
+    ]
+  },
+  "cases": [
+    {
+      "id": "natural:peak:Q22077954",
+      "kind": "place",
+      "query": "Bald Hill",
+      "query_style": "natural_feature",
+      "expected_name": "Bald Hill",
+      "expected_lat": 39.46767,
+      "expected_lon": -123.7564,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "peak",
+        "country": "US"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q22077954",
+        "instance_of": "Q8502",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 1,
+      "control_base": 1
+    },
+    {
+      "id": "natural:peak:Q13128650",
+      "kind": "place",
+      "query": "Glas-bheinn Mh\u00f2r",
+      "query_style": "natural_feature",
+      "expected_name": "Glas-bheinn Mh\u00f2r",
+      "expected_lat": 57.271701,
+      "expected_lon": -4.595439,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "peak",
+        "country": "GB"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q13128650",
+        "instance_of": "Q8502",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 1
+    },
+    {
+      "id": "natural:peak:Q16665281",
+      "kind": "place",
+      "query": "Morne Incapable",
+      "query_style": "natural_feature",
+      "expected_name": "Morne Incapable",
+      "expected_lat": 16.10101,
+      "expected_lon": -61.67702,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "peak",
+        "country": "FR"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q16665281",
+        "instance_of": "Q8502",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 1
+    },
+    {
+      "id": "natural:peak:Q104640930",
+      "kind": "place",
+      "query": "Sonnenberg",
+      "query_style": "natural_feature",
+      "expected_name": "Sonnenberg",
+      "expected_lat": 49.196204,
+      "expected_lon": 7.978864,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "peak",
+        "country": "DE"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q104640930",
+        "instance_of": "Q8502",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:peak:Q22587948",
+      "kind": "place",
+      "query": "Dosso di Dentro",
+      "query_style": "natural_feature",
+      "expected_name": "Dosso di Dentro",
+      "expected_lat": 46.79556,
+      "expected_lon": 10.44069,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "peak",
+        "country": "IT"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q22587948",
+        "instance_of": "Q8502",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:peak:Q133505425",
+      "kind": "place",
+      "query": "la Codoleda",
+      "query_style": "natural_feature",
+      "expected_name": "la Codoleda",
+      "expected_lat": 41.669156,
+      "expected_lon": 1.852252,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "peak",
+        "country": "ES"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q133505425",
+        "instance_of": "Q8502",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:peak:Q11571424",
+      "kind": "place",
+      "query": "Kariba-yama",
+      "query_style": "natural_feature",
+      "expected_name": "Kariba-yama",
+      "expected_lat": 42.613333,
+      "expected_lon": 139.940556,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "peak",
+        "country": "JP"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q11571424",
+        "instance_of": "Q8502",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:peak:Q27267930",
+      "kind": "place",
+      "query": "Seokjeongmaksan",
+      "query_style": "natural_feature",
+      "expected_name": "Seokjeongmaksan",
+      "expected_lat": 34.4192,
+      "expected_lon": 126.12,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "peak",
+        "country": "KR"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q27267930",
+        "instance_of": "Q8502",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:peak:Q11060564",
+      "kind": "place",
+      "query": "Ganzuowan Mountain",
+      "query_style": "natural_feature",
+      "expected_name": "Ganzuowan Mountain",
+      "expected_lat": 23.876306,
+      "expected_lon": 121.139028,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "peak",
+        "country": "TW"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q11060564",
+        "instance_of": "Q8502",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:peak:Q5317664",
+      "kind": "place",
+      "query": "Duxton Hill",
+      "query_style": "natural_feature",
+      "expected_name": "Duxton Hill",
+      "expected_lat": 1.278778,
+      "expected_lon": 103.842833,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "peak",
+        "country": "SG"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q5317664",
+        "instance_of": "Q8502",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 1,
+      "control_base": 0
+    },
+    {
+      "id": "natural:peak:Q21907494",
+      "kind": "place",
+      "query": "Little Blue Hill",
+      "query_style": "natural_feature",
+      "expected_name": "Little Blue Hill",
+      "expected_lat": -42.31,
+      "expected_lon": 146.83,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "peak",
+        "country": "AU"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q21907494",
+        "instance_of": "Q8502",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 1
+    },
+    {
+      "id": "natural:peak:Q22433407",
+      "kind": "place",
+      "query": "Savage Mountain",
+      "query_style": "natural_feature",
+      "expected_name": "Savage Mountain",
+      "expected_lat": 56.6305,
+      "expected_lon": -126.6844,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "peak",
+        "country": "CA"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q22433407",
+        "instance_of": "Q8502",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:peak:Q27817619",
+      "kind": "place",
+      "query": "Cerro Guasimal",
+      "query_style": "natural_feature",
+      "expected_name": "Cerro Guasimal",
+      "expected_lat": 29.235833,
+      "expected_lon": -109.689167,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "peak",
+        "country": "MX"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q27817619",
+        "instance_of": "Q8502",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:peak:Q22033306",
+      "kind": "place",
+      "query": "Serra da Taquara",
+      "query_style": "natural_feature",
+      "expected_name": "Serra da Taquara",
+      "expected_lat": -24.583333,
+      "expected_lon": -50.016667,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "peak",
+        "country": "BR"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q22033306",
+        "instance_of": "Q8502",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:peak:Q20190997",
+      "kind": "place",
+      "query": "Leo Pargial",
+      "query_style": "natural_feature",
+      "expected_name": "Leo Pargial",
+      "expected_lat": 31.8844,
+      "expected_lon": 78.7353,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "peak",
+        "country": "IN"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q20190997",
+        "instance_of": "Q8502",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 1,
+      "control_base": 0
+    },
+    {
+      "id": "natural:peak:Q31532232",
+      "kind": "place",
+      "query": "Grootberg",
+      "query_style": "natural_feature",
+      "expected_name": "Grootberg",
+      "expected_lat": -30.2917,
+      "expected_lon": 17.7271,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "peak",
+        "country": "ZA"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q31532232",
+        "instance_of": "Q8502",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 1
+    },
+    {
+      "id": "natural:peak:Q101110907",
+      "kind": "place",
+      "query": "Guollej\u00e1rr\u00e1hpp\u00e1t",
+      "query_style": "natural_feature",
+      "expected_name": "Guollej\u00e1rr\u00e1hpp\u00e1t",
+      "expected_lat": 70.11501,
+      "expected_lon": 27.14909,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "peak",
+        "country": "NO"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q101110907",
+        "instance_of": "Q8502",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:peak:Q16485353",
+      "kind": "place",
+      "query": "Bardo",
+      "query_style": "natural_feature",
+      "expected_name": "Bardo",
+      "expected_lat": 49.5791,
+      "expected_lon": 20.013,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "peak",
+        "country": "PL"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q16485353",
+        "instance_of": "Q8502",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 1,
+      "control_base": 1
+    },
+    {
+      "id": "natural:peak:Q123058277",
+      "kind": "place",
+      "query": "Kara\u00e7avu\u015f Mountains",
+      "query_style": "natural_feature",
+      "expected_name": "Kara\u00e7avu\u015f Mountains",
+      "expected_lat": 38.66714,
+      "expected_lon": 41.45042,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "peak",
+        "country": "TR"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q123058277",
+        "instance_of": "Q8502",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:peak:Q15941633",
+      "kind": "place",
+      "query": "Shek Lung Kung",
+      "query_style": "natural_feature",
+      "expected_name": "Shek Lung Kung",
+      "expected_lat": 22.38135,
+      "expected_lon": 114.08756,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "peak",
+        "country": "HK"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q15941633",
+        "instance_of": "Q8502",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:volcano:Q53565991",
+      "kind": "place",
+      "query": "Pipkin",
+      "query_style": "natural_feature",
+      "expected_name": "Pipkin",
+      "expected_lat": 34.686667,
+      "expected_lon": -116.62,
+      "tolerance_km": 5.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "volcano",
+        "country": "US"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q53565991",
+        "instance_of": "Q8072",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:volcano:Q2454241",
+      "kind": "place",
+      "query": "Tristan da Cunha",
+      "query_style": "natural_feature",
+      "expected_name": "Tristan da Cunha",
+      "expected_lat": -37.115,
+      "expected_lon": -12.285,
+      "tolerance_km": 5.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "volcano",
+        "country": "GB"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q2454241",
+        "instance_of": "Q8072",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 2
+    },
+    {
+      "id": "natural:volcano:Q97292947",
+      "kind": "place",
+      "query": "Puy de la Rodde",
+      "query_style": "natural_feature",
+      "expected_name": "Puy de la Rodde",
+      "expected_lat": 45.6625,
+      "expected_lon": 2.955,
+      "tolerance_km": 5.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "volcano",
+        "country": "FR"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q97292947",
+        "instance_of": "Q8072",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 1
+    },
+    {
+      "id": "natural:volcano:Q30666957",
+      "kind": "place",
+      "query": "Grefenburg",
+      "query_style": "natural_feature",
+      "expected_name": "Grefenburg",
+      "expected_lat": 51.55694,
+      "expected_lon": 9.7579,
+      "tolerance_km": 5.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "volcano",
+        "country": "DE"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q30666957",
+        "instance_of": "Q8072",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 1
+    },
+    {
+      "id": "natural:volcano:Q1037278",
+      "kind": "place",
+      "query": "Agnano",
+      "query_style": "natural_feature",
+      "expected_name": "Agnano",
+      "expected_lat": 40.844722,
+      "expected_lon": 14.149722,
+      "tolerance_km": 5.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "volcano",
+        "country": "IT"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q1037278",
+        "instance_of": "Q8072",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:volcano:Q1374413",
+      "kind": "place",
+      "query": "Tenegu\u00eda",
+      "query_style": "natural_feature",
+      "expected_name": "Tenegu\u00eda",
+      "expected_lat": 28.473333,
+      "expected_lon": -17.851667,
+      "tolerance_km": 5.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "volcano",
+        "country": "ES"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q1374413",
+        "instance_of": "Q8072",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 1,
+      "control_base": 0
+    },
+    {
+      "id": "natural:volcano:Q3139453",
+      "kind": "place",
+      "query": "Mount Tomuraushi",
+      "query_style": "natural_feature",
+      "expected_name": "Mount Tomuraushi",
+      "expected_lat": 43.527222,
+      "expected_lon": 142.848611,
+      "tolerance_km": 5.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "volcano",
+        "country": "JP"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q3139453",
+        "instance_of": "Q8072",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 1,
+      "control_base": 0
+    },
+    {
+      "id": "natural:volcano:Q12600001",
+      "kind": "place",
+      "query": "Sanbangsan",
+      "query_style": "natural_feature",
+      "expected_name": "Sanbangsan",
+      "expected_lat": 33.240556,
+      "expected_lon": 126.313611,
+      "tolerance_km": 5.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "volcano",
+        "country": "KR"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q12600001",
+        "instance_of": "Q8072",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 1,
+      "control_base": 0
+    },
+    {
+      "id": "natural:volcano:Q16926723",
+      "kind": "place",
+      "query": "Zhuzi Mountain",
+      "query_style": "natural_feature",
+      "expected_name": "Zhuzi Mountain",
+      "expected_lat": 25.213889,
+      "expected_lon": 121.5625,
+      "tolerance_km": 5.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "volcano",
+        "country": "TW"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q16926723",
+        "instance_of": "Q8072",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:volcano:Q21960103",
+      "kind": "place",
+      "query": "Kinrara Crater",
+      "query_style": "natural_feature",
+      "expected_name": "Kinrara Crater",
+      "expected_lat": -18.4147,
+      "expected_lon": 144.9135,
+      "tolerance_km": 5.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "volcano",
+        "country": "AU"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q21960103",
+        "instance_of": "Q8072",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 1,
+      "control_base": 0
+    },
+    {
+      "id": "natural:volcano:Q6850826",
+      "kind": "place",
+      "query": "Milbanke Sound Group",
+      "query_style": "natural_feature",
+      "expected_name": "Milbanke Sound Group",
+      "expected_lat": 52.354722,
+      "expected_lon": -128.350278,
+      "tolerance_km": 5.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "volcano",
+        "country": "CA"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q6850826",
+        "instance_of": "Q8072",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:volcano:Q31450047",
+      "kind": "place",
+      "query": "Volc\u00e1nes Cuates",
+      "query_style": "natural_feature",
+      "expected_name": "Volc\u00e1nes Cuates",
+      "expected_lat": 19.193611,
+      "expected_lon": -99.443333,
+      "tolerance_km": 5.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "volcano",
+        "country": "MX"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q31450047",
+        "instance_of": "Q8072",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:volcano:Q7064057",
+      "kind": "place",
+      "query": "Nova Igua\u00e7u Volcano",
+      "query_style": "natural_feature",
+      "expected_name": "Nova Igua\u00e7u Volcano",
+      "expected_lat": -22.766944,
+      "expected_lon": -43.466389,
+      "tolerance_km": 5.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "volcano",
+        "country": "BR"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q7064057",
+        "instance_of": "Q8072",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:volcano:Q4281547",
+      "kind": "place",
+      "query": "Mascarin Peak",
+      "query_style": "natural_feature",
+      "expected_name": "Mascarin Peak",
+      "expected_lat": -46.904556,
+      "expected_lon": 37.689036,
+      "tolerance_km": 5.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "volcano",
+        "country": "ZA"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q4281547",
+        "instance_of": "Q8072",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 1
+    },
+    {
+      "id": "natural:volcano:Q140690836",
+      "kind": "place",
+      "query": "Hoyberg",
+      "query_style": "natural_feature",
+      "expected_name": "Hoyberg",
+      "expected_lat": 70.860069,
+      "expected_lon": -9.069003,
+      "tolerance_km": 5.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "volcano",
+        "country": "NO"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q140690836",
+        "instance_of": "Q8072",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 1
+    },
+    {
+      "id": "natural:volcano:Q747135",
+      "kind": "place",
+      "query": "Grodczyn",
+      "query_style": "natural_feature",
+      "expected_name": "Grodczyn",
+      "expected_lat": 50.4142,
+      "expected_lon": 16.333345,
+      "tolerance_km": 5.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "volcano",
+        "country": "PL"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q747135",
+        "instance_of": "Q8072",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:volcano:Q1433508",
+      "kind": "place",
+      "query": "Mount S\u00fcphan",
+      "query_style": "natural_feature",
+      "expected_name": "Mount S\u00fcphan",
+      "expected_lat": 38.92983,
+      "expected_lon": 42.82959,
+      "tolerance_km": 5.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "volcano",
+        "country": "TR"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q1433508",
+        "instance_of": "Q8072",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 1,
+      "control_base": 0
+    },
+    {
+      "id": "natural:island:Q130311393",
+      "kind": "place",
+      "query": "Stone Island",
+      "query_style": "natural_feature",
+      "expected_name": "Stone Island",
+      "expected_lat": 43.926111,
+      "expected_lon": -69.300278,
+      "tolerance_km": 10.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "island",
+        "country": "US"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q130311393",
+        "instance_of": "Q23442",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 1
+    },
+    {
+      "id": "natural:island:Q2007541",
+      "kind": "place",
+      "query": "Samson",
+      "query_style": "natural_feature",
+      "expected_name": "Samson",
+      "expected_lat": 49.933072,
+      "expected_lon": -6.352633,
+      "tolerance_km": 10.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "island",
+        "country": "GB"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q2007541",
+        "instance_of": "Q23442",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 1
+    },
+    {
+      "id": "natural:island:Q21619543",
+      "kind": "place",
+      "query": "Roches Kourou",
+      "query_style": "natural_feature",
+      "expected_name": "Roches Kourou",
+      "expected_lat": 5.14684,
+      "expected_lon": -52.57625,
+      "tolerance_km": 10.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "island",
+        "country": "FR"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q21619543",
+        "instance_of": "Q23442",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:island:Q1826333",
+      "kind": "place",
+      "query": "Lindwerder",
+      "query_style": "natural_feature",
+      "expected_name": "Lindwerder",
+      "expected_lat": 52.5772,
+      "expected_lon": 13.2528,
+      "tolerance_km": 10.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "island",
+        "country": "DE"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q1826333",
+        "instance_of": "Q23442",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 1
+    },
+    {
+      "id": "natural:island:Q1249309",
+      "kind": "place",
+      "query": "Pantelleria Island",
+      "query_style": "natural_feature",
+      "expected_name": "Pantelleria Island",
+      "expected_lat": 36.783333,
+      "expected_lon": 12.0,
+      "tolerance_km": 10.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "island",
+        "country": "IT"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q1249309",
+        "instance_of": "Q23442",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:island:Q23983123",
+      "kind": "place",
+      "query": "Illa de ses Rates",
+      "query_style": "natural_feature",
+      "expected_name": "Illa de ses Rates",
+      "expected_lat": 39.132778,
+      "expected_lon": 2.923333,
+      "tolerance_km": 10.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "island",
+        "country": "ES"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q23983123",
+        "instance_of": "Q23442",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:island:Q109405713",
+      "kind": "place",
+      "query": "Bird Island",
+      "query_style": "natural_feature",
+      "expected_name": "Bird Island",
+      "expected_lat": 35.631105,
+      "expected_lon": 139.769182,
+      "tolerance_km": 10.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "island",
+        "country": "JP"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q109405713",
+        "instance_of": "Q23442",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:island:Q22973052",
+      "kind": "place",
+      "query": "Geumodo",
+      "query_style": "natural_feature",
+      "expected_name": "Geumodo",
+      "expected_lat": 34.52333,
+      "expected_lon": 127.75222,
+      "tolerance_km": 10.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "island",
+        "country": "KR"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q22973052",
+        "instance_of": "Q23442",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:island:Q15915516",
+      "kind": "place",
+      "query": "Xiaochiwei Islet",
+      "query_style": "natural_feature",
+      "expected_name": "Xiaochiwei Islet",
+      "expected_lat": 25.921667,
+      "expected_lon": 123.555,
+      "tolerance_km": 10.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "island",
+        "country": "TW"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q15915516",
+        "instance_of": "Q23442",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:island:Q1928550",
+      "kind": "place",
+      "query": "Pulau Ubin",
+      "query_style": "natural_feature",
+      "expected_name": "Pulau Ubin",
+      "expected_lat": 1.411944,
+      "expected_lon": 103.963889,
+      "tolerance_km": 10.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "island",
+        "country": "SG"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q1928550",
+        "instance_of": "Q23442",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 1,
+      "control_base": 1
+    },
+    {
+      "id": "natural:island:Q21909027",
+      "kind": "place",
+      "query": "Harold Island",
+      "query_style": "natural_feature",
+      "expected_name": "Harold Island",
+      "expected_lat": -20.239167,
+      "expected_lon": 149.155,
+      "tolerance_km": 10.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "island",
+        "country": "AU"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q21909027",
+        "instance_of": "Q23442",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 1
+    },
+    {
+      "id": "natural:island:Q22467763",
+      "kind": "place",
+      "query": "Pakwatew Ministik",
+      "query_style": "natural_feature",
+      "expected_name": "Pakwatew Ministik",
+      "expected_lat": 58.545278,
+      "expected_lon": -114.456667,
+      "tolerance_km": 10.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "island",
+        "country": "CA"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q22467763",
+        "instance_of": "Q23442",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:island:Q19462538",
+      "kind": "place",
+      "query": "Isla San Damian",
+      "query_style": "natural_feature",
+      "expected_name": "Isla San Damian",
+      "expected_lat": 25.5862,
+      "expected_lon": -111.13048,
+      "tolerance_km": 10.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "island",
+        "country": "MX"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q19462538",
+        "instance_of": "Q23442",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 1
+    },
+    {
+      "id": "natural:island:Q22031272",
+      "kind": "place",
+      "query": "Ilha de Curu\u00e7a",
+      "query_style": "natural_feature",
+      "expected_name": "Ilha de Curu\u00e7a",
+      "expected_lat": -0.55,
+      "expected_lon": -47.808333,
+      "tolerance_km": 10.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "island",
+        "country": "BR"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q22031272",
+        "instance_of": "Q23442",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:island:Q26780998",
+      "kind": "place",
+      "query": "Outer Islet",
+      "query_style": "natural_feature",
+      "expected_name": "Outer Islet",
+      "expected_lat": 19.268611,
+      "expected_lon": 72.758333,
+      "tolerance_km": 10.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "island",
+        "country": "IN"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q26780998",
+        "instance_of": "Q23442",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:island:Q31880646",
+      "kind": "place",
+      "query": "Bird Island",
+      "query_style": "natural_feature",
+      "expected_name": "Bird Island",
+      "expected_lat": -28.8,
+      "expected_lon": 32.05,
+      "tolerance_km": 10.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "island",
+        "country": "ZA"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q31880646",
+        "instance_of": "Q23442",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:island:Q165635",
+      "kind": "place",
+      "query": "Hinn\u00f8ya",
+      "query_style": "natural_feature",
+      "expected_name": "Hinn\u00f8ya",
+      "expected_lat": 68.533333,
+      "expected_lon": 15.833333,
+      "tolerance_km": 10.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "island",
+        "country": "NO"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q165635",
+        "instance_of": "Q23442",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:island:Q7107952",
+      "kind": "place",
+      "query": "Ostr\u00f3w Tumski, Pozna\u0144",
+      "query_style": "natural_feature",
+      "expected_name": "Ostr\u00f3w Tumski, Pozna\u0144",
+      "expected_lat": 52.411411,
+      "expected_lon": 16.947858,
+      "tolerance_km": 10.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "island",
+        "country": "PL"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q7107952",
+        "instance_of": "Q23442",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:island:Q49649857",
+      "kind": "place",
+      "query": "Ku\u015f Island",
+      "query_style": "natural_feature",
+      "expected_name": "Ku\u015f Island",
+      "expected_lat": 40.460278,
+      "expected_lon": 27.561945,
+      "tolerance_km": 10.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "island",
+        "country": "TR"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q49649857",
+        "instance_of": "Q23442",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:bridge:Q114960569",
+      "kind": "place",
+      "query": "Childs Pony Truss Bridge",
+      "query_style": "natural_feature",
+      "expected_name": "Childs Pony Truss Bridge",
+      "expected_lat": 39.65178,
+      "expected_lon": -75.86438,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "bridge",
+        "country": "US"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q114960569",
+        "instance_of": "Q12280",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:bridge:Q126700395",
+      "kind": "place",
+      "query": "Black Bridge",
+      "query_style": "natural_feature",
+      "expected_name": "Black Bridge",
+      "expected_lat": 54.6888,
+      "expected_lon": -7.44316,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "bridge",
+        "country": "GB"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q126700395",
+        "instance_of": "Q12280",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:bridge:Q105733899",
+      "kind": "place",
+      "query": "pont du Halage de Tounis",
+      "query_style": "natural_feature",
+      "expected_name": "pont du Halage de Tounis",
+      "expected_lat": 43.59357,
+      "expected_lon": 1.44069,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "bridge",
+        "country": "FR"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q105733899",
+        "instance_of": "Q12280",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 4
+    },
+    {
+      "id": "natural:bridge:Q121360047",
+      "kind": "place",
+      "query": "Leon Gonczarowski Bridge",
+      "query_style": "natural_feature",
+      "expected_name": "Leon Gonczarowski Bridge",
+      "expected_lat": 50.295519,
+      "expected_lon": 11.935717,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "bridge",
+        "country": "DE"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q121360047",
+        "instance_of": "Q12280",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:bridge:Q108732002",
+      "kind": "place",
+      "query": "Ponte Nuovo",
+      "query_style": "natural_feature",
+      "expected_name": "Ponte Nuovo",
+      "expected_lat": 42.783056,
+      "expected_lon": 11.060555,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "bridge",
+        "country": "IT"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q108732002",
+        "instance_of": "Q12280",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 1
+    },
+    {
+      "id": "natural:bridge:Q113496027",
+      "kind": "place",
+      "query": "Pont de la font de Cal Baldiri",
+      "query_style": "natural_feature",
+      "expected_name": "Pont de la font de Cal Baldiri",
+      "expected_lat": 41.74743,
+      "expected_lon": 1.58536,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "bridge",
+        "country": "ES"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q113496027",
+        "instance_of": "Q12280",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:bridge:Q117474375",
+      "kind": "place",
+      "query": "Urashima Bridge",
+      "query_style": "natural_feature",
+      "expected_name": "Urashima Bridge",
+      "expected_lat": 33.12101,
+      "expected_lon": 130.438671,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "bridge",
+        "country": "JP"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q117474375",
+        "instance_of": "Q12280",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:bridge:Q16092255",
+      "kind": "place",
+      "query": "Neungpagyo",
+      "query_style": "natural_feature",
+      "expected_name": "Neungpagyo",
+      "expected_lat": 38.4025,
+      "expected_lon": 128.378333,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "bridge",
+        "country": "KR"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q16092255",
+        "instance_of": "Q12280",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:bridge:Q18653556",
+      "kind": "place",
+      "query": "Xinwu Bridge",
+      "query_style": "natural_feature",
+      "expected_name": "Xinwu Bridge",
+      "expected_lat": 23.133145,
+      "expected_lon": 121.119206,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "bridge",
+        "country": "TW"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q18653556",
+        "instance_of": "Q12280",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:bridge:Q17750009",
+      "kind": "place",
+      "query": "Bayfront Bridge",
+      "query_style": "natural_feature",
+      "expected_name": "Bayfront Bridge",
+      "expected_lat": 1.287083,
+      "expected_lon": 103.860889,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "bridge",
+        "country": "SG"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q17750009",
+        "instance_of": "Q12280",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 1,
+      "control_base": 1
+    },
+    {
+      "id": "natural:bridge:Q55636896",
+      "kind": "place",
+      "query": "Vacy Bridge over Paterson River",
+      "query_style": "natural_feature",
+      "expected_name": "Vacy Bridge over Paterson River",
+      "expected_lat": -32.538,
+      "expected_lon": 151.576,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "bridge",
+        "country": "AU"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q55636896",
+        "instance_of": "Q12280",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:bridge:Q113034943",
+      "kind": "place",
+      "query": "Pont Rossignol",
+      "query_style": "natural_feature",
+      "expected_name": "Pont Rossignol",
+      "expected_lat": 45.647778,
+      "expected_lon": -75.288889,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "bridge",
+        "country": "CA"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q113034943",
+        "instance_of": "Q12280",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:bridge:Q65494372",
+      "kind": "place",
+      "query": "bridge of San Rafael",
+      "query_style": "natural_feature",
+      "expected_name": "bridge of San Rafael",
+      "expected_lat": 20.9411,
+      "expected_lon": -100.7936,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "bridge",
+        "country": "MX"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q65494372",
+        "instance_of": "Q12280",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:bridge:Q55410203",
+      "kind": "place",
+      "query": "Ponte do Pontal",
+      "query_style": "natural_feature",
+      "expected_name": "Ponte do Pontal",
+      "expected_lat": -23.217167,
+      "expected_lon": -44.714083,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "bridge",
+        "country": "BR"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q55410203",
+        "instance_of": "Q12280",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:bridge:Q23823831",
+      "kind": "place",
+      "query": "Hancock Bridge, Mumbai",
+      "query_style": "natural_feature",
+      "expected_name": "Hancock Bridge, Mumbai",
+      "expected_lat": 18.96484,
+      "expected_lon": 72.83867,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "bridge",
+        "country": "IN"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q23823831",
+        "instance_of": "Q12280",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:bridge:Q125576878",
+      "kind": "place",
+      "query": "Havenga Bridge",
+      "query_style": "natural_feature",
+      "expected_name": "Havenga Bridge",
+      "expected_lat": -29.91081,
+      "expected_lon": 24.63634,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "bridge",
+        "country": "ZA"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q125576878",
+        "instance_of": "Q12280",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 1,
+      "control_base": 0
+    },
+    {
+      "id": "natural:bridge:Q20113159",
+      "kind": "place",
+      "query": "Treschows bru",
+      "query_style": "natural_feature",
+      "expected_name": "Treschows bru",
+      "expected_lat": 59.941139,
+      "expected_lon": 10.768417,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "bridge",
+        "country": "NO"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q20113159",
+        "instance_of": "Q12280",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 1
+    },
+    {
+      "id": "natural:bridge:Q11785887",
+      "kind": "place",
+      "query": "Ignacy Moscicki Bridge in Pu\u0142awy",
+      "query_style": "natural_feature",
+      "expected_name": "Ignacy Moscicki Bridge in Pu\u0142awy",
+      "expected_lat": 51.413611,
+      "expected_lon": 21.945278,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "bridge",
+        "country": "PL"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q11785887",
+        "instance_of": "Q12280",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:bridge:Q132735502",
+      "kind": "place",
+      "query": "Yapraklar Bridge (\u0130yidere)",
+      "query_style": "natural_feature",
+      "expected_name": "Yapraklar Bridge (\u0130yidere)",
+      "expected_lat": 40.995022,
+      "expected_lon": 40.372593,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "bridge",
+        "country": "TR"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q132735502",
+        "instance_of": "Q12280",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:square:Q124979075",
+      "kind": "place",
+      "query": "Columbus Square",
+      "query_style": "natural_feature",
+      "expected_name": "Columbus Square",
+      "expected_lat": 40.77,
+      "expected_lon": -73.917424,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "square",
+        "country": "US"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q124979075",
+        "instance_of": "Q174782",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 1,
+      "control_base": 1
+    },
+    {
+      "id": "natural:square:Q109374506",
+      "kind": "place",
+      "query": "Whitfield Place",
+      "query_style": "natural_feature",
+      "expected_name": "Whitfield Place",
+      "expected_lat": 51.524,
+      "expected_lon": -0.1385,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "square",
+        "country": "GB"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q109374506",
+        "instance_of": "Q174782",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:square:Q115837519",
+      "kind": "place",
+      "query": "place des Fauvelles",
+      "query_style": "natural_feature",
+      "expected_name": "place des Fauvelles",
+      "expected_lat": 48.90057,
+      "expected_lon": 2.231591,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "square",
+        "country": "FR"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q115837519",
+        "instance_of": "Q174782",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:square:Q111351960",
+      "kind": "place",
+      "query": "Viktoriaplatz",
+      "query_style": "natural_feature",
+      "expected_name": "Viktoriaplatz",
+      "expected_lat": 52.44382,
+      "expected_lon": 13.30044,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "square",
+        "country": "DE"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q111351960",
+        "instance_of": "Q174782",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 1
+    },
+    {
+      "id": "natural:square:Q127789437",
+      "kind": "place",
+      "query": "piazza Madonna della Provvidenza",
+      "query_style": "natural_feature",
+      "expected_name": "piazza Madonna della Provvidenza",
+      "expected_lat": 45.47655,
+      "expected_lon": 9.08882,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "square",
+        "country": "IT"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q127789437",
+        "instance_of": "Q174782",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:square:Q115929242",
+      "kind": "place",
+      "query": "Enrique Garc\u00eda-Herrera Square",
+      "query_style": "natural_feature",
+      "expected_name": "Enrique Garc\u00eda-Herrera Square",
+      "expected_lat": 36.71977,
+      "expected_lon": -4.42445,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "square",
+        "country": "ES"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q115929242",
+        "instance_of": "Q174782",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:square:Q107739286",
+      "kind": "place",
+      "query": "Media Hiroba",
+      "query_style": "natural_feature",
+      "expected_name": "Media Hiroba",
+      "expected_lat": 35.170801,
+      "expected_lon": 136.908481,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "square",
+        "country": "JP"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q107739286",
+        "instance_of": "Q174782",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:square:Q482760",
+      "kind": "place",
+      "query": "Seoul Plaza",
+      "query_style": "natural_feature",
+      "expected_name": "Seoul Plaza",
+      "expected_lat": 37.565577,
+      "expected_lon": 126.978082,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "square",
+        "country": "KR"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q482760",
+        "instance_of": "Q174782",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:square:Q97358137",
+      "kind": "place",
+      "query": "Chiang Wei-shui Memorial Plaza",
+      "query_style": "natural_feature",
+      "expected_name": "Chiang Wei-shui Memorial Plaza",
+      "expected_lat": 25.02213,
+      "expected_lon": 121.56021,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "square",
+        "country": "TW"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q97358137",
+        "instance_of": "Q174782",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:square:Q7138919",
+      "kind": "place",
+      "query": "Parliament Square, Hobart",
+      "query_style": "natural_feature",
+      "expected_name": "Parliament Square, Hobart",
+      "expected_lat": -42.885,
+      "expected_lon": 147.33,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "square",
+        "country": "AU"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q7138919",
+        "instance_of": "Q174782",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:square:Q3389782",
+      "kind": "place",
+      "query": "Place De La Dauversi\u00e8re",
+      "query_style": "natural_feature",
+      "expected_name": "Place De La Dauversi\u00e8re",
+      "expected_lat": 45.5084,
+      "expected_lon": -73.5534,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "square",
+        "country": "CA"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q3389782",
+        "instance_of": "Q174782",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 1,
+      "control_base": 1
+    },
+    {
+      "id": "natural:square:Q109590542",
+      "kind": "place",
+      "query": "Plaza Hidalgo",
+      "query_style": "natural_feature",
+      "expected_name": "Plaza Hidalgo",
+      "expected_lat": 20.615,
+      "expected_lon": -105.231944,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "square",
+        "country": "MX"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q109590542",
+        "instance_of": "Q174782",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:square:Q116783385",
+      "kind": "place",
+      "query": "Pra\u00e7a do Carmo",
+      "query_style": "natural_feature",
+      "expected_name": "Pra\u00e7a do Carmo",
+      "expected_lat": -1.458109,
+      "expected_lon": -48.505635,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "square",
+        "country": "BR"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q116783385",
+        "instance_of": "Q174782",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 1,
+      "control_base": 1
+    },
+    {
+      "id": "natural:square:Q260122",
+      "kind": "place",
+      "query": "Thekkinkadu Maidan",
+      "query_style": "natural_feature",
+      "expected_name": "Thekkinkadu Maidan",
+      "expected_lat": 10.5249,
+      "expected_lon": 76.2144,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "square",
+        "country": "IN"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q260122",
+        "instance_of": "Q174782",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 1,
+      "control_base": 0
+    },
+    {
+      "id": "natural:square:Q6990632",
+      "kind": "place",
+      "query": "Nelson Mandela Square",
+      "query_style": "natural_feature",
+      "expected_name": "Nelson Mandela Square",
+      "expected_lat": -26.1074,
+      "expected_lon": 28.0546,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "square",
+        "country": "ZA"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q6990632",
+        "instance_of": "Q174782",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 1,
+      "control_base": 0
+    },
+    {
+      "id": "natural:square:Q20113253",
+      "kind": "place",
+      "query": "\u00c5mot grustak, Oslo",
+      "query_style": "natural_feature",
+      "expected_name": "\u00c5mot grustak, Oslo",
+      "expected_lat": 60.01961,
+      "expected_lon": 10.61605,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "square",
+        "country": "NO"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q20113253",
+        "instance_of": "Q174782",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:square:Q11819219",
+      "kind": "place",
+      "query": "Zgody Square",
+      "query_style": "natural_feature",
+      "expected_name": "Zgody Square",
+      "expected_lat": 53.4286,
+      "expected_lon": 14.5439,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "square",
+        "country": "PL"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q11819219",
+        "instance_of": "Q174782",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:square:Q6046415",
+      "kind": "place",
+      "query": "K\u0131z\u0131lay Meydan\u0131",
+      "query_style": "natural_feature",
+      "expected_name": "K\u0131z\u0131lay Meydan\u0131",
+      "expected_lat": 39.920556,
+      "expected_lon": 32.853611,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "square",
+        "country": "TR"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q6046415",
+        "instance_of": "Q174782",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 1,
+      "control_base": 0
+    },
+    {
+      "id": "natural:square:Q136396717",
+      "kind": "place",
+      "query": "Chinachem Century Tower",
+      "query_style": "natural_feature",
+      "expected_name": "Chinachem Century Tower",
+      "expected_lat": 22.280396,
+      "expected_lon": 114.171215,
+      "tolerance_km": 1.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "square",
+        "country": "HK"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q136396717",
+        "instance_of": "Q174782",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 1,
+      "control_base": 0
+    },
+    {
+      "id": "natural:park:Q23016720",
+      "kind": "place",
+      "query": "Conejo Canyons Open Space",
+      "query_style": "natural_feature",
+      "expected_name": "Conejo Canyons Open Space",
+      "expected_lat": 34.213694,
+      "expected_lon": -118.927611,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "park",
+        "country": "US"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q23016720",
+        "instance_of": "Q22698",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 1,
+      "control_base": 0
+    },
+    {
+      "id": "natural:park:Q30625465",
+      "kind": "place",
+      "query": "Barton Mills Valley",
+      "query_style": "natural_feature",
+      "expected_name": "Barton Mills Valley",
+      "expected_lat": 52.337,
+      "expected_lon": 0.525,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "park",
+        "country": "GB"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q30625465",
+        "instance_of": "Q22698",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 1,
+      "control_base": 0
+    },
+    {
+      "id": "natural:park:Q135183983",
+      "kind": "place",
+      "query": "Jardin Debussy Champagne",
+      "query_style": "natural_feature",
+      "expected_name": "Jardin Debussy Champagne",
+      "expected_lat": 48.696508,
+      "expected_lon": 2.356983,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "park",
+        "country": "FR"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q135183983",
+        "instance_of": "Q22698",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:park:Q1405825",
+      "kind": "place",
+      "query": "Sanspareil",
+      "query_style": "natural_feature",
+      "expected_name": "Sanspareil",
+      "expected_lat": 49.9844,
+      "expected_lon": 11.3152,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "park",
+        "country": "DE"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q1405825",
+        "instance_of": "Q22698",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:park:Q132048404",
+      "kind": "place",
+      "query": "Giardino Giovanni Andrea Corso",
+      "query_style": "natural_feature",
+      "expected_name": "Giardino Giovanni Andrea Corso",
+      "expected_lat": 44.125789,
+      "expected_lon": 8.20941,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "park",
+        "country": "IT"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q132048404",
+        "instance_of": "Q22698",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:park:Q24024548",
+      "kind": "place",
+      "query": "Bike Park Tres Cantos",
+      "query_style": "natural_feature",
+      "expected_name": "Bike Park Tres Cantos",
+      "expected_lat": 40.61085,
+      "expected_lon": -3.70383,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "park",
+        "country": "ES"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q24024548",
+        "instance_of": "Q22698",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 1,
+      "control_base": 0
+    },
+    {
+      "id": "natural:park:Q17221794",
+      "kind": "place",
+      "query": "Senogawa Park",
+      "query_style": "natural_feature",
+      "expected_name": "Senogawa Park",
+      "expected_lat": 34.429378,
+      "expected_lon": 132.638258,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "park",
+        "country": "JP"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q17221794",
+        "instance_of": "Q22698",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 1,
+      "control_base": 0
+    },
+    {
+      "id": "natural:park:Q27341328",
+      "kind": "place",
+      "query": "Goindolgongwon",
+      "query_style": "natural_feature",
+      "expected_name": "Goindolgongwon",
+      "expected_lat": 38.079444,
+      "expected_lon": 127.076389,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "park",
+        "country": "KR"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q27341328",
+        "instance_of": "Q22698",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:park:Q28416989",
+      "kind": "place",
+      "query": "Pingtung Park",
+      "query_style": "natural_feature",
+      "expected_name": "Pingtung Park",
+      "expected_lat": 22.675833,
+      "expected_lon": 120.492778,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "park",
+        "country": "TW"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q28416989",
+        "instance_of": "Q22698",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 1,
+      "control_base": 0
+    },
+    {
+      "id": "natural:park:Q4879350",
+      "kind": "place",
+      "query": "Bedok Town Park",
+      "query_style": "natural_feature",
+      "expected_name": "Bedok Town Park",
+      "expected_lat": 1.33694,
+      "expected_lon": 103.93833,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "park",
+        "country": "SG"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q4879350",
+        "instance_of": "Q22698",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 2,
+      "control_base": 1
+    },
+    {
+      "id": "natural:park:Q21932634",
+      "kind": "place",
+      "query": "Mowantjie Willauwar Conservation Park",
+      "query_style": "natural_feature",
+      "expected_name": "Mowantjie Willauwar Conservation Park",
+      "expected_lat": -35.309167,
+      "expected_lon": 139.419722,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "park",
+        "country": "AU"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q21932634",
+        "instance_of": "Q22698",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 1,
+      "control_base": 0
+    },
+    {
+      "id": "natural:park:Q22485004",
+      "kind": "place",
+      "query": "Parc Marquis-De Montcalm",
+      "query_style": "natural_feature",
+      "expected_name": "Parc Marquis-De Montcalm",
+      "expected_lat": 45.29788,
+      "expected_lon": -73.26556,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "park",
+        "country": "CA"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q22485004",
+        "instance_of": "Q22698",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 1
+    },
+    {
+      "id": "natural:park:Q6062459",
+      "kind": "place",
+      "query": "Papagayo Park",
+      "query_style": "natural_feature",
+      "expected_name": "Papagayo Park",
+      "expected_lat": 16.8597,
+      "expected_lon": -99.8869,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "park",
+        "country": "MX"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q6062459",
+        "instance_of": "Q22698",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:park:Q22068717",
+      "kind": "place",
+      "query": "Parque da Serra da Caneca Fina",
+      "query_style": "natural_feature",
+      "expected_name": "Parque da Serra da Caneca Fina",
+      "expected_lat": -22.47899,
+      "expected_lon": -42.95198,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "park",
+        "country": "BR"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q22068717",
+        "instance_of": "Q22698",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 2,
+      "control_base": 0
+    },
+    {
+      "id": "natural:park:Q137208000",
+      "kind": "place",
+      "query": "Lalithodyana park, Dharmasthala",
+      "query_style": "natural_feature",
+      "expected_name": "Lalithodyana park, Dharmasthala",
+      "expected_lat": 12.950591,
+      "expected_lon": 75.38165,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "park",
+        "country": "IN"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q137208000",
+        "instance_of": "Q22698",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:park:Q32014690",
+      "kind": "place",
+      "query": "Saint Lucia Park",
+      "query_style": "natural_feature",
+      "expected_name": "Saint Lucia Park",
+      "expected_lat": -28.274167,
+      "expected_lon": 32.412222,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "park",
+        "country": "ZA"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q32014690",
+        "instance_of": "Q22698",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:park:Q23042769",
+      "kind": "place",
+      "query": "Etterstadparken",
+      "query_style": "natural_feature",
+      "expected_name": "Etterstadparken",
+      "expected_lat": 59.909528,
+      "expected_lon": 10.798828,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "park",
+        "country": "NO"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q23042769",
+        "instance_of": "Q22698",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 1,
+      "control_base": 1
+    },
+    {
+      "id": "natural:park:Q106104145",
+      "kind": "place",
+      "query": "Remains of the Park",
+      "query_style": "natural_feature",
+      "expected_name": "Remains of the Park",
+      "expected_lat": 50.339833,
+      "expected_lon": 18.772917,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "park",
+        "country": "PL"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q106104145",
+        "instance_of": "Q22698",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:park:Q49512241",
+      "kind": "place",
+      "query": "Kuvai Milliye Park",
+      "query_style": "natural_feature",
+      "expected_name": "Kuvai Milliye Park",
+      "expected_lat": 36.918056,
+      "expected_lon": 34.913611,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "park",
+        "country": "TR"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q49512241",
+        "instance_of": "Q22698",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    },
+    {
+      "id": "natural:park:Q86681959",
+      "kind": "place",
+      "query": "Adventure Park",
+      "query_style": "natural_feature",
+      "expected_name": "Adventure Park",
+      "expected_lat": 22.385035,
+      "expected_lon": 113.963966,
+      "tolerance_km": 2.0,
+      "expected_feature_type": "poi",
+      "strata": {
+        "scope": "natural_feature",
+        "feature_class": "park",
+        "country": "HK"
+      },
+      "provenance": {
+        "source_name": "Wikidata",
+        "source_kind": "open_knowledge_base",
+        "source_license": "CC0-1.0",
+        "source_record_id": "Q86681959",
+        "instance_of": "Q22698",
+        "coordinate_property": "P625",
+        "selection_method": "first 120 endpoint rows for (class, country), ranked by sha256(QID), top 1",
+        "accessed_at": "2026-08-07T02:07:49Z",
+        "osm_derived": false
+      },
+      "control_places": 0,
+      "control_base": 0
+    }
+  ]
+}

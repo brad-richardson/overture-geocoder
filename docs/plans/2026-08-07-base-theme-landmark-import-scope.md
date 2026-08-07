@@ -136,6 +136,12 @@ still has no open mechanism.
 
 ## 6. What to measure before committing
 
+**All four are now measured — see `2026-08-07-base-import-measurements.md`.**
+Duplicates 5.5% (not a blocker), real head cost **+4.8%** after the per-token cap
+(not the +14.0% upper bound below), the natural-feature stratum built and run
+(+19 of 114 cases, ceiling 28 -> 47), and the names-only join **refuted** at 2.8%
+reach. The list below is kept as authored.
+
 1. **Duplicate rate**: of the admitted 4.7M, how many have a Places record with
    the same normalized name within 200 m. That decides whether the import needs
    collapse first, and it is a local join, not a rebuild.
