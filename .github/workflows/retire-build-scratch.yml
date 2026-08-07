@@ -1,0 +1,316 @@
+name: Retire Build Scratch
+
+# Delete the build-time scratch a completed construction-v1 run leaves behind,
+# once that build's slice is PROMOTED and its reverse indexes are PUBLISHED.
+#
+# Why this exists: nothing in construction-v1.yml ever deletes anything, so
+# every planet build leaves 100-305 GiB of staging behind forever. The
+# 2026-08-07 audit found geocoder-shards at 2.35 TiB, of which staging/ alone
+# was 832.92 GiB across four completed builds.
+#
+# WHY IT IS NOT A STEP IN construction-v1.yml, which is the obvious place:
+# "after a successful build" is the WRONG moment, and that is very likely why
+# nobody added it. Two things read this scratch AFTER the build finishes:
+#
+#   * promote-slice rebuilds its reduction records from the staging store
+#     (construction_v1_hosted.py export-reductions --staging-bucket)
+#   * reverse-v2 consumes the per-record position packs under
+#     construction-v1/<binding>/slice/ (Places `positions`, Address
+#     `address_records`)
+#
+# Purging at finalize would break the next two steps of the operator's own
+# workflow. The safe moment is after promotion AND reverse publication, which
+# is a state this workflow verifies rather than assumes.
+#
+# What it never touches: any slice-* prefix, any YYYY-MM-DD.N version prefix,
+# and the catalog. Serving data is read exclusively from the release manifest's
+# entrypoints under slice-*/ -- the Worker never reads a construction-v1/ or
+# staging/ key at all. Rollback does not need scratch either: recover reads only
+# v2/catalog.json and the release documents.
+
+on:
+  workflow_dispatch:
+    inputs:
+      slice_version:
+        description: Promoted slice whose build scratch is being retired (slice-YYYY-MM-DD.N).
+        required: true
+        type: string
+      request_sha256:
+        description: >-
+          The construction request digest. Its staging store is
+          staging/global-v2/<request_sha256>/. Must match the slice's own
+          claims/<family>.json, which is what binds the scratch to the slice.
+        required: true
+        type: string
+      construction_binding:
+        description: >-
+          Optional. The construction-v1/<binding>/ namespace digest, holding the
+          position packs that fed the reverse build. Leave empty to retire only
+          the staging store. The binding is sha256 over the request BEFORE
+          namespaces are added, so it cannot be derived from request_sha256 --
+          read it off the run or the bucket listing.
+        required: false
+        default: ""
+        type: string
+      mode:
+        description: dry-run lists every key that would be deleted and removes nothing.
+        required: true
+        default: dry-run
+        type: choice
+        options: [dry-run, execute]
+
+# Reads v2/catalog.json and the release chain. Joins the publication group so it
+# can never interleave with a promotion that is mid-sequence.
+concurrency:
+  group: r2-v2-publication
+  cancel-in-progress: false
+
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+  AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+  AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+  BUCKET: geocoder-shards
+  DRY_RUN: ${{ inputs.mode == 'dry-run' }}
+  # Belt and braces against a typo'd input reaching a delete. These are matched
+  # as whole first path components, in either direction.
+  PROTECTED_PREFIXES: "v2 backups catalog.json"
+
+jobs:
+  retire:
+    name: Verify the slice is promoted and reverse-published, then retire its scratch
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out main without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Validate inputs (no secrets)
+        env:
+          SLICE_VERSION: ${{ inputs.slice_version }}
+          REQUEST_SHA256: ${{ inputs.request_sha256 }}
+          CONSTRUCTION_BINDING: ${{ inputs.construction_binding }}
+        run: |
+          set -euo pipefail
+          # Reject whitespace first. A multi-line dispatch value would otherwise
+          # pass a per-line grep on its first line and smuggle the rest into the
+          # target file as additional delete targets.
+          for pair in "slice_version:$SLICE_VERSION" \
+                      "request_sha256:$REQUEST_SHA256" \
+                      "construction_binding:$CONSTRUCTION_BINDING"; do
+            value="${pair#*:}"
+            case "$value" in
+              *$'\n'*|*$'\r'*|*$'\t'*|*" "*)
+                echo "::error::${pair%%:*} must be a single line with no whitespace"
+                exit 1;;
+            esac
+          done
+          printf '%s' "$SLICE_VERSION" \
+            | grep -Eq '^slice-[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$' \
+            || { echo "::error::slice_version must match slice-YYYY-MM-DD.N"; exit 1; }
+          printf '%s' "$REQUEST_SHA256" | grep -Eq '^[0-9a-f]{64}$' \
+            || { echo "::error::request_sha256 must be 64 lowercase hex"; exit 1; }
+          if [ -n "$CONSTRUCTION_BINDING" ]; then
+            printf '%s' "$CONSTRUCTION_BINDING" | grep -Eq '^[0-9a-f]{64}$' \
+              || { echo "::error::construction_binding must be 64 lowercase hex"; exit 1; }
+          fi
+          echo "retiring scratch for $SLICE_VERSION (request $REQUEST_SHA256)"
+
+      - name: Set up exact Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.11'
+
+      - name: Fetch the v2 chain, fail closed on anything unreadable
+        run: |
+          set -euo pipefail
+          export ENDPOINT="https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          S3() { aws "$@" --endpoint-url "$ENDPOINT" --region auto; }
+          S3 s3 cp "s3://$BUCKET/v2/catalog.json" /tmp/v2-catalog.json
+          mkdir -p /tmp/v2-releases
+          jq -r '.releases[]? | "\(.geocoder_build) \(.manifest_key)"' \
+            /tmp/v2-catalog.json > /tmp/v2-release-keys.txt
+          while read -r build key; do
+            [ -n "$build" ] || continue
+            mkdir -p "/tmp/v2-releases/$build"
+            S3 s3 cp "s3://$BUCKET/$key" "/tmp/v2-releases/$build/release.json"
+          done < /tmp/v2-release-keys.txt
+
+      # The INVERSE of the usual retention question. Everywhere else the guard
+      # proves a prefix is unreferenced before deleting it. Here the slice must
+      # be REFERENCED: an unpromoted slice's scratch is still needed to promote
+      # it, and deleting it would strand a completed planet build.
+      - name: Require the slice to be promoted
+        env:
+          SLICE_VERSION: ${{ inputs.slice_version }}
+        run: |
+          set -euo pipefail
+          python3 scripts/v2_retention_guard.py list-referenced \
+            --v2-catalog /tmp/v2-catalog.json \
+            --releases-dir /tmp/v2-releases > /tmp/referenced.txt
+          echo "v2 chain references:"; sed 's/^/  /' /tmp/referenced.txt
+          grep -Fxq "$SLICE_VERSION" /tmp/referenced.txt || {
+            echo "::error::$SLICE_VERSION is NOT referenced by the v2 chain. Its build scratch is what promotion reads; refusing to retire scratch for an unpromoted slice."
+            exit 1
+          }
+          echo "$SLICE_VERSION is promoted and referenced."
+
+      # Binds the scratch to the slice. Without this the operator could name any
+      # request digest and delete an unrelated build's staging store.
+      - name: Require the slice's own claims to name this request
+        env:
+          SLICE_VERSION: ${{ inputs.slice_version }}
+          REQUEST_SHA256: ${{ inputs.request_sha256 }}
+        run: |
+          set -euo pipefail
+          export ENDPOINT="https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          S3() { aws "$@" --endpoint-url "$ENDPOINT" --region auto; }
+          S3 s3 cp "s3://$BUCKET/$SLICE_VERSION/slice-manifest.json" /tmp/slice-manifest.json
+          families=$(jq -r '.families[]' /tmp/slice-manifest.json)
+          [ -n "$families" ] || { echo "::error::slice manifest lists no families"; exit 1; }
+          echo "slice families: $(echo "$families" | tr '\n' ' ')"
+          matched=0
+          for family in $families; do
+            S3 s3 cp "s3://$BUCKET/$SLICE_VERSION/claims/$family.json" "/tmp/claim-$family.json"
+            claim=$(jq -r '.request_sha256 // .request // empty' "/tmp/claim-$family.json")
+            [ "$claim" = "$REQUEST_SHA256" ] || {
+              echo "::error::$family claim names request ${claim:-<none>}, not $REQUEST_SHA256"
+              exit 1
+            }
+            matched=$((matched + 1))
+            echo "  $family claim binds $REQUEST_SHA256"
+          done
+          [ "$matched" -gt 0 ] || { echo "::error::no claims verified"; exit 1; }
+
+      # The position packs under construction-v1/<binding>/slice/ are the reverse
+      # build's INPUT. Deleting them before reverse is published would make the
+      # reverse index unbuildable without re-running the whole planet build.
+      - name: Require reverse to be published for every family
+        env:
+          SLICE_VERSION: ${{ inputs.slice_version }}
+        run: |
+          set -euo pipefail
+          export ENDPOINT="https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          S3() { aws "$@" --endpoint-url "$ENDPOINT" --region auto; }
+          for family in $(jq -r '.families[]' /tmp/slice-manifest.json); do
+            key="$SLICE_VERSION/families/$family/reverse-catalog.rcat"
+            S3 s3api head-object --bucket "$BUCKET" --key "$key" --output json >/dev/null 2>&1 || {
+              echo "::error::$key is absent: reverse is not published for $family. The position packs this would delete are the reverse build's input."
+              exit 1
+            }
+            echo "  $family reverse catalog present"
+          done
+
+      - name: Compute and guard the delete targets
+        env:
+          REQUEST_SHA256: ${{ inputs.request_sha256 }}
+          CONSTRUCTION_BINDING: ${{ inputs.construction_binding }}
+        run: |
+          set -euo pipefail
+          : > /tmp/delete-targets.txt
+          echo "staging/global-v2/$REQUEST_SHA256/" >> /tmp/delete-targets.txt
+          if [ -n "$CONSTRUCTION_BINDING" ]; then
+            echo "construction-v1/$CONSTRUCTION_BINDING/" >> /tmp/delete-targets.txt
+          fi
+          echo "== computed delete targets =="; cat /tmp/delete-targets.txt
+
+          python3 - "$PROTECTED_PREFIXES" /tmp/delete-targets.txt <<'PY'
+          import re
+          import sys
+
+          protected = [p.strip("/") for p in sys.argv[1].split() if p.strip("/")]
+          assert protected, "PROTECTED_PREFIXES must be non-empty"
+
+          # This workflow may ONLY delete a fully-qualified per-run scratch
+          # prefix. Anything else -- a bare accumulator root, a slice, a version
+          # prefix -- is refused regardless of what the inputs said.
+          ALLOWED = (
+              re.compile(r"^staging/global-v2/[0-9a-f]{64}/$"),
+              re.compile(r"^construction-v1/[0-9a-f]{64}/$"),
+          )
+
+          with open(sys.argv[2]) as handle:
+              targets = [line.strip() for line in handle if line.strip()]
+          assert targets, "no targets to check"
+
+          bad = []
+          for target in targets:
+              if any(character.isspace() for character in target):
+                  bad.append((target, "contains whitespace"))
+                  continue
+              if target.startswith("/") or ".." in target.split("/"):
+                  bad.append((target, "malformed target"))
+                  continue
+              if not any(pattern.match(target) for pattern in ALLOWED):
+                  bad.append((target, "not a fully-qualified per-run scratch prefix"))
+                  continue
+              norm = target.strip("/")
+              for prot in protected:
+                  if norm == prot or norm.startswith(prot + "/") \
+                     or prot.startswith(norm + "/"):
+                      bad.append((target, f"intersects protected {prot}/"))
+
+          for target, why in bad:
+              print(f"::error::target {target!r}: {why}")
+          if bad:
+              raise SystemExit(1)
+          print(f"{len(targets)} targets clear: {targets}")
+          PY
+
+      - name: Retire the scratch
+        run: |
+          set -euo pipefail
+          export ENDPOINT="https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          S3() { aws "$@" --endpoint-url "$ENDPOINT" --region auto; }
+          : > /tmp/deleted-keys.log
+          while read -r target; do
+            [ -n "$target" ] || continue
+            echo "=== $target (dry_run=$DRY_RUN) ===" >> /tmp/deleted-keys.log
+            if [ "$DRY_RUN" = "true" ]; then
+              S3 s3 rm "s3://$BUCKET/$target" --recursive --dryrun \
+                | tee -a /tmp/deleted-keys.log | tail -5
+              count=$(grep -c '^(dryrun) delete:' /tmp/deleted-keys.log || true)
+              echo "would delete $count keys under $target"
+            else
+              keys=$(S3 s3 rm "s3://$BUCKET/$target" --recursive \
+                       | tee -a /tmp/deleted-keys.log | grep -c '^delete:' || true)
+              echo "deleted $keys keys under $target"
+            fi
+          done < /tmp/delete-targets.txt
+
+      # The slice must be untouched and still serving after a scratch retirement.
+      # If this workflow ever reaches serving data, this is what says so.
+      - name: Prove the promoted slice and the live API are unaffected
+        if: always()
+        env:
+          SLICE_VERSION: ${{ inputs.slice_version }}
+        run: |
+          set -euo pipefail
+          export ENDPOINT="https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          S3() { aws "$@" --endpoint-url "$ENDPOINT" --region auto; }
+          for family in $(jq -r '.families[]' /tmp/slice-manifest.json); do
+            for key in "families/$family/family-manifest.json" \
+                       "families/$family/routing.json" \
+                       "families/$family/reverse-catalog.rcat"; do
+              S3 s3api head-object --bucket "$BUCKET" \
+                --key "$SLICE_VERSION/$key" --output json >/dev/null \
+                || { echo "::error::$SLICE_VERSION/$key missing after retirement"; exit 1; }
+            done
+            echo "  $family serving entrypoints intact"
+          done
+          body=$(curl -sS --max-time 20 --get "https://geocoder.bradr.dev/v2/forward" \
+                   --data-urlencode "q=Berlin" --data-urlencode "limit=1")
+          echo "$body" | jq -e '.type == "FeatureCollection" and (.features | length) >= 1' \
+            >/dev/null || { echo "::error::live v2 forward degraded: $(echo "$body" | head -c 200)"; exit 1; }
+          echo "live /v2/forward still serving"
+
+      - name: Upload the delete audit log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: retire-build-scratch-${{ github.run_id }}
+          path: /tmp/deleted-keys.log
+          if-no-files-found: warn
