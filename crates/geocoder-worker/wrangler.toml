@@ -6,7 +6,19 @@ compatibility_date = "2026-05-01"
 enabled = true
 
 [build]
-command = "cargo install -q worker-build@^0.7 && worker-build --release"
+# Install ONLY when the tool is missing. `cargo install` hard-errors with
+# "binary `worker-build` already exists in destination" (exit 101) whenever the
+# binary is present but cargo has no record of installing it -- which is exactly
+# what `deploy-rust-worker.yml`'s cache produces, because it restores
+# `~/.cargo/bin/worker-build` alone and not `.crates.toml`. That broke every
+# cache-hit production deploy from 2026-08-04 until 2026-08-07 and forced a
+# hand-deploy of the proximity wave.
+#
+# `A || B && C` is `(A || B) && C`: the build runs when the tool was already
+# there or was just installed, and is skipped -- non-zero -- when the install
+# itself fails. The `^0.7` fallback is unchanged, so a bare environment behaves
+# exactly as before; the deploy workflow's pinned 0.8.5 now survives its cache.
+command = "command -v worker-build >/dev/null 2>&1 || cargo install -q worker-build@^0.7 && worker-build --release"
 
 # CPU limit to prevent runaway requests
 [limits]
