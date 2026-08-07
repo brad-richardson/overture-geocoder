@@ -236,3 +236,20 @@ def test_the_addresses_anchor_reconciles_with_the_frozen_readiness_task_list():
     assert sum(
         task["selected_uncompressed_bytes"] for task in tasks
     ) == anchor["selected_uncompressed_bytes"]
+
+
+def test_the_request_survives_a_json_round_trip_unchanged():
+    """`admit-dispatch` compares a `json.loads`'d dispatch request against a
+    freshly derived one, so any value whose Python type does not survive JSON
+    makes EVERY dispatch fail with 'dispatch request differs from the canonical
+    reviewed request' -- and the message names nothing, so it reads like a
+    tampered request rather than a tuple. Caught in a real dry-run by
+    `task_caps`, whose paths were tuples and came back as lists."""
+    report, admitted = CONTROL.prepare(arguments())
+    assert admitted
+    request = report["request"]
+    assert json.loads(json.dumps(request)) == request
+    # And the identity the gate actually enforces reproduces from the bytes.
+    assert CONTROL.sha256_bytes(
+        CONTROL.canonical(json.loads(json.dumps(request)))
+    ) == report["request_sha256"]
