@@ -1194,6 +1194,85 @@ def build_catalog(
     return catalog
 
 
+def build_pruned_catalog(
+    before: Any,
+    *,
+    keep: int | None = None,
+    retain_builds: list[str] | None = None,
+    generated_at: str | None = None,
+    catalog_key: str = PRODUCTION_CATALOG_KEY,
+) -> tuple[dict[str, Any], list[str]]:
+    """Drop release entries from the catalog. Returns (catalog, dropped builds).
+
+    The v2 catalog has never had a retention path, so releases accumulate until
+    they hit the Worker's MAX_CATALOG_RELEASES ceiling (64), at which point the
+    Worker REJECTS the catalog outright. This is the missing half of
+    `v2_retention_guard.py`, which could already answer "is this prefix
+    referenced" but had no way to make a prefix stop being referenced.
+
+    Two modes, mirroring `prune_catalog.py`'s split for the v1 root:
+
+    * ``keep`` retains the newest N entries.
+    * ``retain_builds`` retains exactly the named builds.
+
+    ``retain_builds`` exists because recency is the WRONG axis for cost. Each
+    retained release pins every slice it references, and releases do not
+    reference the same number of slices: a release binding forward and reverse
+    from different slices (which the contract allows, and 2026-08-03.0 does)
+    pins three, where its predecessor pins one. Retaining the cheaper of two
+    equally-old rollback targets was measured at 54 GiB on the 2026-08-07
+    bucket, for identical rollback depth.
+
+    This never chooses for the operator and never sorts by date: it drops
+    exactly what it is told to, having proved the result is still a valid,
+    servable catalog. `latest` is always retained -- dropping it would leave the
+    catalog pointing at a release it does not contain.
+    """
+    if (keep is None) == (retain_builds is None):
+        raise ValueError("prune requires exactly one of keep or retain_builds")
+    validated = validate_catalog(before, catalog_key=catalog_key)
+    entries = validated["releases"]
+    latest = validated["latest"]
+
+    if keep is not None:
+        if keep < 1:
+            raise ValueError(f"keep must be >= 1, got {keep}")
+        kept = entries[:keep]
+    else:
+        wanted = list(dict.fromkeys(retain_builds or []))
+        if not wanted:
+            raise ValueError("retain_builds must name at least one build")
+        known = {entry["geocoder_build"] for entry in entries}
+        missing = [build for build in wanted if build not in known]
+        if missing:
+            raise ValueError(f"retain_builds names builds absent from the catalog: {missing}")
+        # Preserve catalog order rather than the order the operator typed.
+        kept = [entry for entry in entries if entry["geocoder_build"] in set(wanted)]
+
+    kept_builds = [entry["geocoder_build"] for entry in kept]
+    if latest not in kept_builds:
+        raise ValueError(
+            f"refusing to drop the catalog latest {latest!r}; it must be retained"
+        )
+    dropped = [
+        entry["geocoder_build"] for entry in entries if entry["geocoder_build"] not in set(kept_builds)
+    ]
+    if not dropped:
+        return dict(validated), []
+
+    catalog = {
+        "schema": CATALOG_SCHEMA,
+        "generated_at": _require_string(generated_at or _now(), "generated_at"),
+        "latest": latest,
+        "releases": kept,
+    }
+    catalog["catalog_digest"] = gbm.digest(catalog)
+    # Fail closed: a pruned catalog that does not validate must never be
+    # published, and this is the same validator the Worker's contract mirrors.
+    validate_catalog(catalog, catalog_key=catalog_key)
+    return catalog, dropped
+
+
 def validate_catalog(
     catalog: Any, *, catalog_key: str = PRODUCTION_CATALOG_KEY
 ) -> dict[str, Any]:
@@ -2234,6 +2313,80 @@ def cmd_promote(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_prune(args: argparse.Namespace) -> None:
+    """Compare-and-swap the catalog to a shorter release list.
+
+    Deletes NOTHING from the bucket. Pruning only makes prefixes stop being
+    referenced; deciding what that freed is `v2_retention_guard.py`'s job, and
+    it must be re-run AFTER this lands rather than predicted before it. The
+    Worker caches the catalog, so a bucket delete must also wait out that TTL --
+    see the cache-TTL wait in r2-cleanup.yml.
+    """
+    if (args.keep is None) == (not args.retain_builds):
+        raise _fail("prune requires exactly one of --keep or --retain-builds")
+    if not SHA256_RE.fullmatch(args.expect_sha256):
+        raise _fail("--expect-sha256 must be a lowercase SHA-256 digest")
+    store = open_control_store(args.store, "--store")
+    current = store.get(args.catalog_key)
+    if current is None:
+        raise _fail(f"catalog {args.catalog_key} is absent; nothing to prune")
+    current_sha = _sha256_bytes(current[0])
+    if current_sha != args.expect_sha256:
+        raise _fail(
+            f"catalog {args.catalog_key} is sha256 {current_sha}, not the "
+            "stated expectation; refusing the compare-and-swap"
+        )
+    expect_token = current[1]
+    try:
+        before = json.loads(current[0])
+    except ValueError as error:
+        raise _fail(f"catalog {args.catalog_key} is not JSON") from error
+
+    retain = args.retain_builds.split() if args.retain_builds else None
+    try:
+        catalog, dropped = build_pruned_catalog(
+            before,
+            keep=args.keep,
+            retain_builds=retain,
+            generated_at=args.generated_at,
+            catalog_key=args.catalog_key,
+        )
+    except ValueError as error:
+        raise _fail(str(error)) from error
+
+    if not dropped:
+        print(json.dumps({"pruned": [], "status": "already-minimal"}, sort_keys=True))
+        return
+
+    payload = gbm.canonical_json(catalog)
+    sha = _sha256_bytes(payload)
+    print(
+        json.dumps(
+            {
+                "planned_write": {
+                    "key": args.catalog_key,
+                    "sha256": sha,
+                    "bytes": len(payload),
+                    "previous_catalog_sha256": current_sha,
+                    "mode": "compare-and-swap",
+                },
+                "retained": [entry["geocoder_build"] for entry in catalog["releases"]],
+                "dropped": dropped,
+                "note": (
+                    "no bucket objects were deleted; re-run "
+                    "v2_retention_guard.py list-referenced after this lands to "
+                    "see what became unreferenced, and wait out the worker "
+                    "catalog cache TTL before deleting anything"
+                ),
+            },
+            sort_keys=True,
+        )
+    )
+    if not args.execute:
+        return
+    _write_catalog_verified(store, args.catalog_key, payload, expect_token)
+
+
 def cmd_recover(args: argparse.Namespace) -> None:
     if (args.build is None) == (not args.unavailable):
         raise _fail("recover requires exactly one of --build or --unavailable")
@@ -2506,6 +2659,26 @@ def main(argv: list[str] | None = None) -> None:
     promote.add_argument("--generated-at")
     promote.add_argument("--execute", action="store_true")
 
+    prune = commands.add_parser(
+        "prune",
+        help="compare-and-swap the catalog to a shorter release list",
+    )
+    prune.add_argument("--store", required=True)
+    prune.add_argument("--catalog-key", default=PRODUCTION_CATALOG_KEY)
+    prune.add_argument("--keep", type=int, help="retain the newest N releases")
+    prune.add_argument(
+        "--retain-builds",
+        default="",
+        help=(
+            "space-separated builds to retain instead of the newest N. Recency "
+            "is the wrong axis for cost: each retained release pins every slice "
+            "it references, and releases do not pin the same number"
+        ),
+    )
+    prune.add_argument("--expect-sha256", required=True)
+    prune.add_argument("--generated-at")
+    prune.add_argument("--execute", action="store_true")
+
     recover = commands.add_parser(
         "recover",
         help="repoint the catalog at a prior release, or make v2 unavailable",
@@ -2527,6 +2700,8 @@ def main(argv: list[str] | None = None) -> None:
         cmd_publish_release(args)
     elif args.command == "promote":
         cmd_promote(args)
+    elif args.command == "prune":
+        cmd_prune(args)
     elif args.command == "recover":
         cmd_recover(args)
     elif args.command == "release":
