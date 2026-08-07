@@ -350,8 +350,19 @@ def test_protected_prefix_guard_precedes_every_delete():
         body = re.sub(r"cat > /tmp/r2-rm\.sh <<'SH'.*?\nSH\n", "", step.get("run", ""), flags=re.S)
         if "s3 rm" in body or re.search(r"^\s*RM \"", body, re.M):
             assert guard < index, step.get("name")
+    # Deliberately an exact list, not a membership check: changing which
+    # prefixes are protected must be a conscious edit with a test change beside
+    # it, never a silent drift. 2026-07-28.0 was added 2026-08-07 -- it became
+    # the v1 catalog's latest AND the legacy core bound by the live v2 build
+    # 2026-08-07.0, and had been missing from this list entirely.
     protected = load(CLEANUP)["env"]["PROTECTED_PREFIXES"].split()
-    assert protected == ["2026-07-13.0", "2026-07-18.0", "2026-07-02.3", "backups"]
+    assert protected == [
+        "2026-07-28.0",
+        "2026-07-18.0",
+        "2026-07-13.0",
+        "2026-07-02.3",
+        "backups",
+    ]
     # No target constant may name a protected prefix.
     env = load(CLEANUP)["env"]
     targets = [

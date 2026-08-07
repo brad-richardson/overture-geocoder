@@ -7,6 +7,18 @@ name: R2 Inventory
 
 on:
   workflow_dispatch:
+    inputs:
+      deep_prefixes:
+        description: >-
+          Space-separated top-level prefixes to break down one level further,
+          with each child's newest object date. Depth follows the prefix, so
+          pass `staging/global-v2/` to reach the per-run hashes rather than the
+          single `staging/global-v2` bucket one level up. The accumulators are
+          `staging/` and `construction-v1/`: both hold many per-run children,
+          so a single total for them says nothing about what is safe to drop.
+        required: false
+        default: "staging/ staging/global-v2/ construction-v1/"
+        type: string
 
 env:
   AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -20,6 +32,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Inventory bucket
+        # Through the environment, never interpolated into the script body: a
+        # workflow_dispatch string is attacker-controlled input to a job that
+        # holds R2 write credentials.
+        env:
+          DEEP_PREFIXES: ${{ inputs.deep_prefixes }}
         run: |
           ENDPOINT="https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"
 
@@ -56,4 +73,35 @@ jobs:
               s_gib=$(python3 -c "print(f'{$s_bytes/2**30:.2f}')")
               echo "    └─ staging/  objects=$s_objects  size=${s_gib}GiB"
             fi
+          done
+
+          # Second level for the accumulator prefixes. A retention decision
+          # needs the per-child newest-object date as well as the size: age is
+          # what distinguishes an abandoned run from one still being written,
+          # and `aws s3 ls --recursive` already carries the date per object, so
+          # this costs no extra requests beyond the listing itself.
+          for prefix in $DEEP_PREFIXES; do
+            echo ""
+            echo "== Inside $prefix (by child prefix, newest object first) =="
+            aws s3 ls "s3://$BUCKET/$prefix" --recursive \
+              --endpoint-url "$ENDPOINT" --region auto \
+              | python3 -c "
+          import sys
+          depth = len('$prefix'.rstrip('/').split('/'))
+          children = {}
+          for line in sys.stdin:
+              parts = line.split(maxsplit=3)
+              if len(parts) < 4:
+                  continue
+              date, size, key = parts[0], int(parts[2]), parts[3].rstrip()
+              segments = key.split('/')
+              child = '/'.join(segments[: depth + 1]) if len(segments) > depth else key
+              count, total, newest = children.get(child, (0, 0, ''))
+              children[child] = (count + 1, total + size, max(newest, date))
+          for child, (count, total, newest) in sorted(
+              children.items(), key=lambda item: item[1][2], reverse=True
+          ):
+              print(f'  {newest}  {total/2**30:8.2f}GiB  {count:>7} obj  {child}')
+          print(f'  ({len(children)} child prefixes)')
+          "
           done
