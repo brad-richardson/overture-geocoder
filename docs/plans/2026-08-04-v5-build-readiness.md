@@ -196,13 +196,25 @@ anything:
   81,224,863 comparable records reassigned between `2026-06-17.0` and
   `2026-07-22.0`).
 
-### 3.4 Tokenizer / alias work
-Apostrophe folding ("Childrens" ↔ "Children's" — the Royal Children's Hospital
-is indexed 51 m from gold and hits rank 1 only with the apostrophe) and an
-alias route for abbreviations ("GPO" ↔ "General Post Office" — target indexed
-7 m away). Cheap relative to phrase keys; verify whether folding is Worker-side
-(query normalization) or producer-side (index keys) before scheduling, since
-that determines whether it needs v5 at all.
+### 3.4 Tokenizer / alias work — apostrophe half ANSWERED 2026-08-07
+The scheduling question this section asked — Worker-side or producer-side — is
+answered for apostrophes: **both, and the halves are separable.** See
+`2026-08-07-apostrophe-folding-locus.md`.
+
+- **Worker half, no rebuild**: an apostrophe-born ≤1-char token must not consume
+  a `HEAD_QUERY_TOKEN_CAP` slot. **733,701 records are over the cap only because
+  the split spends one.** Scope it to apostrophe-born tokens: 5,071,193 records
+  carry a ≤1-char token with no apostrophe (`H&M`, `A&W`, initials, single CJK
+  characters) and are retrievable today only because those postings survive.
+  Ships behind the paired gate like any retrieval change.
+- **Producer half, in v5**: index the elided form so `dominos` reaches
+  `Domino's Pizza`. Measured cost **+666,637 head records, +113,415,307 B,
+  +1.98%** — cheaper than the `e4:` keys adopted above, so it rides the same
+  generation. No query-time rule can substitute: synthesizing `domino + s` from
+  `dominos` fires on every ordinary plural.
+
+Still unscoped in this section: the abbreviation alias route ("GPO" ↔ "General
+Post Office"), and the ampersand / non-decomposable-Latin variant classes.
 
 ## 4. Standing prohibitions (do not relitigate inside v5)
 

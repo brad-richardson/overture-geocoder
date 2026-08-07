@@ -1,0 +1,117 @@
+{
+  "schema": "apostrophe-locus-v1",
+  "question": "v5-readiness \u00a73.4: is apostrophe folding Worker-side or producer-side? Answer: both, and the halves are separable.",
+  "inputs": {
+    "corpus": "overture places 2026-06-17.0 (local mirror)",
+    "head_reference_build": "local planet build of 2026-06-17.0",
+    "live_endpoint": "https://geocoder.bradr.dev"
+  },
+  "corpus": {
+    "apostrophe_records": 2553035,
+    "apostrophe_with_degenerate_token": 2342346,
+    "emits_a_bare_s": 1858191,
+    "over_head_cap_today": 1565166,
+    "over_head_cap_if_joined": 831465,
+    "rescued_by_joining": 733701,
+    "phrase_eligible_today": 972366,
+    "phrase_eligible_if_joined": 1472322,
+    "degenerate_without_any_apostrophe": 5071193
+  },
+  "producer_side_cost": {
+    "distinct_new_index_tokens": 296553,
+    "new_record_token_rows": 2424496,
+    "new_head_records": 666637,
+    "new_head_bytes": 113415307,
+    "head_growth_fraction": 0.019838022283355808
+  },
+  "mechanism": {
+    "index_tokenizer": "places_transform_v1.rs normalized_words",
+    "query_tokenizer": "places_pages.rs normalized_words (byte-identical)",
+    "head_query_token_cap": 3,
+    "note": "The apostrophe is a separator on both sides, so the two spellings of one name produce disjoint token sets, and the possessive costs a token-cap slot. A bare `s` posting is already survivable -- the saturated-posting relaxation in places_construction_v1.rs admits a record absent from a saturated posting when its display tokens carry the token -- so the cap, not the `s`, is what refuses these queries."
+  },
+  "live_pairs": [
+    {
+      "apostrophe_query": "Domino's Pizza",
+      "ascii_query": "Dominos Pizza",
+      "apostrophe": {
+        "status": 200,
+        "empty": false,
+        "names": [
+          "Domino's Pizza Broken Hill"
+        ]
+      },
+      "ascii": {
+        "status": 200,
+        "empty": true,
+        "names": []
+      }
+    },
+    {
+      "apostrophe_query": "Queen's Medical Center",
+      "ascii_query": "Queens Medical Center",
+      "apostrophe": {
+        "status": 200,
+        "empty": true,
+        "names": []
+      },
+      "ascii": {
+        "status": 200,
+        "empty": false,
+        "names": [
+          "Queens Medical Center",
+          "Queens medical center",
+          "Queens Medical Center"
+        ]
+      }
+    },
+    {
+      "apostrophe_query": "Women's Health Center",
+      "ascii_query": "Womens Health Center",
+      "apostrophe": {
+        "status": 200,
+        "empty": false,
+        "names": [
+          "NRMC Women's Health Center"
+        ]
+      },
+      "ascii": {
+        "status": 200,
+        "empty": false,
+        "names": [
+          "Womens Health Center",
+          "Premier Women's Health",
+          "Premier Womens Health"
+        ]
+      }
+    },
+    {
+      "apostrophe_query": "Shriners Children's Hawaii",
+      "ascii_query": "Shriners Childrens Hawaii",
+      "apostrophe": {
+        "status": 200,
+        "empty": true,
+        "names": []
+      },
+      "ascii": {
+        "status": 200,
+        "empty": true,
+        "names": []
+      }
+    },
+    {
+      "apostrophe_query": "Len's Mill Store",
+      "ascii_query": "Lens Mill Store",
+      "apostrophe": {
+        "status": 200,
+        "empty": true,
+        "names": []
+      },
+      "ascii": {
+        "status": 200,
+        "empty": true,
+        "names": []
+      }
+    }
+  ]
+}
