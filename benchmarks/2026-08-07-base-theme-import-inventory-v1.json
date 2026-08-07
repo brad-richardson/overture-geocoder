@@ -1,0 +1,2483 @@
+{
+  "schema": "base-theme-import-inventory-v1",
+  "release": "2026-06-17.0",
+  "scanned_types": [
+    "base/infrastructure",
+    "base/land_use",
+    "base/land"
+  ],
+  "not_scanned": [
+    "theme=buildings (276 GB); an absent verdict is never 'not in Overture'",
+    "base/water, base/land_cover: no gold case is a water or land-cover feature"
+  ],
+  "gold_delta": {
+    "exact_base_name_matches_rows": 26,
+    "transit_named_after_rows": 12,
+    "non_transit_rows": 14,
+    "distinct_landmarks_behind_those_rows": 10,
+    "already_served_by_production": 6,
+    "incremental_gold_landmarks": 4,
+    "incremental": {
+      "Golden Gate Bridge": {
+        "class": "bridge/bridge",
+        "wikidata": true,
+        "names_common": 11,
+        "production_serves_it_today": false,
+        "rows": 1
+      },
+      "Mayo Clinic": {
+        "class": "medical/clinic",
+        "wikidata": false,
+        "names_common": 0,
+        "production_serves_it_today": false,
+        "rows": 1
+      },
+      "The Royal Children's Hospital": {
+        "class": "medical/hospital",
+        "wikidata": true,
+        "names_common": 1,
+        "production_serves_it_today": false,
+        "rows": 1
+      },
+      "Times Square": {
+        "class": "pedestrian/plaza",
+        "wikidata": true,
+        "names_common": 9,
+        "production_serves_it_today": false,
+        "rows": 1
+      }
+    },
+    "landmarks": {
+      "Big Ben": {
+        "class": "tower/bell_tower",
+        "wikidata": true,
+        "names_common": 5,
+        "production_serves_it_today": true,
+        "rows": 2
+      },
+      "Buckingham Palace": {
+        "class": "pedestrian/information",
+        "wikidata": false,
+        "names_common": 0,
+        "production_serves_it_today": true,
+        "rows": 2
+      },
+      "Eiffel Tower": {
+        "class": "pedestrian/information",
+        "wikidata": false,
+        "names_common": 7,
+        "production_serves_it_today": true,
+        "rows": 2
+      },
+      "Golden Gate Bridge": {
+        "class": "bridge/bridge",
+        "wikidata": true,
+        "names_common": 11,
+        "production_serves_it_today": false,
+        "rows": 1
+      },
+      "Mayo Clinic": {
+        "class": "medical/clinic",
+        "wikidata": false,
+        "names_common": 0,
+        "production_serves_it_today": false,
+        "rows": 1
+      },
+      "SickKids": {
+        "class": "medical/hospital",
+        "wikidata": true,
+        "names_common": 0,
+        "production_serves_it_today": true,
+        "rows": 1
+      },
+      "Singapore General Hospital": {
+        "class": "medical/hospital",
+        "wikidata": true,
+        "names_common": 5,
+        "production_serves_it_today": true,
+        "rows": 1
+      },
+      "Statue of Liberty": {
+        "class": "protected/national_park",
+        "wikidata": true,
+        "names_common": 1,
+        "production_serves_it_today": true,
+        "rows": 2
+      },
+      "The Royal Children's Hospital": {
+        "class": "medical/hospital",
+        "wikidata": true,
+        "names_common": 1,
+        "production_serves_it_today": false,
+        "rows": 1
+      },
+      "Times Square": {
+        "class": "pedestrian/plaza",
+        "wikidata": true,
+        "names_common": 9,
+        "production_serves_it_today": false,
+        "rows": 1
+      }
+    },
+    "transit_examples": [
+      "Brandenburg Gate -> transit/subway_station",
+      "Colosseum -> transit/subway_station",
+      "Harrods -> transit/bus_stop",
+      "Louvre Museum -> transit/ferry_terminal",
+      "Raffles Hotel -> transit/bus_stop",
+      "Sagrada Familia -> transit/stop_position",
+      "Taj Mahal -> transit/subway_station",
+      "Union Station -> transit/bicycle_rental"
+    ]
+  },
+  "inventory_by_class": {
+    "infrastructure": [
+      {
+        "subtype": "transit",
+        "class": "bus_stop",
+        "named_rows": 3678822,
+        "with_qid": 4214,
+        "with_names_common": 550270
+      },
+      {
+        "subtype": "bridge",
+        "class": "bridge",
+        "named_rows": 2544617,
+        "with_qid": 72447,
+        "with_names_common": 631407
+      },
+      {
+        "subtype": "transit",
+        "class": "stop_position",
+        "named_rows": 1196900,
+        "with_qid": 20685,
+        "with_names_common": 255296
+      },
+      {
+        "subtype": "pedestrian",
+        "class": "information",
+        "named_rows": 578519,
+        "with_qid": 2560,
+        "with_names_common": 29773
+      },
+      {
+        "subtype": "transit",
+        "class": "parking",
+        "named_rows": 335529,
+        "with_qid": 396,
+        "with_names_common": 22108
+      },
+      {
+        "subtype": "transit",
+        "class": "platform",
+        "named_rows": 278438,
+        "with_qid": 1625,
+        "with_names_common": 16020
+      },
+      {
+        "subtype": "power",
+        "class": "substation",
+        "named_rows": 227575,
+        "with_qid": 1032,
+        "with_names_common": 21214
+      },
+      {
+        "subtype": "pedestrian",
+        "class": "artwork",
+        "named_rows": 198352,
+        "with_qid": 16828,
+        "with_names_common": 22235
+      },
+      {
+        "subtype": "power",
+        "class": "power_line",
+        "named_rows": 122325,
+        "with_qid": 161,
+        "with_names_common": 5257
+      },
+      {
+        "subtype": "barrier",
+        "class": "fence",
+        "named_rows": 122257,
+        "with_qid": 4660,
+        "with_names_common": 14791
+      },
+      {
+        "subtype": "pedestrian",
+        "class": "viewpoint",
+        "named_rows": 93092,
+        "with_qid": 3045,
+        "with_names_common": 18044
+      },
+      {
+        "subtype": "emergency",
+        "class": "fire_hydrant",
+        "named_rows": 88843,
+        "with_qid": 3,
+        "with_names_common": 2335
+      },
+      {
+        "subtype": "power",
+        "class": "power_pole",
+        "named_rows": 85025,
+        "with_qid": 2,
+        "with_names_common": 448
+      },
+      {
+        "subtype": "transportation",
+        "class": "motorway_junction",
+        "named_rows": 84929,
+        "with_qid": 3336,
+        "with_names_common": 21044
+      },
+      {
+        "subtype": "transit",
+        "class": "railway_station",
+        "named_rows": 83400,
+        "with_qid": 51086,
+        "with_names_common": 35019
+      },
+      {
+        "subtype": "transit",
+        "class": "bicycle_rental",
+        "named_rows": 79752,
+        "with_qid": 2077,
+        "with_names_common": 32521
+      },
+      {
+        "subtype": "transportation",
+        "class": "traffic_signals",
+        "named_rows": 79092,
+        "with_qid": 129,
+        "with_names_common": 40435
+      },
+      {
+        "subtype": "pedestrian",
+        "class": "atm",
+        "named_rows": 78643,
+        "with_qid": 55,
+        "with_names_common": 18840
+      },
+      {
+        "subtype": "utility",
+        "class": "pipeline",
+        "named_rows": 78535,
+        "with_qid": 919,
+        "with_names_common": 1608
+      },
+      {
+        "subtype": "water",
+        "class": "dam",
+        "named_rows": 76962,
+        "with_qid": 16479,
+        "with_names_common": 2841
+      },
+      {
+        "subtype": "bridge",
+        "class": "viaduct",
+        "named_rows": 69016,
+        "with_qid": 4699,
+        "with_names_common": 27436
+      },
+      {
+        "subtype": "transportation",
+        "class": "charging_station",
+        "named_rows": 60934,
+        "with_qid": 63,
+        "with_names_common": 6457
+      },
+      {
+        "subtype": "recreation",
+        "class": "camp_site",
+        "named_rows": 60872,
+        "with_qid": 125,
+        "with_names_common": 8130
+      },
+      {
+        "subtype": "barrier",
+        "class": "wall",
+        "named_rows": 56748,
+        "with_qid": 4984,
+        "with_names_common": 9021
+      },
+      {
+        "subtype": "transit",
+        "class": "bus_station",
+        "named_rows": 54070,
+        "with_qid": 1266,
+        "with_names_common": 11986
+      },
+      {
+        "subtype": "power",
+        "class": "plant",
+        "named_rows": 47843,
+        "with_qid": 9357,
+        "with_names_common": 6431
+      },
+      {
+        "subtype": "waste_management",
+        "class": "recycling",
+        "named_rows": 41495,
+        "with_qid": 597,
+        "with_names_common": 2706
+      },
+      {
+        "subtype": "transportation",
+        "class": "street_lamp",
+        "named_rows": 38404,
+        "with_qid": 40,
+        "with_names_common": 64
+      },
+      {
+        "subtype": "power",
+        "class": "generator",
+        "named_rows": 38286,
+        "with_qid": 639,
+        "with_names_common": 1423
+      },
+      {
+        "subtype": "water",
+        "class": "drinking_water",
+        "named_rows": 36550,
+        "with_qid": 585,
+        "with_names_common": 5280
+      },
+      {
+        "subtype": "airport",
+        "class": "airport",
+        "named_rows": 36115,
+        "with_qid": 17198,
+        "with_names_common": 6720
+      },
+      {
+        "subtype": "pedestrian",
+        "class": "vending_machine",
+        "named_rows": 35973,
+        "with_qid": 50,
+        "with_names_common": 12462
+      },
+      {
+        "subtype": "transit",
+        "class": "railway_halt",
+        "named_rows": 33835,
+        "with_qid": 15374,
+        "with_names_common": 8910
+      },
+      {
+        "subtype": "barrier",
+        "class": "gate",
+        "named_rows": 32756,
+        "with_qid": 274,
+        "with_names_common": 2776
+      },
+      {
+        "subtype": "pedestrian",
+        "class": "toilets",
+        "named_rows": 28198,
+        "with_qid": 52,
+        "with_names_common": 2793
+      },
+      {
+        "subtype": "water",
+        "class": "fountain",
+        "named_rows": 27149,
+        "with_qid": 3201,
+        "with_names_common": 2657
+      },
+      {
+        "subtype": "pier",
+        "class": "pier",
+        "named_rows": 26311,
+        "with_qid": 360,
+        "with_names_common": 1412
+      },
+      {
+        "subtype": "barrier",
+        "class": "toll_booth",
+        "named_rows": 26290,
+        "with_qid": 313,
+        "with_names_common": 6268
+      },
+      {
+        "subtype": "transit",
+        "class": "ferry_terminal",
+        "named_rows": 20306,
+        "with_qid": 636,
+        "with_names_common": 3894
+      },
+      {
+        "subtype": "power",
+        "class": "power_tower",
+        "named_rows": 19841,
+        "with_qid": 9,
+        "with_names_common": 452
+      },
+      {
+        "subtype": "transit",
+        "class": "bicycle_parking",
+        "named_rows": 18299,
+        "with_qid": 50,
+        "with_names_common": 707
+      },
+      {
+        "subtype": "transit",
+        "class": "subway_station",
+        "named_rows": 17861,
+        "with_qid": 13134,
+        "with_names_common": 12015
+      },
+      {
+        "subtype": "power",
+        "class": "minor_line",
+        "named_rows": 17491,
+        "with_qid": 8,
+        "with_names_common": 535
+      },
+      {
+        "subtype": "aerialway",
+        "class": "aerialway_station",
+        "named_rows": 17155,
+        "with_qid": 222,
+        "with_names_common": 1039
+      },
+      {
+        "subtype": "transportation",
+        "class": "milestone",
+        "named_rows": 17089,
+        "with_qid": 225,
+        "with_names_common": 5931
+      },
+      {
+        "subtype": "communication",
+        "class": "communication_tower",
+        "named_rows": 17032,
+        "with_qid": 956,
+        "with_names_common": 806
+      },
+      {
+        "subtype": "transit",
+        "class": "parking_space",
+        "named_rows": 16584,
+        "with_qid": 14,
+        "with_names_common": 426
+      },
+      {
+        "subtype": "power",
+        "class": "cable",
+        "named_rows": 15653,
+        "with_qid": 195,
+        "with_names_common": 290
+      },
+      {
+        "subtype": "pedestrian",
+        "class": "post_box",
+        "named_rows": 15316,
+        "with_qid": 13,
+        "with_names_common": 1124
+      },
+      {
+        "subtype": "airport",
+        "class": "helipad",
+        "named_rows": 14718,
+        "with_qid": 3524,
+        "with_names_common": 972
+      },
+      {
+        "subtype": "pedestrian",
+        "class": "bench",
+        "named_rows": 13296,
+        "with_qid": 139,
+        "with_names_common": 516
+      },
+      {
+        "subtype": "transit",
+        "class": "parking_entrance",
+        "named_rows": 12034,
+        "with_qid": 9,
+        "with_names_common": 650
+      },
+      {
+        "subtype": "utility",
+        "class": "storage_tank",
+        "named_rows": 11693,
+        "with_qid": 38,
+        "with_names_common": 535
+      },
+      {
+        "subtype": "barrier",
+        "class": "barrier",
+        "named_rows": 11211,
+        "with_qid": 290,
+        "with_names_common": 643
+      },
+      {
+        "subtype": "water",
+        "class": "weir",
+        "named_rows": 10606,
+        "with_qid": 465,
+        "with_names_common": 452
+      },
+      {
+        "subtype": "barrier",
+        "class": "city_wall",
+        "named_rows": 10496,
+        "with_qid": 2844,
+        "with_names_common": 6802
+      },
+      {
+        "subtype": "communication",
+        "class": "mobile_phone_tower",
+        "named_rows": 10337,
+        "with_qid": 239,
+        "with_names_common": 392
+      },
+      {
+        "subtype": "bridge",
+        "class": "boardwalk",
+        "named_rows": 9924,
+        "with_qid": 54,
+        "with_names_common": 573
+      },
+      {
+        "subtype": "utility",
+        "class": "reservoir_covered",
+        "named_rows": 9694,
+        "with_qid": 114,
+        "with_names_common": 433
+      },
+      {
+        "subtype": "power",
+        "class": "transformer",
+        "named_rows": 9314,
+        "with_qid": 2,
+        "with_names_common": 1394
+      },
+      {
+        "subtype": "utility",
+        "class": "water_tower",
+        "named_rows": 8894,
+        "with_qid": 679,
+        "with_names_common": 536
+      },
+      {
+        "subtype": "tower",
+        "class": "defensive",
+        "named_rows": 7755,
+        "with_qid": 2286,
+        "with_names_common": 1267
+      },
+      {
+        "subtype": "aerialway",
+        "class": "chair_lift",
+        "named_rows": 7678,
+        "with_qid": 85,
+        "with_names_common": 767
+      },
+      {
+        "subtype": "bridge",
+        "class": "aqueduct",
+        "named_rows": 7512,
+        "with_qid": 475,
+        "with_names_common": 851
+      },
+      {
+        "subtype": "tower",
+        "class": "observation",
+        "named_rows": 6438,
+        "with_qid": 701,
+        "with_names_common": 926
+      },
+      {
+        "subtype": "barrier",
+        "class": "cutline",
+        "named_rows": 5954,
+        "with_qid": 15,
+        "with_names_common": 211
+      },
+      {
+        "subtype": "barrier",
+        "class": "lift_gate",
+        "named_rows": 4825,
+        "with_qid": 25,
+        "with_names_common": 824
+      },
+      {
+        "subtype": "transportation",
+        "class": "street_cabinet",
+        "named_rows": 4734,
+        "with_qid": 2,
+        "with_names_common": 84
+      },
+      {
+        "subtype": "bridge",
+        "class": "movable",
+        "named_rows": 4565,
+        "with_qid": 778,
+        "with_names_common": 231
+      },
+      {
+        "subtype": "airport",
+        "class": "runway",
+        "named_rows": 4378,
+        "with_qid": 151,
+        "with_names_common": 206
+      },
+      {
+        "subtype": "airport",
+        "class": "apron",
+        "named_rows": 4178,
+        "with_qid": 21,
+        "with_names_common": 363
+      },
+      {
+        "subtype": "recreation",
+        "class": "roller_coaster",
+        "named_rows": 4138,
+        "with_qid": 350,
+        "with_names_common": 186
+      },
+      {
+        "subtype": "barrier",
+        "class": "border_control",
+        "named_rows": 4034,
+        "with_qid": 110,
+        "with_names_common": 1794
+      },
+      {
+        "subtype": "aerialway",
+        "class": "platter",
+        "named_rows": 3761,
+        "with_qid": 2,
+        "with_names_common": 147
+      },
+      {
+        "subtype": "airport",
+        "class": "taxiway",
+        "named_rows": 3607,
+        "with_qid": 2,
+        "with_names_common": 116
+      },
+      {
+        "subtype": "tower",
+        "class": "bell_tower",
+        "named_rows": 3388,
+        "with_qid": 651,
+        "with_names_common": 580
+      },
+      {
+        "subtype": "barrier",
+        "class": "ditch",
+        "named_rows": 3356,
+        "with_qid": 83,
+        "with_names_common": 491
+      },
+      {
+        "subtype": "waste_management",
+        "class": "waste_disposal",
+        "named_rows": 3088,
+        "with_qid": 0,
+        "with_names_common": 121
+      },
+      {
+        "subtype": "barrier",
+        "class": "kerb",
+        "named_rows": 2666,
+        "with_qid": 32,
+        "with_names_common": 105
+      },
+      {
+        "subtype": "transit",
+        "class": "motorcycle_parking",
+        "named_rows": 2537,
+        "with_qid": 1,
+        "with_names_common": 144
+      },
+      {
+        "subtype": "power",
+        "class": "portal",
+        "named_rows": 2401,
+        "with_qid": 1,
+        "with_names_common": 4
+      },
+      {
+        "subtype": "aerialway",
+        "class": "t-bar",
+        "named_rows": 2333,
+        "with_qid": 5,
+        "with_names_common": 95
+      },
+      {
+        "subtype": "transportation",
+        "class": "crossing",
+        "named_rows": 2320,
+        "with_qid": 31,
+        "with_names_common": 396
+      },
+      {
+        "subtype": "waste_management",
+        "class": "waste_basket",
+        "named_rows": 2304,
+        "with_qid": 0,
+        "with_names_common": 67
+      },
+      {
+        "subtype": "aerialway",
+        "class": "drag_lift",
+        "named_rows": 2207,
+        "with_qid": 2,
+        "with_names_common": 110
+      },
+      {
+        "subtype": "barrier",
+        "class": "hedge",
+        "named_rows": 2192,
+        "with_qid": 72,
+        "with_names_common": 194
+      },
+      {
+        "subtype": "bridge",
+        "class": "cantilever",
+        "named_rows": 2068,
+        "with_qid": 99,
+        "with_names_common": 210
+      },
+      {
+        "subtype": "manhole",
+        "class": "manhole",
+        "named_rows": 2027,
+        "with_qid": 2,
+        "with_names_common": 457
+      },
+      {
+        "subtype": "airport",
+        "class": "airport_gate",
+        "named_rows": 1980,
+        "with_qid": 0,
+        "with_names_common": 250
+      },
+      {
+        "subtype": "airport",
+        "class": "military_airport",
+        "named_rows": 1922,
+        "with_qid": 1172,
+        "with_names_common": 1003
+      },
+      {
+        "subtype": "utility",
+        "class": "silo",
+        "named_rows": 1903,
+        "with_qid": 37,
+        "with_names_common": 121
+      },
+      {
+        "subtype": "barrier",
+        "class": "entrance",
+        "named_rows": 1844,
+        "with_qid": 95,
+        "with_names_common": 296
+      },
+      {
+        "subtype": "aerialway",
+        "class": "magic_carpet",
+        "named_rows": 1823,
+        "with_qid": 1,
+        "with_names_common": 65
+      },
+      {
+        "subtype": "bridge",
+        "class": "covered",
+        "named_rows": 1749,
+        "with_qid": 564,
+        "with_names_common": 105
+      },
+      {
+        "subtype": "airport",
+        "class": "airstrip",
+        "named_rows": 1747,
+        "with_qid": 265,
+        "with_names_common": 184
+      },
+      {
+        "subtype": "aerialway",
+        "class": "gondola",
+        "named_rows": 1733,
+        "with_qid": 282,
+        "with_names_common": 286
+      },
+      {
+        "subtype": "quay",
+        "class": "quay",
+        "named_rows": 1647,
+        "with_qid": 22,
+        "with_names_common": 208
+      },
+      {
+        "subtype": "communication",
+        "class": "communication_line",
+        "named_rows": 1516,
+        "with_qid": 247,
+        "with_names_common": 708
+      },
+      {
+        "subtype": "barrier",
+        "class": "retaining_wall",
+        "named_rows": 1513,
+        "with_qid": 117,
+        "with_names_common": 114
+      },
+      {
+        "subtype": "airport",
+        "class": "municipal_airport",
+        "named_rows": 1403,
+        "with_qid": 1286,
+        "with_names_common": 158
+      },
+      {
+        "subtype": "airport",
+        "class": "international_airport",
+        "named_rows": 1311,
+        "with_qid": 1259,
+        "with_names_common": 1065
+      },
+      {
+        "subtype": "utility",
+        "class": "utility_pole",
+        "named_rows": 1255,
+        "with_qid": 1,
+        "with_names_common": 2
+      },
+      {
+        "subtype": "airport",
+        "class": "private_airport",
+        "named_rows": 1239,
+        "with_qid": 781,
+        "with_names_common": 157
+      },
+      {
+        "subtype": "water",
+        "class": "breakwater",
+        "named_rows": 1169,
+        "with_qid": 49,
+        "with_names_common": 83
+      },
+      {
+        "subtype": "bridge",
+        "class": "bridge_support",
+        "named_rows": 1162,
+        "with_qid": 94,
+        "with_names_common": 152
+      },
+      {
+        "subtype": "barrier",
+        "class": "sally_port",
+        "named_rows": 1141,
+        "with_qid": 206,
+        "with_names_common": 220
+      },
+      {
+        "subtype": "airport",
+        "class": "regional_airport",
+        "named_rows": 1044,
+        "with_qid": 896,
+        "with_names_common": 545
+      },
+      {
+        "subtype": "aerialway",
+        "class": "rope_tow",
+        "named_rows": 996,
+        "with_qid": 1,
+        "with_names_common": 40
+      },
+      {
+        "subtype": "tower",
+        "class": "monitoring",
+        "named_rows": 984,
+        "with_qid": 4,
+        "with_names_common": 328
+      },
+      {
+        "subtype": "barrier",
+        "class": "bollard",
+        "named_rows": 907,
+        "with_qid": 8,
+        "with_names_common": 46
+      },
+      {
+        "subtype": "aerialway",
+        "class": "zip_line",
+        "named_rows": 895,
+        "with_qid": 6,
+        "with_names_common": 49
+      },
+      {
+        "subtype": "aerialway",
+        "class": "cable_car",
+        "named_rows": 882,
+        "with_qid": 208,
+        "with_names_common": 182
+      },
+      {
+        "subtype": "aerialway",
+        "class": "pylon",
+        "named_rows": 863,
+        "with_qid": 1,
+        "with_names_common": 16
+      },
+      {
+        "subtype": "barrier",
+        "class": "block",
+        "named_rows": 828,
+        "with_qid": 3,
+        "with_names_common": 63
+      },
+      {
+        "subtype": "airport",
+        "class": "seaplane_airport",
+        "named_rows": 803,
+        "with_qid": 377,
+        "with_names_common": 3
+      },
+      {
+        "subtype": "airport",
+        "class": "heliport",
+        "named_rows": 724,
+        "with_qid": 195,
+        "with_names_common": 146
+      },
+      {
+        "subtype": "tower",
+        "class": "radar",
+        "named_rows": 718,
+        "with_qid": 39,
+        "with_names_common": 23
+      },
+      {
+        "subtype": "utility",
+        "class": "gasometer",
+        "named_rows": 703,
+        "with_qid": 19,
+        "with_names_common": 44
+      },
+      {
+        "subtype": "bridge",
+        "class": "trestle",
+        "named_rows": 667,
+        "with_qid": 44,
+        "with_names_common": 92
+      },
+      {
+        "subtype": "tower",
+        "class": "watchtower",
+        "named_rows": 658,
+        "with_qid": 153,
+        "with_names_common": 100
+      },
+      {
+        "subtype": "aerialway",
+        "class": "goods",
+        "named_rows": 565,
+        "with_qid": 13,
+        "with_names_common": 12
+      },
+      {
+        "subtype": "barrier",
+        "class": "swing_gate",
+        "named_rows": 548,
+        "with_qid": 1,
+        "with_names_common": 17
+      },
+      {
+        "subtype": "manhole",
+        "class": "drain",
+        "named_rows": 529,
+        "with_qid": 0,
+        "with_names_common": 6
+      },
+      {
+        "subtype": "tower",
+        "class": "siren",
+        "named_rows": 495,
+        "with_qid": 0,
+        "with_names_common": 3
+      },
+      {
+        "subtype": "tower",
+        "class": "lighting",
+        "named_rows": 445,
+        "with_qid": 8,
+        "with_names_common": 30
+      },
+      {
+        "subtype": "power",
+        "class": "switch",
+        "named_rows": 432,
+        "with_qid": 1,
+        "with_names_common": 5
+      },
+      {
+        "subtype": "transportation",
+        "class": "stop",
+        "named_rows": 356,
+        "with_qid": 2,
+        "with_names_common": 24
+      },
+      {
+        "subtype": "manhole",
+        "class": "sewer",
+        "named_rows": 223,
+        "with_qid": 1,
+        "with_names_common": 5
+      },
+      {
+        "subtype": "barrier",
+        "class": "full-height_turnstile",
+        "named_rows": 217,
+        "with_qid": 0,
+        "with_names_common": 10
+      },
+      {
+        "subtype": "tower",
+        "class": "minaret",
+        "named_rows": 198,
+        "with_qid": 23,
+        "with_names_common": 66
+      },
+      {
+        "subtype": "barrier",
+        "class": "chain",
+        "named_rows": 193,
+        "with_qid": 11,
+        "with_names_common": 37
+      },
+      {
+        "subtype": "barrier",
+        "class": "cattle_grid",
+        "named_rows": 192,
+        "with_qid": 2,
+        "with_names_common": 7
+      },
+      {
+        "subtype": "barrier",
+        "class": "stile",
+        "named_rows": 187,
+        "with_qid": 0,
+        "with_names_common": 8
+      },
+      {
+        "subtype": "airport",
+        "class": "taxilane",
+        "named_rows": 180,
+        "with_qid": 0,
+        "with_names_common": 55
+      },
+      {
+        "subtype": "barrier",
+        "class": "kissing_gate",
+        "named_rows": 155,
+        "with_qid": 1,
+        "with_names_common": 3
+      },
+      {
+        "subtype": "tower",
+        "class": "cooling",
+        "named_rows": 144,
+        "with_qid": 4,
+        "with_names_common": 8
+      },
+      {
+        "subtype": "barrier",
+        "class": "guard_rail",
+        "named_rows": 131,
+        "with_qid": 2,
+        "with_names_common": 8
+      },
+      {
+        "subtype": "aerialway",
+        "class": "j-bar",
+        "named_rows": 122,
+        "with_qid": 0,
+        "with_names_common": 3
+      },
+      {
+        "subtype": "aerialway",
+        "class": "mixed_lift",
+        "named_rows": 98,
+        "with_qid": 8,
+        "with_names_common": 14
+      },
+      {
+        "subtype": "transportation",
+        "class": "give_way",
+        "named_rows": 95,
+        "with_qid": 2,
+        "with_names_common": 8
+      },
+      {
+        "subtype": "tower",
+        "class": "diving",
+        "named_rows": 81,
+        "with_qid": 2,
+        "with_names_common": 5
+      },
+      {
+        "subtype": "barrier",
+        "class": "cycle_barrier",
+        "named_rows": 77,
+        "with_qid": 1,
+        "with_names_common": 2
+      },
+      {
+        "subtype": "airport",
+        "class": "stopway",
+        "named_rows": 61,
+        "with_qid": 0,
+        "with_names_common": 0
+      },
+      {
+        "subtype": "barrier",
+        "class": "jersey_barrier",
+        "named_rows": 56,
+        "with_qid": 1,
+        "with_names_common": 11
+      },
+      {
+        "subtype": "barrier",
+        "class": "height_restrictor",
+        "named_rows": 56,
+        "with_qid": 0,
+        "with_names_common": 1
+      },
+      {
+        "subtype": "power",
+        "class": "terminal",
+        "named_rows": 52,
+        "with_qid": 0,
+        "with_names_common": 2
+      },
+      {
+        "subtype": "tower",
+        "class": "hose",
+        "named_rows": 50,
+        "with_qid": 1,
+        "with_names_common": 0
+      },
+      {
+        "subtype": "airport",
+        "class": "launchpad",
+        "named_rows": 49,
+        "with_qid": 13,
+        "with_names_common": 16
+      },
+      {
+        "subtype": "power",
+        "class": "catenary_mast",
+        "named_rows": 41,
+        "with_qid": 0,
+        "with_names_common": 0
+      },
+      {
+        "subtype": "tower",
+        "class": "lightning_protection",
+        "named_rows": 40,
+        "with_qid": 0,
+        "with_names_common": 8
+      },
+      {
+        "subtype": "power",
+        "class": "connection",
+        "named_rows": 27,
+        "with_qid": 0,
+        "with_names_common": 1
+      },
+      {
+        "subtype": "barrier",
+        "class": "handrail",
+        "named_rows": 25,
+        "with_qid": 1,
+        "with_names_common": 2
+      },
+      {
+        "subtype": "barrier",
+        "class": "hampshire_gate",
+        "named_rows": 22,
+        "with_qid": 1,
+        "with_names_common": 1
+      },
+      {
+        "subtype": "pedestrian",
+        "class": "pedestrian_crossing",
+        "named_rows": 21,
+        "with_qid": 0,
+        "with_names_common": 12
+      },
+      {
+        "subtype": "power",
+        "class": "insulator",
+        "named_rows": 16,
+        "with_qid": 0,
+        "with_names_common": 0
+      },
+      {
+        "subtype": "barrier",
+        "class": "cable_barrier",
+        "named_rows": 15,
+        "with_qid": 1,
+        "with_names_common": 1
+      },
+      {
+        "subtype": "barrier",
+        "class": "bump_gate",
+        "named_rows": 12,
+        "with_qid": 0,
+        "with_names_common": 0
+      },
+      {
+        "subtype": "communication",
+        "class": "communication_pole",
+        "named_rows": 12,
+        "with_qid": 0,
+        "with_names_common": 0
+      },
+      {
+        "subtype": "barrier",
+        "class": "planter",
+        "named_rows": 9,
+        "with_qid": 0,
+        "with_names_common": 0
+      },
+      {
+        "subtype": "barrier",
+        "class": "bus_trap",
+        "named_rows": 8,
+        "with_qid": 1,
+        "with_names_common": 1
+      },
+      {
+        "subtype": "power",
+        "class": "heliostat",
+        "named_rows": 5,
+        "with_qid": 0,
+        "with_names_common": 1
+      },
+      {
+        "subtype": "power",
+        "class": "cable_distribution",
+        "named_rows": 4,
+        "with_qid": 1,
+        "with_names_common": 2
+      },
+      {
+        "subtype": "pedestrian",
+        "class": "picnic_table",
+        "named_rows": 2,
+        "with_qid": 0,
+        "with_names_common": 0
+      }
+    ],
+    "land_use": [
+      {
+        "subtype": "residential",
+        "class": "residential",
+        "named_rows": 833571,
+        "with_qid": 17828,
+        "with_names_common": 100721
+      },
+      {
+        "subtype": "education",
+        "class": "school",
+        "named_rows": 663194,
+        "with_qid": 84219,
+        "with_names_common": 83309
+      },
+      {
+        "subtype": "park",
+        "class": "park",
+        "named_rows": 570875,
+        "with_qid": 34938,
+        "with_names_common": 46616
+      },
+      {
+        "subtype": "developed",
+        "class": "industrial",
+        "named_rows": 359316,
+        "with_qid": 9593,
+        "with_names_common": 36835
+      },
+      {
+        "subtype": "cemetery",
+        "class": "cemetery",
+        "named_rows": 247070,
+        "with_qid": 32779,
+        "with_names_common": 16029
+      },
+      {
+        "subtype": "recreation",
+        "class": "pitch",
+        "named_rows": 205326,
+        "with_qid": 2506,
+        "with_names_common": 9014
+      },
+      {
+        "subtype": "agriculture",
+        "class": "farmyard",
+        "named_rows": 165404,
+        "with_qid": 851,
+        "with_names_common": 5900
+      },
+      {
+        "subtype": "developed",
+        "class": "commercial",
+        "named_rows": 118800,
+        "with_qid": 2204,
+        "with_names_common": 10658
+      },
+      {
+        "subtype": "education",
+        "class": "kindergarten",
+        "named_rows": 116845,
+        "with_qid": 606,
+        "with_names_common": 12355
+      },
+      {
+        "subtype": "developed",
+        "class": "retail",
+        "named_rows": 83876,
+        "with_qid": 1956,
+        "with_names_common": 7309
+      },
+      {
+        "subtype": "agriculture",
+        "class": "farmland",
+        "named_rows": 75757,
+        "with_qid": 135,
+        "with_names_common": 2084
+      },
+      {
+        "subtype": "protected",
+        "class": "nature_reserve",
+        "named_rows": 74399,
+        "with_qid": 10167,
+        "with_names_common": 4726
+      },
+      {
+        "subtype": "medical",
+        "class": "hospital",
+        "named_rows": 72953,
+        "with_qid": 8003,
+        "with_names_common": 11816
+      },
+      {
+        "subtype": "recreation",
+        "class": "playground",
+        "named_rows": 71731,
+        "with_qid": 664,
+        "with_names_common": 3297
+      },
+      {
+        "subtype": "horticulture",
+        "class": "allotments",
+        "named_rows": 70923,
+        "with_qid": 167,
+        "with_names_common": 7810
+      },
+      {
+        "subtype": "winter_sports",
+        "class": "downhill",
+        "named_rows": 70327,
+        "with_qid": 33,
+        "with_names_common": 2474
+      },
+      {
+        "subtype": "pedestrian",
+        "class": "plaza",
+        "named_rows": 67518,
+        "with_qid": 3741,
+        "with_names_common": 8000
+      },
+      {
+        "subtype": "construction",
+        "class": "construction",
+        "named_rows": 60400,
+        "with_qid": 715,
+        "with_names_common": 4117
+      },
+      {
+        "subtype": "pedestrian",
+        "class": "pedestrian",
+        "named_rows": 59780,
+        "with_qid": 3168,
+        "with_names_common": 7950
+      },
+      {
+        "subtype": "campground",
+        "class": "camp_site",
+        "named_rows": 47481,
+        "with_qid": 402,
+        "with_names_common": 2640
+      },
+      {
+        "subtype": "cemetery",
+        "class": "grave_yard",
+        "named_rows": 46093,
+        "with_qid": 4535,
+        "with_names_common": 1765
+      },
+      {
+        "subtype": "recreation",
+        "class": "recreation_ground",
+        "named_rows": 44579,
+        "with_qid": 847,
+        "with_names_common": 2139
+      },
+      {
+        "subtype": "winter_sports",
+        "class": "nordic",
+        "named_rows": 42633,
+        "with_qid": 27,
+        "with_names_common": 974
+      },
+      {
+        "subtype": "horticulture",
+        "class": "garden",
+        "named_rows": 42592,
+        "with_qid": 1837,
+        "with_names_common": 3978
+      },
+      {
+        "subtype": "agriculture",
+        "class": "meadow",
+        "named_rows": 37256,
+        "with_qid": 971,
+        "with_names_common": 2075
+      },
+      {
+        "subtype": "resource_extraction",
+        "class": "quarry",
+        "named_rows": 31050,
+        "with_qid": 917,
+        "with_names_common": 1831
+      },
+      {
+        "subtype": "education",
+        "class": "college",
+        "named_rows": 30934,
+        "with_qid": 3653,
+        "with_names_common": 4912
+      },
+      {
+        "subtype": "education",
+        "class": "university",
+        "named_rows": 30591,
+        "with_qid": 8032,
+        "with_names_common": 7733
+      },
+      {
+        "subtype": "golf",
+        "class": "golf_course",
+        "named_rows": 29461,
+        "with_qid": 1545,
+        "with_names_common": 1482
+      },
+      {
+        "subtype": "managed",
+        "class": "grass",
+        "named_rows": 29112,
+        "with_qid": 537,
+        "with_names_common": 1448
+      },
+      {
+        "subtype": "religious",
+        "class": "religious",
+        "named_rows": 28688,
+        "with_qid": 1904,
+        "with_names_common": 4426
+      },
+      {
+        "subtype": "military",
+        "class": "military",
+        "named_rows": 26109,
+        "with_qid": 1741,
+        "with_names_common": 4144
+      },
+      {
+        "subtype": "protected",
+        "class": "species_management_area",
+        "named_rows": 25963,
+        "with_qid": 13883,
+        "with_names_common": 3757
+      },
+      {
+        "subtype": "recreation",
+        "class": "stadium",
+        "named_rows": 24991,
+        "with_qid": 5337,
+        "with_names_common": 3905
+      },
+      {
+        "subtype": "horticulture",
+        "class": "orchard",
+        "named_rows": 15674,
+        "with_qid": 37,
+        "with_names_common": 907
+      },
+      {
+        "subtype": "recreation",
+        "class": "track",
+        "named_rows": 13802,
+        "with_qid": 274,
+        "with_names_common": 635
+      },
+      {
+        "subtype": "landfill",
+        "class": "landfill",
+        "named_rows": 13156,
+        "with_qid": 128,
+        "with_names_common": 1263
+      },
+      {
+        "subtype": "golf",
+        "class": "tee",
+        "named_rows": 12704,
+        "with_qid": 0,
+        "with_names_common": 67
+      },
+      {
+        "subtype": "developed",
+        "class": "works",
+        "named_rows": 12494,
+        "with_qid": 171,
+        "with_names_common": 679
+      },
+      {
+        "subtype": "recreation",
+        "class": "resort",
+        "named_rows": 12349,
+        "with_qid": 194,
+        "with_names_common": 2168
+      },
+      {
+        "subtype": "residential",
+        "class": "garages",
+        "named_rows": 12229,
+        "with_qid": 12,
+        "with_names_common": 2005
+      },
+      {
+        "subtype": "medical",
+        "class": "clinic",
+        "named_rows": 11732,
+        "with_qid": 179,
+        "with_names_common": 1339
+      },
+      {
+        "subtype": "developed",
+        "class": "brownfield",
+        "named_rows": 11153,
+        "with_qid": 409,
+        "with_names_common": 635
+      },
+      {
+        "subtype": "recreation",
+        "class": "marina",
+        "named_rows": 10786,
+        "with_qid": 450,
+        "with_names_common": 1019
+      },
+      {
+        "subtype": "transportation",
+        "class": "railway",
+        "named_rows": 10383,
+        "with_qid": 787,
+        "with_names_common": 1422
+      },
+      {
+        "subtype": "protected",
+        "class": "natural_monument",
+        "named_rows": 10016,
+        "with_qid": 3803,
+        "with_names_common": 1806
+      },
+      {
+        "subtype": "protected",
+        "class": "protected_landscape_seascape",
+        "named_rows": 9450,
+        "with_qid": 2936,
+        "with_names_common": 1069
+      },
+      {
+        "subtype": "aquaculture",
+        "class": "aquaculture",
+        "named_rows": 9181,
+        "with_qid": 17,
+        "with_names_common": 224
+      },
+      {
+        "subtype": "horticulture",
+        "class": "vineyard",
+        "named_rows": 8659,
+        "with_qid": 97,
+        "with_names_common": 196
+      },
+      {
+        "subtype": "park",
+        "class": "dog_park",
+        "named_rows": 8565,
+        "with_qid": 36,
+        "with_names_common": 311
+      },
+      {
+        "subtype": "golf",
+        "class": "green",
+        "named_rows": 8506,
+        "with_qid": 1,
+        "with_names_common": 85
+      },
+      {
+        "subtype": "horticulture",
+        "class": "plant_nursery",
+        "named_rows": 8407,
+        "with_qid": 20,
+        "with_names_common": 357
+      },
+      {
+        "subtype": "protected",
+        "class": "national_park",
+        "named_rows": 7876,
+        "with_qid": 4223,
+        "with_names_common": 2512
+      },
+      {
+        "subtype": "protected",
+        "class": "wilderness_area",
+        "named_rows": 7376,
+        "with_qid": 2648,
+        "with_names_common": 557
+      },
+      {
+        "subtype": "entertainment",
+        "class": "water_park",
+        "named_rows": 7243,
+        "with_qid": 273,
+        "with_names_common": 336
+      },
+      {
+        "subtype": "education",
+        "class": "education",
+        "named_rows": 6985,
+        "with_qid": 194,
+        "with_names_common": 354
+      },
+      {
+        "subtype": "entertainment",
+        "class": "theme_park",
+        "named_rows": 6174,
+        "with_qid": 1000,
+        "with_names_common": 1155
+      },
+      {
+        "subtype": "protected",
+        "class": "aboriginal_land",
+        "named_rows": 5339,
+        "with_qid": 1878,
+        "with_names_common": 2114
+      },
+      {
+        "subtype": "golf",
+        "class": "fairway",
+        "named_rows": 5244,
+        "with_qid": 0,
+        "with_names_common": 44
+      },
+      {
+        "subtype": "entertainment",
+        "class": "zoo",
+        "named_rows": 5080,
+        "with_qid": 1137,
+        "with_names_common": 814
+      },
+      {
+        "subtype": "construction",
+        "class": "greenfield",
+        "named_rows": 4848,
+        "with_qid": 25,
+        "with_names_common": 238
+      },
+      {
+        "subtype": "protected",
+        "class": "strict_nature_reserve",
+        "named_rows": 4718,
+        "with_qid": 4153,
+        "with_names_common": 256
+      },
+      {
+        "subtype": "winter_sports",
+        "class": "hike",
+        "named_rows": 4269,
+        "with_qid": 8,
+        "with_names_common": 52
+      },
+      {
+        "subtype": "recreation",
+        "class": "beach_resort",
+        "named_rows": 4183,
+        "with_qid": 55,
+        "with_names_common": 495
+      },
+      {
+        "subtype": "park",
+        "class": "village_green",
+        "named_rows": 3997,
+        "with_qid": 66,
+        "with_names_common": 463
+      },
+      {
+        "subtype": "horticulture",
+        "class": "greenhouse_horticulture",
+        "named_rows": 3640,
+        "with_qid": 7,
+        "with_names_common": 157
+      },
+      {
+        "subtype": "winter_sports",
+        "class": "winter_sports",
+        "named_rows": 3349,
+        "with_qid": 549,
+        "with_names_common": 613
+      },
+      {
+        "subtype": "protected",
+        "class": "environmental",
+        "named_rows": 3097,
+        "with_qid": 18,
+        "with_names_common": 19
+      },
+      {
+        "subtype": "medical",
+        "class": "doctors",
+        "named_rows": 2666,
+        "with_qid": 21,
+        "with_names_common": 208
+      },
+      {
+        "subtype": "military",
+        "class": "base",
+        "named_rows": 2579,
+        "with_qid": 471,
+        "with_names_common": 749
+      },
+      {
+        "subtype": "golf",
+        "class": "bunker",
+        "named_rows": 2518,
+        "with_qid": 0,
+        "with_names_common": 1
+      },
+      {
+        "subtype": "education",
+        "class": "driving_school",
+        "named_rows": 2379,
+        "with_qid": 39,
+        "with_names_common": 278
+      },
+      {
+        "subtype": "winter_sports",
+        "class": "skitour",
+        "named_rows": 2334,
+        "with_qid": 3,
+        "with_names_common": 32
+      },
+      {
+        "subtype": "military",
+        "class": "range",
+        "named_rows": 1878,
+        "with_qid": 47,
+        "with_names_common": 154
+      },
+      {
+        "subtype": "golf",
+        "class": "driving_range",
+        "named_rows": 1833,
+        "with_qid": 1,
+        "with_names_common": 63
+      },
+      {
+        "subtype": "military",
+        "class": "barracks",
+        "named_rows": 1734,
+        "with_qid": 286,
+        "with_names_common": 272
+      },
+      {
+        "subtype": "winter_sports",
+        "class": "sled",
+        "named_rows": 1709,
+        "with_qid": 10,
+        "with_names_common": 68
+      },
+      {
+        "subtype": "military",
+        "class": "airfield",
+        "named_rows": 1694,
+        "with_qid": 1003,
+        "with_names_common": 830
+      },
+      {
+        "subtype": "military",
+        "class": "training_area",
+        "named_rows": 1382,
+        "with_qid": 115,
+        "with_names_common": 118
+      },
+      {
+        "subtype": "protected",
+        "class": "forest",
+        "named_rows": 1119,
+        "with_qid": 292,
+        "with_names_common": 37
+      },
+      {
+        "subtype": "protected",
+        "class": "state_park",
+        "named_rows": 1078,
+        "with_qid": 847,
+        "with_names_common": 22
+      },
+      {
+        "subtype": "winter_sports",
+        "class": "snow_park",
+        "named_rows": 1054,
+        "with_qid": 2,
+        "with_names_common": 23
+      },
+      {
+        "subtype": "protected",
+        "class": "protected",
+        "named_rows": 912,
+        "with_qid": 121,
+        "with_names_common": 80
+      },
+      {
+        "subtype": "developed",
+        "class": "institutional",
+        "named_rows": 862,
+        "with_qid": 101,
+        "with_names_common": 182
+      },
+      {
+        "subtype": "horticulture",
+        "class": "flowerbed",
+        "named_rows": 829,
+        "with_qid": 11,
+        "with_names_common": 67
+      },
+      {
+        "subtype": "winter_sports",
+        "class": "fatbike",
+        "named_rows": 825,
+        "with_qid": 0,
+        "with_names_common": 0
+      },
+      {
+        "subtype": "resource_extraction",
+        "class": "salt_pond",
+        "named_rows": 771,
+        "with_qid": 42,
+        "with_names_common": 78
+      },
+      {
+        "subtype": "military",
+        "class": "danger_area",
+        "named_rows": 766,
+        "with_qid": 53,
+        "with_names_common": 93
+      },
+      {
+        "subtype": "winter_sports",
+        "class": "ski_jump",
+        "named_rows": 680,
+        "with_qid": 21,
+        "with_names_common": 4
+      },
+      {
+        "subtype": "golf",
+        "class": "water_hazard",
+        "named_rows": 538,
+        "with_qid": 47,
+        "with_names_common": 13
+      },
+      {
+        "subtype": "education",
+        "class": "music_school",
+        "named_rows": 533,
+        "with_qid": 25,
+        "with_names_common": 102
+      },
+      {
+        "subtype": "agriculture",
+        "class": "animal_keeping",
+        "named_rows": 423,
+        "with_qid": 3,
+        "with_names_common": 94
+      },
+      {
+        "subtype": "military",
+        "class": "nuclear_explosion_site",
+        "named_rows": 414,
+        "with_qid": 12,
+        "with_names_common": 7
+      },
+      {
+        "subtype": "military",
+        "class": "military_school",
+        "named_rows": 401,
+        "with_qid": 138,
+        "with_names_common": 171
+      },
+      {
+        "subtype": "golf",
+        "class": "rough",
+        "named_rows": 341,
+        "with_qid": 2,
+        "with_names_common": 19
+      },
+      {
+        "subtype": "winter_sports",
+        "class": "connection",
+        "named_rows": 314,
+        "with_qid": 1,
+        "with_names_common": 70
+      },
+      {
+        "subtype": "winter_sports",
+        "class": "sleigh",
+        "named_rows": 254,
+        "with_qid": 2,
+        "with_names_common": 6
+      },
+      {
+        "subtype": "military",
+        "class": "naval_base",
+        "named_rows": 253,
+        "with_qid": 57,
+        "with_names_common": 75
+      },
+      {
+        "subtype": "education",
+        "class": "schoolyard",
+        "named_rows": 219,
+        "with_qid": 1,
+        "with_names_common": 5
+      },
+      {
+        "subtype": "golf",
+        "class": "lateral_water_hazard",
+        "named_rows": 202,
+        "with_qid": 14,
+        "with_names_common": 5
+      },
+      {
+        "subtype": "transportation",
+        "class": "highway",
+        "named_rows": 188,
+        "with_qid": 3,
+        "with_names_common": 120
+      },
+      {
+        "subtype": "military",
+        "class": "military_hospital",
+        "named_rows": 181,
+        "with_qid": 55,
+        "with_names_common": 62
+      },
+      {
+        "subtype": "winter_sports",
+        "class": "playground",
+        "named_rows": 161,
+        "with_qid": 0,
+        "with_names_common": 14
+      },
+      {
+        "subtype": "winter_sports",
+        "class": "ice_skate",
+        "named_rows": 155,
+        "with_qid": 1,
+        "with_names_common": 6
+      },
+      {
+        "subtype": "military",
+        "class": "obstacle_course",
+        "named_rows": 130,
+        "with_qid": 0,
+        "with_names_common": 12
+      },
+      {
+        "subtype": "resource_extraction",
+        "class": "peat_cutting",
+        "named_rows": 102,
+        "with_qid": 2,
+        "with_names_common": 30
+      },
+      {
+        "subtype": "resource_extraction",
+        "class": "logging",
+        "named_rows": 57,
+        "with_qid": 4,
+        "with_names_common": 5
+      },
+      {
+        "subtype": "transportation",
+        "class": "traffic_island",
+        "named_rows": 28,
+        "with_qid": 0,
+        "with_names_common": 5
+      },
+      {
+        "subtype": "military",
+        "class": "trench",
+        "named_rows": 28,
+        "with_qid": 0,
+        "with_names_common": 4
+      },
+      {
+        "subtype": "residential",
+        "class": "static_caravan",
+        "named_rows": 4,
+        "with_qid": 0,
+        "with_names_common": 0
+      }
+    ],
+    "land": [
+      {
+        "subtype": "physical",
+        "class": "peak",
+        "named_rows": 678772,
+        "with_qid": 137480,
+        "with_names_common": 101837
+      },
+      {
+        "subtype": "land",
+        "class": "islet",
+        "named_rows": 127451,
+        "with_qid": 14391,
+        "with_names_common": 16705
+      },
+      {
+        "subtype": "forest",
+        "class": "wood",
+        "named_rows": 109544,
+        "with_qid": 4018,
+        "with_names_common": 7224
+      },
+      {
+        "subtype": "wetland",
+        "class": "wetland",
+        "named_rows": 81994,
+        "with_qid": 3978,
+        "with_names_common": 4346
+      },
+      {
+        "subtype": "forest",
+        "class": "forest",
+        "named_rows": 80534,
+        "with_qid": 2446,
+        "with_names_common": 6681
+      },
+      {
+        "subtype": "tree",
+        "class": "tree",
+        "named_rows": 67553,
+        "with_qid": 2435,
+        "with_names_common": 7341
+      },
+      {
+        "subtype": "land",
+        "class": "island",
+        "named_rows": 59758,
+        "with_qid": 19027,
+        "with_names_common": 11601
+      },
+      {
+        "subtype": "physical",
+        "class": "saddle",
+        "named_rows": 52010,
+        "with_qid": 4736,
+        "with_names_common": 9883
+      },
+      {
+        "subtype": "physical",
+        "class": "cave_entrance",
+        "named_rows": 51283,
+        "with_qid": 3356,
+        "with_names_common": 5972
+      },
+      {
+        "subtype": "sand",
+        "class": "beach",
+        "named_rows": 48913,
+        "with_qid": 6002,
+        "with_names_common": 9371
+      },
+      {
+        "subtype": "physical",
+        "class": "valley",
+        "named_rows": 43752,
+        "with_qid": 3830,
+        "with_names_common": 11525
+      },
+      {
+        "subtype": "physical",
+        "class": "cliff",
+        "named_rows": 36833,
+        "with_qid": 2343,
+        "with_names_common": 3005
+      },
+      {
+        "subtype": "physical",
+        "class": "hill",
+        "named_rows": 29214,
+        "with_qid": 760,
+        "with_names_common": 2091
+      },
+      {
+        "subtype": "physical",
+        "class": "ridge",
+        "named_rows": 27338,
+        "with_qid": 3431,
+        "with_names_common": 4289
+      },
+      {
+        "subtype": "rock",
+        "class": "bare_rock",
+        "named_rows": 19610,
+        "with_qid": 1307,
+        "with_names_common": 1926
+      },
+      {
+        "subtype": "grass",
+        "class": "grassland",
+        "named_rows": 16338,
+        "with_qid": 499,
+        "with_names_common": 1320
+      },
+      {
+        "subtype": "shrub",
+        "class": "scrub",
+        "named_rows": 15609,
+        "with_qid": 389,
+        "with_names_common": 1020
+      },
+      {
+        "subtype": "rock",
+        "class": "rock",
+        "named_rows": 13900,
+        "with_qid": 706,
+        "with_names_common": 1586
+      },
+      {
+        "subtype": "grass",
+        "class": "grass",
+        "named_rows": 10792,
+        "with_qid": 656,
+        "with_names_common": 512
+      },
+      {
+        "subtype": "glacier",
+        "class": "glacier",
+        "named_rows": 9982,
+        "with_qid": 2386,
+        "with_names_common": 2322
+      },
+      {
+        "subtype": "rock",
+        "class": "stone",
+        "named_rows": 9416,
+        "with_qid": 538,
+        "with_names_common": 1054
+      },
+      {
+        "subtype": "physical",
+        "class": "mountain_range",
+        "named_rows": 7229,
+        "with_qid": 1567,
+        "with_names_common": 1450
+      },
+      {
+        "subtype": "sand",
+        "class": "sand",
+        "named_rows": 5799,
+        "with_qid": 224,
+        "with_names_common": 979
+      },
+      {
+        "subtype": "shrub",
+        "class": "heath",
+        "named_rows": 4976,
+        "with_qid": 253,
+        "with_names_common": 379
+      },
+      {
+        "subtype": "reef",
+        "class": "reef",
+        "named_rows": 4424,
+        "with_qid": 609,
+        "with_names_common": 701
+      },
+      {
+        "subtype": "physical",
+        "class": "peninsula",
+        "named_rows": 3403,
+        "with_qid": 762,
+        "with_names_common": 785
+      },
+      {
+        "subtype": "physical",
+        "class": "volcano",
+        "named_rows": 3172,
+        "with_qid": 1167,
+        "with_names_common": 767
+      },
+      {
+        "subtype": "rock",
+        "class": "scree",
+        "named_rows": 3100,
+        "with_qid": 68,
+        "with_names_common": 295
+      },
+      {
+        "subtype": "sand",
+        "class": "dune",
+        "named_rows": 2678,
+        "with_qid": 9,
+        "with_names_common": 1742
+      },
+      {
+        "subtype": "land",
+        "class": "archipelago",
+        "named_rows": 2514,
+        "with_qid": 924,
+        "with_names_common": 801
+      },
+      {
+        "subtype": "tree",
+        "class": "tree_row",
+        "named_rows": 2249,
+        "with_qid": 58,
+        "with_names_common": 92
+      },
+      {
+        "subtype": "shrub",
+        "class": "shrub",
+        "named_rows": 1983,
+        "with_qid": 8,
+        "with_names_common": 17
+      },
+      {
+        "subtype": "grass",
+        "class": "fell",
+        "named_rows": 1248,
+        "with_qid": 26,
+        "with_names_common": 122
+      },
+      {
+        "subtype": "rock",
+        "class": "shingle",
+        "named_rows": 597,
+        "with_qid": 24,
+        "with_names_common": 96
+      },
+      {
+        "subtype": "physical",
+        "class": "plateau",
+        "named_rows": 347,
+        "with_qid": 75,
+        "with_names_common": 55
+      },
+      {
+        "subtype": "crater",
+        "class": "volcanic_caldera_rim",
+        "named_rows": 235,
+        "with_qid": 51,
+        "with_names_common": 33
+      },
+      {
+        "subtype": "desert",
+        "class": "desert",
+        "named_rows": 157,
+        "with_qid": 37,
+        "with_names_common": 65
+      },
+      {
+        "subtype": "crater",
+        "class": "meteor_crater",
+        "named_rows": 128,
+        "with_qid": 78,
+        "with_names_common": 44
+      },
+      {
+        "subtype": "shrub",
+        "class": "shrubbery",
+        "named_rows": 89,
+        "with_qid": 2,
+        "with_names_common": 2
+      },
+      {
+        "subtype": "grass",
+        "class": "meadow",
+        "named_rows": 27,
+        "with_qid": 2,
+        "with_names_common": 2
+      },
+      {
+        "subtype": "grass",
+        "class": "tundra",
+        "named_rows": 12,
+        "with_qid": 11,
+        "with_names_common": 10
+      }
+    ]
+  },
+  "all_named_rows": 17799468,
+  "proposed_admission": {
+    "classes": [
+      {
+        "type": "base/infrastructure",
+        "subtype": "bridge",
+        "class": "bridge",
+        "named_rows": 2544617,
+        "with_qid": 72447,
+        "with_names_common": 631407
+      },
+      {
+        "type": "base/land",
+        "subtype": "physical",
+        "class": "peak",
+        "named_rows": 678772,
+        "with_qid": 137480,
+        "with_names_common": 101837
+      },
+      {
+        "type": "base/land_use",
+        "subtype": "park",
+        "class": "park",
+        "named_rows": 570875,
+        "with_qid": 34938,
+        "with_names_common": 46616
+      },
+      {
+        "type": "base/land_use",
+        "subtype": "cemetery",
+        "class": "cemetery",
+        "named_rows": 247070,
+        "with_qid": 32779,
+        "with_names_common": 16029
+      },
+      {
+        "type": "base/infrastructure",
+        "subtype": "pedestrian",
+        "class": "artwork",
+        "named_rows": 198352,
+        "with_qid": 16828,
+        "with_names_common": 22235
+      },
+      {
+        "type": "base/land",
+        "subtype": "land",
+        "class": "islet",
+        "named_rows": 127451,
+        "with_qid": 14391,
+        "with_names_common": 16705
+      },
+      {
+        "type": "base/land_use",
+        "subtype": "medical",
+        "class": "hospital",
+        "named_rows": 72953,
+        "with_qid": 8003,
+        "with_names_common": 11816
+      },
+      {
+        "type": "base/land_use",
+        "subtype": "pedestrian",
+        "class": "plaza",
+        "named_rows": 67518,
+        "with_qid": 3741,
+        "with_names_common": 8000
+      },
+      {
+        "type": "base/land",
+        "subtype": "land",
+        "class": "island",
+        "named_rows": 59758,
+        "with_qid": 19027,
+        "with_names_common": 11601
+      },
+      {
+        "type": "base/land",
+        "subtype": "physical",
+        "class": "saddle",
+        "named_rows": 52010,
+        "with_qid": 4736,
+        "with_names_common": 9883
+      },
+      {
+        "type": "base/land_use",
+        "subtype": "education",
+        "class": "college",
+        "named_rows": 30934,
+        "with_qid": 3653,
+        "with_names_common": 4912
+      },
+      {
+        "type": "base/land_use",
+        "subtype": "education",
+        "class": "university",
+        "named_rows": 30591,
+        "with_qid": 8032,
+        "with_names_common": 7733
+      },
+      {
+        "type": "base/land_use",
+        "subtype": "medical",
+        "class": "clinic",
+        "named_rows": 11732,
+        "with_qid": 179,
+        "with_names_common": 1339
+      },
+      {
+        "type": "base/land_use",
+        "subtype": "protected",
+        "class": "national_park",
+        "named_rows": 7876,
+        "with_qid": 4223,
+        "with_names_common": 2512
+      },
+      {
+        "type": "base/infrastructure",
+        "subtype": "tower",
+        "class": "bell_tower",
+        "named_rows": 3388,
+        "with_qid": 651,
+        "with_names_common": 580
+      },
+      {
+        "type": "base/land",
+        "subtype": "physical",
+        "class": "volcano",
+        "named_rows": 3172,
+        "with_qid": 1167,
+        "with_names_common": 767
+      }
+    ],
+    "totals": {
+      "named_rows": 4707069,
+      "with_qid": 362275,
+      "with_names_common": 893972
+    },
+    "qid_coverage": 0.077,
+    "names_common_coverage": 0.1899,
+    "upper_bound_head_records": 4707069,
+    "upper_bound_head_bytes": 800816151,
+    "upper_bound_head_growth_fraction": 0.14007464288854854,
+    "cost_note": "An upper bound that assumes one head record per admitted feature and no cap eviction. The per-token cap of 10 can only reduce it."
+  }
+}
