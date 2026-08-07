@@ -1315,20 +1315,45 @@ jobs:
             # same frozen Seattle point-family fixtures that closed the reverse
             # milestone; checking both types also proves the release retained
             # the independently sourced Address reverse operation.
+            #
+            # This assertion is deliberately NOT a POI-name fixture. It used to
+            # require a feature literally named "Space Needle", which passed on
+            # every June-vintage build and went red on 2026-08-07.0 (Overture
+            # 2026-07-22.0) even though reverse was entirely correct: upstream
+            # renamed that record, and the only surviving matches sit hundreds
+            # of metres away ("Space Needle, Seattle Washington State US" at
+            # 47.6164, "Space Needle-Seattle Center" at 47.6259). A promotion
+            # gate that a routine upstream rename can fail is a gate operators
+            # learn to wave through, which is the same reasoning that already
+            # moved the places-head check off `q=Eiffel Tower`.
+            #
+            # What replaces it is strictly MORE discriminating about the thing
+            # actually under test -- that reverse resolved the correct cell and
+            # ranked it. A broken or stale reverse index returns nothing, or
+            # returns far-away POIs, or returns them unordered; all three fail
+            # here, and none of them depend on what any single record is called.
             body=$(fetch_reverse --data-urlencode "lat=47.6205" \
               --data-urlencode "lon=-122.3493" \
               --data-urlencode "types=poi" \
               --data-urlencode "limit=3") || {
               echo "  FAIL places reverse: request error"; return 1; }
             check_envelope "$body" "places reverse" || return 1
+            # The `type == "number"` clause is load-bearing, not defensive
+            # noise: jq compares null as LESS than every number, so
+            # `null <= 100` is true and a response that dropped distance_m
+            # entirely would satisfy both the bound and the sort. That would be
+            # an assertion incapable of failing, which is the exact defect this
+            # check replaced.
             echo "$body" | jq -e '
               (.features | length) >= 1
               and (.features | all(.properties.feature_type == "poi"))
-              and any(.features[]; .properties.name == "Space Needle")
+              and (.features | all(.properties.distance_m | type == "number"))
+              and (.features | all(.properties.distance_m <= 100))
+              and ([.features[].properties.distance_m] | . == sort)
             ' > /dev/null || {
-              echo "  FAIL places reverse: Space Needle fixture missing"
+              echo "  FAIL places reverse: no ordered POI within 100m of the Seattle Center fixture"
               return 1; }
-            echo "  OK   places reverse (Space Needle, build $GEOCODER_BUILD)"
+            echo "  OK   places reverse (Seattle Center point, build $GEOCODER_BUILD)"
 
             body=$(fetch_reverse --data-urlencode "lat=47.6205" \
               --data-urlencode "lon=-122.3493" \
