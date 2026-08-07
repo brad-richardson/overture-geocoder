@@ -285,6 +285,22 @@ def test_an_unreadable_document_classifies_as_setup(tmp_path):
     assert caught.value.failure_class == acceptance.SETUP
 
 
+def _proximity_and_quarantine_args(tmp_path, clean_payload):
+    """The gates added 2026-08-07, held clean so other assertions stay isolated."""
+    import copy as _copy
+
+    proximity = _copy.deepcopy(clean_payload)
+    return [
+        "--proximity-preview", str(_write(tmp_path / "pp.json", proximity)),
+        "--proximity-baseline", str(_write(tmp_path / "pb.json", proximity)),
+        "--everyday-quarantine",
+        str(_write(tmp_path / "q.json", {
+            "quarantined_case_ids": ["gold:name:empire-state-building"],
+            "quarantine_rule": "test fixture",
+        })),
+    ]
+
+
 def _write(path, payload):
     path.write_text(json.dumps(payload))
     return path
@@ -303,6 +319,7 @@ def test_the_cli_writes_a_classified_rejection_instead_of_a_traceback(tmp_path):
         "--gold-baseline", str(_write(tmp_path / "gb.json", baseline)),
         "--everyday-preview", str(_write(tmp_path / "ep.json", preview)),
         "--everyday-baseline", str(_write(tmp_path / "eb.json", baseline)),
+        *_proximity_and_quarantine_args(tmp_path, baseline),
         "--output", str(output),
     ])
     assert code == 1
@@ -326,6 +343,7 @@ def test_the_cli_still_accepts_a_clean_preview_and_reports_retries(tmp_path):
         "--gold-baseline", str(_write(tmp_path / "gb.json", baseline)),
         "--everyday-preview", str(_write(tmp_path / "ep.json", preview)),
         "--everyday-baseline", str(_write(tmp_path / "eb.json", baseline)),
+        *_proximity_and_quarantine_args(tmp_path, baseline),
         "--output", str(output),
     ])
     assert code == 0
@@ -398,3 +416,87 @@ def test_preview_scripts_parse_committed_benchmarks(tmp_path):
     )
     assert len(acceptance.provider_rows(gold)) == 55
     assert len(acceptance.provider_rows(everyday)) == 200
+
+
+def test_the_proximity_gate_rejects_a_paired_proximity_loss(tmp_path):
+    """The 3/40 -> 28/40 proximity gain was shipped with no gate protecting it.
+
+    A candidate that loses proximity cases while gold and everyday hold steady
+    used to be accepted, because nothing measured the lane at all.
+    """
+    clean = benchmark_payload()
+    lost = benchmark_payload(losses=1)
+    output = tmp_path / "acceptance.json"
+    code = acceptance.main([
+        "--expected-build", "2026-08-03.0",
+        "--gold-preview", str(_write(tmp_path / "gp.json", clean)),
+        "--gold-baseline", str(_write(tmp_path / "gb.json", clean)),
+        "--everyday-preview", str(_write(tmp_path / "ep.json", clean)),
+        "--everyday-baseline", str(_write(tmp_path / "eb.json", clean)),
+        "--proximity-preview", str(_write(tmp_path / "pp.json", lost)),
+        "--proximity-baseline", str(_write(tmp_path / "pb.json", clean)),
+        "--everyday-quarantine", str(_write(tmp_path / "q.json", {
+            "quarantined_case_ids": [], "quarantine_rule": "test fixture",
+        })),
+        "--output", str(output),
+    ])
+    assert code == 1
+    written = json.loads(output.read_text())
+    assert written["failure_class"] == acceptance.QUALITY_REGRESSION
+    assert "proximity" in written["reason"]
+
+
+def test_the_quarantine_is_reported_beside_the_headline_and_never_relaxes_a_gate(tmp_path):
+    clean = benchmark_payload()
+    output = tmp_path / "acceptance.json"
+    code = acceptance.main([
+        "--expected-build", "2026-08-03.0",
+        "--gold-preview", str(_write(tmp_path / "gp.json", clean)),
+        "--gold-baseline", str(_write(tmp_path / "gb.json", clean)),
+        "--everyday-preview", str(_write(tmp_path / "ep.json", clean)),
+        "--everyday-baseline", str(_write(tmp_path / "eb.json", clean)),
+        "--proximity-preview", str(_write(tmp_path / "pp.json", clean)),
+        "--proximity-baseline", str(_write(tmp_path / "pb.json", clean)),
+        "--everyday-quarantine", str(_write(tmp_path / "q.json", {
+            "quarantined_case_ids": ["gold:name:empire-state-building"],
+            "quarantine_rule": "no corpus record near gold",
+        })),
+        "--output", str(output),
+    ])
+    assert code == 0
+    written = json.loads(output.read_text())
+    scorable = written["everyday_poi"]["scorable"]
+    assert scorable["n"] == 1 and scorable["quarantined"] == 1
+    # The headline is untouched by quarantining.
+    assert written["everyday_poi"]["preview"]["found_at_10"] == 2
+    assert scorable["caveat"]
+
+    # An aggregate regression is still a rejection even if quarantining the
+    # lost case would have hidden it.
+    regressed = benchmark_payload(found_at_1=1, found_at_10=1)
+    code = acceptance.main([
+        "--expected-build", "2026-08-03.0",
+        "--gold-preview", str(_write(tmp_path / "gp.json", clean)),
+        "--gold-baseline", str(_write(tmp_path / "gb.json", clean)),
+        "--everyday-preview", str(_write(tmp_path / "ep2.json", regressed)),
+        "--everyday-baseline", str(_write(tmp_path / "eb2.json", clean)),
+        "--proximity-preview", str(_write(tmp_path / "pp.json", clean)),
+        "--proximity-baseline", str(_write(tmp_path / "pb.json", clean)),
+        "--everyday-quarantine", str(_write(tmp_path / "q2.json", {
+            "quarantined_case_ids": [row["case_id"] for row in regressed["results"]],
+            "quarantine_rule": "test fixture",
+        })),
+        "--output", str(output),
+    ])
+    assert code == 1
+
+
+def test_the_preview_workflow_runs_and_gates_the_proximity_stratum():
+    workflow = (ROOT / ".github/workflows/preview-v2-candidate.yml").read_text()
+    assert "benchmarks/proximity-chain-cases-v1.json" in workflow
+    assert "--proximity-preview preview/output/proximity-preview.json" in workflow
+    assert "--proximity-baseline benchmarks/2026-08-07-proximity-chain-baseline-v1.json" in workflow
+    assert "--everyday-quarantine benchmarks/everyday-quarantine-v1.json" in workflow
+    # Both denominators must reach the run summary; one alone misleads.
+    assert ".everyday_poi.scorable.recall_at_1" in workflow
+    assert ".everyday_poi.preview.recall_at_1" in workflow

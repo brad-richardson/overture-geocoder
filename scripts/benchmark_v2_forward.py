@@ -928,9 +928,74 @@ def _normalize_street(value):
     return " ".join(tokens)
 
 
+def chain_name_matches(chain, candidate_name):
+    """Permissive chain-name match, not proof of chain identity.
+
+    Token containment intentionally credits names such as "Starbucks Reserve
+    Roastery". It can also flatter the metric: the frozen Sydney case credits
+    "Woolworths Riley Street Car Park". Interpret this as a conservative
+    retrieval baseline, not entity-resolution ground truth.
+
+    This is the single implementation of the rule. The 2026-08-06 baseline probe
+    that froze the stratum delegates here, so the gate below and that evidence
+    cannot drift apart.
+    """
+    if not candidate_name:
+        return False
+    if normalize_name(candidate_name) == normalize_name(chain):
+        return True
+    chain_tokens = name_tokens(chain)
+    return bool(chain_tokens) and chain_tokens <= name_tokens(candidate_name)
+
+
+def is_chain_proximity_case(case):
+    """A "chain near me" case, which anchor-based scoring cannot score.
+
+    The anchor in these cases is a sampled construction aid, not gold:
+    displacement makes it non-nearest in 38 of 40 frozen cases, so scoring them
+    on `expected_gers_id` would measure the wrong thing entirely. The case-file
+    contract forbids it, and this predicate is how that prohibition is enforced
+    rather than merely documented -- it takes precedence over --semantic-scoring
+    and over exact-id scoring alike.
+    """
+    return bool(case.get("proximity_assert")) and bool(case.get("proximity"))
+
+
+def _score_chain_proximity(case, features):
+    """rank / matched / top-1 distance, all measured from the BIAS point.
+
+    A hit is a chain-name match within `proximity_assert.nearest_within_km` of
+    where the user is standing. Distance from the anchor is meaningless here and
+    is deliberately not what gets reported.
+    """
+    bias_lon, bias_lat = case["proximity"]
+    within_km = case["proximity_assert"]["nearest_within_km"]
+    chain = case.get("expected_name") or case.get("query")
+    rank = matched_distance = top1_distance = None
+    for index, feature in enumerate(features):
+        point = feature_point(feature)
+        distance = (
+            None if point is None else haversine_km(bias_lat, bias_lon, *point)
+        )
+        if index == 0:
+            top1_distance = distance
+        properties = feature.get("properties")
+        name = (properties or {}).get("name") if isinstance(properties, dict) else None
+        if (
+            rank is None
+            and distance is not None
+            and distance <= within_km
+            and chain_name_matches(chain, name)
+        ):
+            rank, matched_distance = index + 1, distance
+    return rank, matched_distance, top1_distance
+
+
 def score_case(case, features, provider="overture", semantic_scoring=None,
                name_match="exact"):
     """rank (1-based or None), distance to matched feature, top-1 distance."""
+    if is_chain_proximity_case(case):
+        return _score_chain_proximity(case, features)
     if semantic_scoring is None:
         semantic_scoring = provider != "overture"
     expected = (case["expected_lat"], case["expected_lon"])
@@ -1113,6 +1178,18 @@ class Runner:
         self.results = []
         self.data_version = None
 
+    def _scoring_mode(self, case):
+        """What actually scored this row, per case rather than per run.
+
+        A proximity stratum scores by chain name near the bias point whatever
+        the run-level flags say, so the row has to name its own authority --
+        otherwise a mixed file would claim `exact_gers_id` for cases whose
+        contract forbids exactly that.
+        """
+        if is_chain_proximity_case(case):
+            return "chain_proximity"
+        return "semantic" if self.semantic_scoring else "exact_gers_id"
+
     def _pace(self):
         now = self._monotonic()
         if self._last_request is None:
@@ -1129,9 +1206,7 @@ class Runner:
         if capability != "supported":
             result = {
                 "provider": self.provider,
-                "scoring_mode": (
-                    "semantic" if self.semantic_scoring else "exact_gers_id"
-                ),
+                "scoring_mode": self._scoring_mode(case),
                 "capability": capability,
                 "capability_reason": capability_reason,
                 "case_id": case["id"],
@@ -1246,9 +1321,7 @@ class Runner:
             error = f"http {status}"
         result = {
             "provider": self.provider,
-            "scoring_mode": (
-                "semantic" if self.semantic_scoring else "exact_gers_id"
-            ),
+            "scoring_mode": self._scoring_mode(case),
             "capability": "supported",
             "capability_reason": None,
             "case_id": case["id"],

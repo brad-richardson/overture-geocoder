@@ -242,6 +242,23 @@ jobs:
             --compare benchmarks/2026-08-03-everyday-poi-external-baseline-v1.json \
             --output preview/output/everyday-poi-preview.json
 
+      # The proximity lane is invisible to both sets above: every case in them
+      # is a bare name with no bias point. It was measured at 3/40 -> 28/40 at
+      # rank 1 by the Worker wave, and the same wave shipped a locality
+      # regression that only an ad-hoc run caught. Scored by chain name near the
+      # bias point, never by the sampled anchor id.
+      - name: Run the frozen 40-case proximity stratum
+        id: proximity_benchmark
+        run: |
+          python -u scripts/benchmark_v2_forward.py run \
+            --cases benchmarks/proximity-chain-cases-v1.json \
+            --skip-builtin \
+            --provider overture \
+            --base-url "$PREVIEW_URL" \
+            --interval 0.1 \
+            --compare benchmarks/2026-08-07-proximity-chain-baseline-v1.json \
+            --output preview/output/proximity-preview.json
+
       - name: Enforce paired acceptance and the two phrase recoveries
         id: acceptance
         run: |
@@ -251,6 +268,9 @@ jobs:
             --gold-baseline benchmarks/2026-08-03-forward-gold-external-after-a2bc.json \
             --everyday-preview preview/output/everyday-poi-preview.json \
             --everyday-baseline benchmarks/2026-08-03-everyday-poi-external-baseline-v1.json \
+            --everyday-quarantine benchmarks/everyday-quarantine-v1.json \
+            --proximity-preview preview/output/proximity-preview.json \
+            --proximity-baseline benchmarks/2026-08-07-proximity-chain-baseline-v1.json \
             --output preview/output/acceptance.json
           {
             echo "## v2 candidate preview accepted"
@@ -261,6 +281,12 @@ jobs:
             echo "- Gold r@10: $(jq -r '.gold.baseline.recall_at_10' preview/output/acceptance.json) -> $(jq -r '.gold.preview.recall_at_10' preview/output/acceptance.json)"
             echo "- Everyday r@1: $(jq -r '.everyday_poi.baseline.recall_at_1' preview/output/acceptance.json) -> $(jq -r '.everyday_poi.preview.recall_at_1' preview/output/acceptance.json)"
             echo "- Everyday r@10: $(jq -r '.everyday_poi.baseline.recall_at_10' preview/output/acceptance.json) -> $(jq -r '.everyday_poi.preview.recall_at_10' preview/output/acceptance.json)"
+            # Both denominators travel together. The headline is over all 200
+            # cases; the scorable figure excludes targets absent from the corpus
+            # and describes a materially different country population.
+            echo "- Everyday scorable (n=$(jq -r '.everyday_poi.scorable.n' preview/output/acceptance.json), quarantined $(jq -r '.everyday_poi.scorable.quarantined' preview/output/acceptance.json)): r@1 $(jq -r '.everyday_poi.scorable.recall_at_1' preview/output/acceptance.json), r@10 $(jq -r '.everyday_poi.scorable.recall_at_10' preview/output/acceptance.json)"
+            echo "- Proximity r@1: $(jq -r '.proximity.baseline.recall_at_1' preview/output/acceptance.json) -> $(jq -r '.proximity.preview.recall_at_1' preview/output/acceptance.json)"
+            echo "- Proximity r@10: $(jq -r '.proximity.baseline.recall_at_10' preview/output/acceptance.json) -> $(jq -r '.proximity.preview.recall_at_10' preview/output/acceptance.json)"
             # An accepted run that needed transient retries is still an accept,
             # but the flakiness must be visible rather than absorbed.
             echo "- Transient retries used: gold $(jq -r '.gold.retries.transient_retries_used' preview/output/acceptance.json), everyday $(jq -r '.everyday_poi.retries.transient_retries_used' preview/output/acceptance.json)"
