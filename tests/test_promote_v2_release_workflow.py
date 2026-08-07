@@ -431,7 +431,16 @@ def test_smoke_preserves_both_point_family_reverse_capabilities():
     )
     assert '"$BASE_URL/v2/reverse"' in run
     assert 'types=poi' in run and 'types=address' in run
-    assert '.properties.name == "Space Needle"' in run
+    # The Places half asserts spatial correctness and ranking rather than a POI
+    # name: upstream renamed the "Space Needle" record between Overture
+    # 2026-06-17.0 and 2026-07-22.0 and failed a promotion whose reverse index
+    # was correct. Both clauses must stay -- the distance bound alone would pass
+    # on an unordered result, and the sort alone would pass on the wrong cell.
+    assert '.properties.distance_m <= 100' in run
+    assert '[.features[].properties.distance_m] | . == sort' in run
+    assert '.properties.name == "Space Needle"' not in run
+    # The Address half stays an exact record fixture. An address record is
+    # identified by its own components, so it has no name to be renamed.
     assert '.properties.number == "400"' in run
     assert '.properties.street == "BROAD Street"' in run
     assert '.properties.postcode == "98109"' in run
