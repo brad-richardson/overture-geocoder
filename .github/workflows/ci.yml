@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
   workflow_call:
+  # A push that lands while GitHub Actions is degraded never gets a run, and
+  # nothing can re-request one: `gh run rerun` needs a run to rerun, and CI is
+  # what `deploy-rust-worker.yml` waits on. The 2026-08-06 outage left two main
+  # commits with zero check-runs and forced a hand-deploy. This makes a commit
+  # re-attestable without an empty commit.
+  workflow_dispatch:
 
 jobs:
   actionlint:
