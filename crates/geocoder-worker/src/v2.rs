@@ -28,8 +28,8 @@ use crate::places_construction_v1::{
     MAX_PLACES_HEAD_ROUTING_BYTES, MAX_PLACES_ROUTING_BYTES, ROUTED_QUERY_TOKEN_CAP,
 };
 use crate::places_pages::{
-    cjk_query_expansion, fold_for_scoring, query_terms, PlaceProjection, PlacesClause,
-    MAX_CATALOG_OBJECT_BYTES, TOKENIZER_VERSION,
+    and_lane_terms, cjk_query_expansion, fold_for_scoring, query_terms, PlaceProjection,
+    PlacesClause, MAX_CATALOG_OBJECT_BYTES, TOKENIZER_VERSION,
 };
 use crate::reverse_construction_v1::{ReverseFamily, ReverseHit};
 use crate::stac::cache::{CATALOG_CACHE_TTL, IMMUTABLE_CACHE_TTL, TEXT_MEMO_TTL_MS};
@@ -2259,7 +2259,12 @@ async fn search_places_construction(
         .object_key
         .strip_suffix(SUFFIX)
         .ok_or_else(|| Error::RustError("v2 Places entrypoint is not a routing object".into()))?;
-    let tokens = query_terms(query);
+    // The phrase lane keys off the record's full name, so it keeps every
+    // clause; the AND lanes drop apostrophe fragments so a possessive does not
+    // spend a token-cap slot. The two are identical for a query with no
+    // apostrophe, which is every case in both frozen sets.
+    let phrase_tokens = query_terms(query);
+    let tokens = and_lane_terms(query);
     if tokens.is_empty() || tokens.len() > ROUTED_QUERY_TOKEN_CAP {
         return Ok(Vec::new());
     }
@@ -2346,8 +2351,14 @@ async fn search_places_construction(
             records.is_empty(),
             tokens.len(),
         ) {
-            records =
-                places_construction_head_records(loader, object_root, &routing, &tokens).await?;
+            records = places_construction_head_records(
+                loader,
+                object_root,
+                &routing,
+                &phrase_tokens,
+                &tokens,
+            )
+            .await?;
         }
         let mut results: Vec<PlaceProjection> = records.iter().map(record_projection).collect();
         for place in &mut results {
@@ -2363,7 +2374,9 @@ async fn search_places_construction(
     if tokens.len() > HEAD_QUERY_TOKEN_CAP {
         return Ok(Vec::new());
     }
-    let records = places_construction_head_records(loader, object_root, &routing, &tokens).await?;
+    let records =
+        places_construction_head_records(loader, object_root, &routing, &phrase_tokens, &tokens)
+            .await?;
     Ok(records.iter().map(record_projection).collect())
 }
 
@@ -2461,22 +2474,29 @@ async fn places_construction_routed_records(
 /// Resolve up to `HEAD_QUERY_TOKEN_CAP` exact tokens through the sharded global
 /// head, composing the entity-phrase lane with the ordinary token lane. At most
 /// three ordinary reads plus two phrase reads per call.
+/// `phrase_tokens` are the unfiltered query clauses and key the `eN:` lane,
+/// whose index keys are built from the record's full name. `and_tokens` are the
+/// AND-lane clauses, which drop apostrophe fragments so a possessive does not
+/// spend a `HEAD_QUERY_TOKEN_CAP` slot. They differ only for a name carrying an
+/// apostrophe; everywhere else the two slices are equal.
 async fn places_construction_head_records(
     loader: &ShardLoader,
     object_root: &str,
     routing: &PlacesRouting,
-    tokens: &[String],
+    phrase_tokens: &[String],
+    and_tokens: &[String],
 ) -> Result<Vec<crate::places_construction_v1::PlacesV1Record>> {
-    if tokens.is_empty() || tokens.len() > HEAD_QUERY_TOKEN_CAP {
+    if and_tokens.is_empty() || and_tokens.len() > HEAD_QUERY_TOKEN_CAP {
         return Ok(Vec::new());
     }
+    let tokens = and_tokens;
     let head_manifest_key = format!("{object_root}/objects/{}", routing.head.manifest_object);
     let head = loader
         .lookup_places_construction_head_routing(&head_manifest_key, &routing.head)
         .await?;
     let mut phrase_groups = Vec::new();
     if head.admits_entity_phrases() {
-        for phrase_tokens in entity_phrase_token_groups(tokens) {
+        for phrase_tokens in entity_phrase_token_groups(phrase_tokens) {
             let mut phrase_records = Vec::new();
             if let Some(phrase_key) = entity_phrase_key(phrase_tokens) {
                 let shard_id = head_shard_id(&phrase_key, head.shard_bits);
@@ -2553,7 +2573,9 @@ async fn search_places_prefix_head_fallback(
     let Some(object_root) = entrypoint.object_key.strip_suffix(SUFFIX) else {
         return Ok(Vec::new());
     };
-    let tokens = query_terms(query);
+    // Fragments are dropped before the split, so a four-clause possessive name
+    // reaches the head lane directly instead of arriving here.
+    let tokens = and_lane_terms(query);
     let Some((head_tokens, dropped)) = prefix_head_fallback_split(&tokens) else {
         return Ok(Vec::new());
     };
@@ -2561,7 +2583,8 @@ async fn search_places_prefix_head_fallback(
         .lookup_places_construction_routing(&entrypoint.object_key)
         .await?;
     let records =
-        places_construction_head_records(loader, object_root, &routing, head_tokens).await?;
+        places_construction_head_records(loader, object_root, &routing, head_tokens, head_tokens)
+            .await?;
     let verified = retain_records_proving_dropped_tokens(records, dropped);
     let mut results: Vec<PlaceProjection> = verified.iter().map(record_projection).collect();
     // When explicit proximity reaches this last resort (its routed lane came
@@ -5809,6 +5832,45 @@ mod tests {
         assert!(plain.get("places_locality_inference").is_none());
         // A response the fallback did not touch carries no fallback marker.
         assert!(plain.get("places_prefix_head_fallback").is_none());
+    }
+
+    /// The lane-level consequence of dropping apostrophe fragments: a
+    /// four-clause possessive name reaches the head lane directly instead of
+    /// being refused by `HEAD_QUERY_TOKEN_CAP` or handed to the prefix
+    /// fallback, while the phrase lane keeps the clauses its index keys need.
+    #[test]
+    fn a_possessive_name_reaches_the_head_lane_instead_of_the_fallback() {
+        let query = "Queen's Medical Center";
+
+        // Today's clauses are one over the cap, which is what returns empty.
+        // Spelled `unfiltered` rather than `..._tokens` on purpose: the head
+        // cap contract test counts occurrences of the guard expression across
+        // this whole file to catch a new head path that forgets to guard, so a
+        // test local -- or a comment quoting it -- must not inflate that count.
+        let unfiltered = query_terms(query);
+        assert_eq!(unfiltered.len(), 4);
+        assert!(unfiltered.len() > HEAD_QUERY_TOKEN_CAP);
+        assert!(prefix_head_fallback_split(&unfiltered).is_some());
+
+        // The AND lane now fits, so the head answers directly.
+        let and_tokens = and_lane_terms(query);
+        assert_eq!(and_tokens.len(), HEAD_QUERY_TOKEN_CAP);
+        assert!(prefix_head_fallback_split(&and_tokens).is_none());
+
+        // The phrase key is built from the UNFILTERED clauses, and this is why:
+        // the producer indexed the fragment, so a filtered key names something
+        // the head does not contain.
+        let three = "Domino's Pizza";
+        assert_eq!(
+            entity_phrase_key(&query_terms(three)),
+            Some("e3:domino s pizza".to_string())
+        );
+        assert_eq!(
+            entity_phrase_key(&and_lane_terms(three)),
+            Some("e2:domino pizza".to_string()),
+            "the filtered key is not the indexed one -- the phrase lane must \
+             never be handed these clauses"
+        );
     }
 
     #[test]
