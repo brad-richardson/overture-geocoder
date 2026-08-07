@@ -1491,3 +1491,55 @@ def test_containment_still_blocks_a_bare_cjk_compound_against_a_longer_name():
     # the everyday set is 5 cases, so it is not worth guessing at.
     assert not bench._names_contain(
         "중앙대학교병원", "중앙대학교병원 (Chung-Ang Univ. Hospital)")
+
+
+def test_a_chain_proximity_case_is_scored_by_chain_name_near_the_bias_point():
+    """The anchor in a proximity case is a construction aid, not gold.
+
+    Displacement makes it non-nearest in 38 of the 40 frozen cases, so scoring
+    on `expected_gers_id` would measure the wrong thing. The chain branch must
+    win regardless of the run-level scoring flags.
+    """
+    case = {
+        "id": "prox:test:chain",
+        "kind": "place",
+        "query": "Starbucks",
+        "expected_name": "Starbucks",
+        "expected_gers_id": "00000000-0000-0000-0000-000000000000",
+        "expected_lat": 47.60,
+        "expected_lon": -122.33,
+        "tolerance_km": 2.0,
+        "proximity": [-122.35, 47.61],
+        "proximity_assert": {"nearest_within_km": 2.0},
+    }
+    assert bench.is_chain_proximity_case(case)
+
+    def feature(name, lon, lat, feature_id="1"):
+        return {
+            "id": feature_id,
+            "properties": {"name": name},
+            "geometry": {"type": "Point", "coordinates": [lon, lat]},
+        }
+
+    # Far-away exact-id match first, near chain instance second.
+    features = [
+        feature("Starbucks", 2.35, 48.85, "00000000-0000-0000-0000-000000000000"),
+        feature("Starbucks Reserve Roastery", -122.351, 47.611),
+    ]
+    rank, matched, top1 = bench.score_case(case, features, semantic_scoring=False)
+    assert rank == 2, "the id match 8,000 km away must not score"
+    assert matched is not None and matched < 2.0
+    # Distances are measured from the bias point, not the anchor.
+    assert top1 > 1000
+
+    # Nothing within the assert radius is a miss even when the name matches.
+    far_only = [feature("Starbucks", -122.5, 47.9)]
+    rank, _, _ = bench.score_case(case, far_only, semantic_scoring=False)
+    assert rank is None
+
+
+def test_chain_name_matching_is_containment_and_tolerates_missing_names():
+    assert bench.chain_name_matches("Starbucks", "Starbucks Reserve Roastery")
+    assert bench.chain_name_matches("Şok", "sok")
+    assert not bench.chain_name_matches("Starbucks", "Peet's Coffee")
+    assert not bench.chain_name_matches("Starbucks", None)

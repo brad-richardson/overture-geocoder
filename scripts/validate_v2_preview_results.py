@@ -116,6 +116,51 @@ def retry_telemetry(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def read_quarantine(path: Path) -> dict[str, Any]:
+    """Case ids whose gold is not in the corpus, with why they were removed.
+
+    Two shapes are accepted so the frozen rebaseline artifact can be used
+    directly: a bare list of ids, or a document carrying `quarantined_case_ids`.
+    """
+    document = read_document(path, "everyday quarantine")
+    ids = document.get("quarantined_case_ids")
+    if ids is None and isinstance(document.get("cases"), list):
+        ids = document["cases"]
+    if not isinstance(ids, list) or not all(isinstance(one, str) for one in ids):
+        raise Rejection(SETUP, "quarantine document has no case id list")
+    return {"ids": set(ids), "rule": document.get("quarantine_rule")}
+
+
+def scorable_scoreboard(rows: list[dict], quarantine: dict[str, Any]) -> dict[str, Any]:
+    """The same run scored over cases whose target exists in the corpus.
+
+    Reported BESIDE the headline, never instead of it, and never consulted by a
+    gate. The 200-case tripwire's raw recall understates the system by roughly a
+    factor of two because ~92 of its targets are registry legal names absent
+    from map data -- but quarantine is also not missing at random (CO falls to
+    zero cases, AU and KR fall by two thirds), so the corrected figure describes
+    a different population and both numbers have to travel together.
+    """
+    kept = [row for row in rows if row["case_id"] not in quarantine["ids"]]
+    if not kept:
+        raise Rejection(SETUP, "quarantine removed every case")
+    found1 = sum(bool(row.get("found_at_1")) for row in kept)
+    found10 = sum(bool(row.get("found_at_10")) for row in kept)
+    return {
+        "n": len(kept),
+        "quarantined": len(rows) - len(kept),
+        "found_at_1": found1,
+        "found_at_10": found10,
+        "recall_at_1": round(found1 / len(kept), 3),
+        "recall_at_10": round(found10 / len(kept), 3),
+        "rule": quarantine["rule"],
+        "caveat": (
+            "Upper bound on a shifted population, not a denominator fix. Cite "
+            "it only beside the headline recall."
+        ),
+    }
+
+
 def validate_one(
     *,
     label: str,
@@ -123,6 +168,7 @@ def validate_one(
     baseline: dict[str, Any],
     expected_build: str,
     required_at_10: set[str],
+    quarantine: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     rows = provider_rows(preview)
     baseline_rows = provider_rows(baseline)
@@ -225,6 +271,11 @@ def validate_one(
         },
         "required_at_10": sorted(required_at_10),
         "retries": retry_telemetry(preview),
+        **(
+            {"scorable": scorable_scoreboard(rows, quarantine)}
+            if quarantine
+            else {}
+        ),
     }
 
 
@@ -249,6 +300,18 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             baseline=read_document(args.everyday_baseline, "everyday baseline"),
             expected_build=args.expected_build,
             required_at_10=set(),
+            quarantine=read_quarantine(args.everyday_quarantine),
+        ),
+        # The proximity stratum measures the only lane no other gate can see.
+        # It was shipped, measured at 3/40 -> 28/40 at rank 1, and then left
+        # ungated -- while the wave that produced it also produced a locality
+        # regression that only an ad-hoc run caught. Gate it like the others.
+        "proximity": validate_one(
+            label="proximity",
+            preview=read_document(args.proximity_preview, "proximity preview"),
+            baseline=read_document(args.proximity_baseline, "proximity baseline"),
+            expected_build=args.expected_build,
+            required_at_10=set(),
         ),
     }
 
@@ -260,6 +323,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--gold-baseline", type=Path, required=True)
     parser.add_argument("--everyday-preview", type=Path, required=True)
     parser.add_argument("--everyday-baseline", type=Path, required=True)
+    # Required, not optional: an optional gate is a gate that gets dropped from
+    # an invocation and never noticed.
+    parser.add_argument("--proximity-preview", type=Path, required=True)
+    parser.add_argument("--proximity-baseline", type=Path, required=True)
+    parser.add_argument(
+        "--everyday-quarantine",
+        type=Path,
+        required=True,
+        help=(
+            "case ids whose gold does not exist in the corpus. Reported as a "
+            "second scoreboard; never used to relax a gate."
+        ),
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
 
