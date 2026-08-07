@@ -236,3 +236,45 @@ def test_list_referenced_reports_every_prefix(chain, capsys):
     printed = set(capsys.readouterr().out.split())
     assert {LIVE_SLICE, LEGACY_CORE, "2026-07-31.0"}.issubset(printed)
     assert ABANDONED_SLICE not in printed
+
+
+# --- workflow wiring -------------------------------------------------------
+#
+# The guard only protects what actually calls it. These assert the wiring in
+# `r2-cleanup.yml`, because the failure being prevented -- deleting a live,
+# serving slice -- happens in the workflow, not in this module.
+
+CLEANUP = Path(__file__).parent.parent / ".github/workflows/r2-cleanup.yml"
+
+
+def test_every_bucket_root_delete_phase_consults_the_v2_guard():
+    """Phases 3 and 5 are the two that delete a whole bucket-root prefix, and
+    both must check the v2 chain -- `prune_catalog assert-unreferenced` sees
+    the v1 catalog only and reports a live slice as unreferenced."""
+    workflow = CLEANUP.read_text()
+    calls = workflow.count("scripts/v2_retention_guard.py assert-unreferenced")
+    assert calls == 2, (
+        "expected the v2 guard in exactly the two bucket-root delete phases "
+        f"(3 and 5); found {calls}"
+    )
+    # It must be given the whole chain, not just the catalog.
+    # >= 2 rather than == 2: a pre-flight `list-referenced` step also passes
+    # the chain, and pinning that count would break on an added diagnostic.
+    assert workflow.count("--releases-dir /tmp/v2-releases") >= 2
+    # And the chain must actually be fetched before any delete.
+    assert 's3 cp "s3://$BUCKET/v2/catalog.json" /tmp/v2-catalog.json' in workflow
+
+
+def test_phase_three_can_target_a_slice_prefix():
+    """Zero-copy promotion writes serving objects into `slice-YYYY-MM-DD.N/`.
+    An abandoned one has to be removable, or a mistyped `release_slice_version`
+    strands ~45 GiB (Places) or ~114 GiB (Addresses) permanently. Phase 3 emits
+    a bare `<prefix>/` target with no version-format restriction, which is what
+    makes a slice eligible."""
+    workflow = CLEANUP.read_text()
+    assert 'for version in $ORPHAN_PREFIXES; do' in workflow
+    assert 'echo "3|$version/" >> /tmp/delete-targets.txt' in workflow
+    # The guard itself must accept the slice shape.
+    assert GUARD.is_bucket_root_prefix("slice-2026-08-04.0")
+    assert GUARD.is_bucket_root_prefix("2026-07-17.0")
+    assert not GUARD.is_bucket_root_prefix("slice-2026-08-04.0/families")

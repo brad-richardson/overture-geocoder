@@ -883,7 +883,39 @@ attestation of a run that really happened -- the standing rule from `cfb9601`.
   does rebuild reverse. Do not spend the week on it.
 - **Track D -- streets, fully parallel and NOT on the rebuild path.** See below.
 
-### Item 1's precondition: the cleanup guard is v1-only, and that is a hazard
+### Item 1's precondition is MET as of `8e4e0fc` — corrected 2026-08-07
+
+**Zero-copy promotion is unblocked. The rest of this section is the hazard as
+it stood before `8e4e0fc`, retained because it explains what the guard has to
+do; its conclusion — "keep `release_slice_version` EMPTY" — no longer holds.**
+
+Both halves of the precondition exist:
+
+1. **A v2-aware unreferenced check**: `scripts/v2_retention_guard.py`, which
+   resolves `v2/catalog.json` -> `v2/releases/{build}/release.json` -> every
+   family source and retained external `operation_sources`. It **scans
+   recursively rather than enumerating fields** (the v1 guard missed the v2
+   chain precisely by enumerating), and it **fails closed** on a missing
+   release document, a byte-mismatched one, an unreadable catalog, or a partial
+   target. 19 tests.
+2. **A phase that can match a slice prefix**: phase 3 emits a bare
+   `<prefix>/` target for each entry in `ORPHAN_PREFIXES` with no
+   version-format restriction, and the guard accepts `slice-YYYY-MM-DD.N` as a
+   bucket-root prefix. `r2-cleanup.yml` fetches the whole v2 chain before any
+   delete and calls the guard in **both** bucket-root delete phases (3 and 5).
+
+The wiring is now contract-tested
+(`test_every_bucket_root_delete_phase_consults_the_v2_guard`,
+`test_phase_three_can_target_a_slice_prefix`), so it cannot silently regress.
+
+**What remains before flipping `release_slice_version` on is a decision, not an
+engineering gap**: the slice smoke already promotes both layouts and asserts
+byte-identical published `routing.json` and family manifests on every change
+(`0bf477e`), and the measured Monaco result was 21 objects copied under the
+construction layout against **0 copied / 21 prepositioned** under the release
+layout. At planet scale that is the ~158 GiB / ~123 min forward copy.
+
+### Historical: the cleanup guard was v1-only, and that was a hazard
 
 Previously recorded as "no `r2-cleanup.yml` phase matches an abandoned
 `slice-YYYY-MM-DD.N/` prefix". Investigated 2026-08-01, and the real shape is
@@ -913,8 +945,9 @@ resolves the release chain before permitting any slice delete. Shipping only the
 first would make a 45 GiB cleanup path whose safety check is blind to the thing
 it is protecting.
 
-Until both land, keep `release_slice_version` EMPTY, which preserves the old
-copy-through behaviour exactly.
+~~Until both land, keep `release_slice_version` EMPTY, which preserves the old
+copy-through behaviour exactly.~~ **Both landed in `8e4e0fc`; see the
+correction at the head of this section.**
 
 ### The street layer is scoped but unimplemented, and is decoupled
 
@@ -1021,12 +1054,13 @@ with **byte-identical** published `routing.json` and family manifest. The slice
 smoke now runs both layouts and asserts that equality on every change
 (`0bf477e`).
 
-**Item 1 has a precondition before planet use, and it is not met.** A wrong
+**Item 1's precondition was unmet and is now MET (`8e4e0fc`, corrected
+2026-08-07).** The risk it guarded against is real — a wrong
 `release_slice_version` puts ~45 GiB (Places) or ~114 GiB (Addresses) of inert
-objects into a release namespace, and `r2-cleanup.yml`'s phases are prefix-gated
-to `staging/global-v2/<64-hex>/` — no phase matches an abandoned
-`slice-YYYY-MM-DD.N/` prefix. Empty `release_slice_version` keeps the old
-behaviour exactly, so this gates only the new path.
+objects into a release namespace — but an abandoned `slice-YYYY-MM-DD.N/`
+prefix is now removable: phase 3 accepts a slice prefix and
+`scripts/v2_retention_guard.py` refuses to delete one that any live v2 release
+still references.
 
 ### Wave D — the operator priority
 
