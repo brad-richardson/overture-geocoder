@@ -760,10 +760,31 @@ records** — 54% of which is bridges, so +6.4% without them.
 **The homonym/fame class therefore still has no open mechanism.** Using base as
 a prominence signal instead of as records would be cross-theme entity
 resolution, which is what killed the P1968 sidecar; it is explicitly not
-recommended. Before this is committed, measure the duplicate rate against
-Places (six of ten gold landmarks are already served, i.e. already duplicated)
-and build a stratum for the natural-feature classes, which neither frozen set
-tests.
+recommended.
+
+**All four preconditions are now measured** (`2026-08-07-base-import-measurements.md`):
+
+- **duplicate rate 5.5%** against Places at 200 m (3.65% at 50 m), concentrated
+  in five civic classes — hospitals 23.6%, parks 19.2%, colleges/universities
+  ~19%, clinics 18.3% — while bridges (0.8%), islets, islands and artwork are
+  almost pure addition. Collapse is a precondition for admitting the civic
+  classes, not for the import;
+- **real head cost +4.76%** (1,599,688 records, 272,155,770 B) once the frozen
+  per-token cap of 10 is applied against the actual head input — a third of the
+  +14.0% upper bound. The method reproduces the hosted run's 30,841,082
+  ordinary-token head records exactly;
+- **the natural-feature stratum is built and run**:
+  `benchmarks/natural-feature-cases-v1.json`, 114 Wikidata-gold cases across 20
+  countries and six classes, each carrying offline Places and base presence
+  controls. Production scores **15/114 at rank 1 and 20/114 at rank 10**, and
+  every hit is one of the 28 Places-backed cases. The import raises the
+  achievable ceiling **28 -> 47**; 67 cases are absent from Overture entirely;
+- **a names-only join is refuted**: it would reach 25,026 Places records, 2.8%
+  of the 893,972 admitted rows carrying cross-language names. Those names live
+  on features Places does not have, so they arrive only if the records do.
+
+The import's effect on the two frozen sets remains unknown and unknowable
+offline; it needs the paired gate like any other change.
 
 ### If the head cap is ever raised, it is contract-bound
 

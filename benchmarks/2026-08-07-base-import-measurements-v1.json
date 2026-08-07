@@ -1,0 +1,133 @@
+{
+  "schema": "base-import-measurements-v1",
+  "inputs": {
+    "places": "overture places 2026-06-17.0 (local mirror)",
+    "base_admission_set": "the class-scoped set proposed in 2026-08-07-base-theme-landmark-import-scope.md"
+  },
+  "admitted_base_rows": 4707069,
+  "places_rows_sharing_an_admitted_name": 1622192,
+  "candidate_pairs": 289507,
+  "method_note": "Exact normalized-name equality plus haversine. A LOWER BOUND on duplication: differing spellings of one entity count as two.",
+  "duplicates_within_50m": 171737,
+  "duplicate_rate_within_50m": 0.0365,
+  "duplicates_within_200m": 258004,
+  "duplicate_rate_within_200m": 0.0548,
+  "duplicates_within_500m": 276677,
+  "duplicate_rate_within_500m": 0.0588,
+  "by_class_within_200m": [
+    {
+      "base_type": "land_use",
+      "subtype": "park",
+      "class": "park",
+      "duplicates": 109835
+    },
+    {
+      "base_type": "land",
+      "subtype": "physical",
+      "class": "peak",
+      "duplicates": 63321
+    },
+    {
+      "base_type": "infrastructure",
+      "subtype": "bridge",
+      "class": "bridge",
+      "duplicates": 21425
+    },
+    {
+      "base_type": "land_use",
+      "subtype": "cemetery",
+      "class": "cemetery",
+      "duplicates": 17979
+    },
+    {
+      "base_type": "land_use",
+      "subtype": "medical",
+      "class": "hospital",
+      "duplicates": 17239
+    },
+    {
+      "base_type": "land_use",
+      "subtype": "pedestrian",
+      "class": "plaza",
+      "duplicates": 6020
+    },
+    {
+      "base_type": "land_use",
+      "subtype": "education",
+      "class": "college",
+      "duplicates": 5880
+    },
+    {
+      "base_type": "land_use",
+      "subtype": "education",
+      "class": "university",
+      "duplicates": 5777
+    },
+    {
+      "base_type": "infrastructure",
+      "subtype": "pedestrian",
+      "class": "artwork",
+      "duplicates": 3477
+    },
+    {
+      "base_type": "land_use",
+      "subtype": "medical",
+      "class": "clinic",
+      "duplicates": 2152
+    },
+    {
+      "base_type": "land",
+      "subtype": "physical",
+      "class": "saddle",
+      "duplicates": 1814
+    },
+    {
+      "base_type": "land",
+      "subtype": "land",
+      "class": "islet",
+      "duplicates": 1441
+    },
+    {
+      "base_type": "land",
+      "subtype": "land",
+      "class": "island",
+      "duplicates": 755
+    },
+    {
+      "base_type": "land_use",
+      "subtype": "protected",
+      "class": "national_park",
+      "duplicates": 375
+    },
+    {
+      "base_type": "land",
+      "subtype": "physical",
+      "class": "volcano",
+      "duplicates": 290
+    },
+    {
+      "base_type": "infrastructure",
+      "subtype": "tower",
+      "class": "bell_tower",
+      "duplicates": 224
+    }
+  ],
+  "names_common_join": {
+    "admitted_rows_with_cross_language_names": 893972,
+    "places_records_with_a_base_twin_within_200m": 255478,
+    "places_records_that_would_gain_cross_language_names": 25026,
+    "reach_of_a_names_only_join": 0.028,
+    "reading": "A names-only join reaches only the base rows that already have a Places twin. The rest of the cross-language names are attached to records that do not exist in Places, so they arrive only if the records do."
+  },
+  "head_cost_after_cap": {
+    "head_records_today_ordinary_tokens": 30841082,
+    "head_records_after_import": 32440770,
+    "new_head_records": 1599688,
+    "new_head_bytes": 272155770,
+    "growth_fraction_of_planet_head": 0.0476,
+    "tokens_that_would_exist_only_because_of_base": 705230,
+    "scope_upper_bound_for_comparison": 0.1401,
+    "method_check": "head_records_today_ordinary_tokens reproduces the 30,841,082 ordinary-token head records recorded for the hosted planet run, which is what makes the after-figure trustworthy."
+  },
+  "elapsed_seconds": 5.0
+}
