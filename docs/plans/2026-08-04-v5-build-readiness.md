@@ -136,37 +136,58 @@ shipped ahead of its measurement.
 
 ## 3. Candidate v5 contents (each independently justified, none yet approved)
 
-### 3.1 `e4:` phrase keys for four-word primary names
+### 3.1 `e4:` phrase keys for four-word primary names — ADOPTED 2026-08-07
 Lets a 4-token query run **only** the phrase probe past the token cap; ordinary
 head reads stay at ≤3 tokens. Directly addresses the "X Y MRT Station" class.
 
-- Cost: head bytes. **Hard constraint: 31.7 MB formal reserve above the 25%
-  headroom floor** (773,590,640 of 805,306,368 B). Must be measured on the
-  scale probe before acceptance, not estimated.
-- Blocked by: §2 item 1 — if the prefix-head fallback recovers this class at
-  query time, `e4:` may be unnecessary and the bytes are better spent on 3.2.
-- Decision input PENDING: post-fix residue count for ≥4-token cases.
+- **Measured cost: +999,815 head records, +170,099,057 B, +3.0% of the planet
+  head** (892,625 new keys, prominent four-word names only, cap 10 applied).
+- **Measured yield: 3 of the 145 cases still missed at rank 10** —
+  `TECK LEE LRT STATION`, `BUKIT PANJANG MRT STATION`, and the gold
+  `Casino de Monte-Carlo`. Roughly 57 MB per claimed case.
+- Its former blocker — "if the prefix-head fallback recovers this class at query
+  time, the bytes are better spent on 3.2" — is void: 3.2 is closed, and the
+  fallback did not recover these three.
+- The "31.7 MB reserve" this section was to be sized against gates a rehearsal
+  fixture, not production (`2026-08-04-measurement-apparatus-findings.md` §3).
+  The production quantity is **mean shard object bytes, 1,395,768 B** across
+  4,096 shards; size any future head growth against that.
 
-### 3.2 Admission-gate softening (`prominence_rank > 0`)
-Admits phrase keys for ordinary POIs. Largest byte cost of any candidate; also
-the largest everyday-POI upside if the residue is dominated by
-`prominence_rank == 0` entities.
+Evidence: `2026-08-07-phrase-admission-sizing.md`.
 
-- Decision input PENDING: of the post-fix everyday-POI misses, how many are
-  `prominence_rank == 0` with a 2–3-word primary name. Requires joining the
-  miss list against the producer's prominence assignment.
-- Must be sized against the same 31.7 MB reserve as 3.1. **3.1 and 3.2 compete
-  for the same budget** — this is the central v5 product decision.
+### 3.2 Admission-gate softening (`prominence_rank > 0`) — CLOSED 2026-08-07
+**Do not reopen without a measurement that contradicts the cost below.**
 
-### 3.3 Instance fame from the GERS↔QID sidecar
-The only honest fix for the homonym/fame class (Colosseum replicas, Statue of
-Liberty, Harrods vs the Depository, Times Square, Raffles, Manchester's POI
-analogue).
+Admitting `prominence_rank == 0` records at 2–3 words costs **+34,457,893 head
+records, +5,862,339,654 B, +102.5%** — it doubles the planet head (5.72 GB ->
+11.58 GB, mean shard 1.40 MB -> 2.83 MB), and every head read already transfers
+the whole object. Bounding it by key rarity does not rescue it: admitting only
+*globally unique* phrase keys still costs +76.0%, because most 2–3-word POI
+names are unique.
 
-- **Hard gate**: sidecar Phase 0 requires ≥200 independently hand-checked
+It claims **19 of 145 current misses**, ~309 MB per claimed case, and 11 of the
+19 are Mexican registry hotels — non-prominent by design (`hotel` is a commodity
+category) and inside a stratum the denominator rebaseline already flags for
+population shift.
+
+**3.1 and 3.2 never competed for a budget**: they differ by 34×, against a
+reserve that was not real. Evidence:
+`2026-08-07-phrase-admission-sizing.md`.
+
+### 3.3 Instance fame from the GERS↔QID sidecar — DEAD, out of v5
+**Closed 2026-08-05; see `2026-08-05-sidecar-p1968-dead-end.md`.** P1968 covers
+7,234 items planet-wide, the audit was stopped at 57/200, and it is not resumed.
+This section is retained only so the homonym/fame class keeps a named owner:
+since the closure that class has **no open mechanism**, and the only living fame
+lever is the unscoped theme=base landmark import
+(`2026-08-06-places-failure-mode-review.md` §6).
+
+The gate below is what it *would* have had to clear, and no longer gates
+anything:
+
+- ~~**Hard gate**: sidecar Phase 0 requires ≥200 independently hand-checked
   decisions with **zero false accepts**, then a broadcast byte/resident-memory
-  measurement. The review instrument is built (see §5); the review is a human
-  judgment that must not be self-certified by an agent.
+  measurement.~~
 - Any accepted sidecar that changes `prominence_rank` moves projection identity
   and construction evidence — so it lands as evidence generation **v5**, never
   as a patch to v4.
@@ -284,15 +305,17 @@ unnoticed for a week — scheduled smoke failures appear to have no alerting.
 ## 7. Readiness checklist
 
 v5 may be specified when every line is YES. It may be **built** when §2 is
-measured and the product decision in 3.1-vs-3.2 is made explicitly.
+measured; the 3.1-vs-3.2 product decision is now made (3.1 in, 3.2 closed).
 
 - [ ] §2 items 1–5 landed, paired-gated, no losses on either frozen set
-- [ ] Post-fix residue classified: ≥4-token vs `prominence_rank == 0` vs
-      absent-from-source, with counts
-- [ ] 3.1 and 3.2 byte costs measured on the scale probe against the 31.7 MB
-      reserve; the competing-budget decision made and recorded
-- [ ] Sidecar Phase 0 gate met by human review (zero false accepts) and
-      broadcast memory measured — or 3.3 explicitly deferred out of v5
+- [x] Post-fix residue classified: ≥4-token vs `prominence_rank == 0` vs
+      absent-from-source, with counts — 3 vs 19 vs 119 of the 145 rank-10
+      misses (`2026-08-07-phrase-admission-sizing-v1.json`)
+- [x] 3.1 and 3.2 byte costs measured and the decision recorded: +3.0% vs
+      +102.5% of the planet head; 3.1 adopted, 3.2 closed. The 31.7 MB reserve
+      was a rehearsal-fixture artifact and is not the gate; size future head
+      growth against mean shard object bytes (1,395,768 B)
+- [x] 3.3 out of v5 — the sidecar is dead (2026-08-05), not deferred
 - [ ] Evidence spec v5 drafted as ONE re-attestation pass
 - [ ] §6 operational items landed or explicitly accepted as risk
 - [ ] Rebuild scope restated: families, DuckDB pin, reverse rebuild yes/no,
