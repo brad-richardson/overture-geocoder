@@ -169,7 +169,10 @@ jobs:
           export ENDPOINT="https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"
           S3() { aws "$@" --endpoint-url "$ENDPOINT" --region auto; }
           S3 s3 cp "s3://$BUCKET/$SLICE_VERSION/slice-manifest.json" /tmp/slice-manifest.json
-          families=$(jq -r '.families[]' /tmp/slice-manifest.json)
+          # `families` is an OBJECT keyed by family name, not an array:
+          # `.families[]` yields the VALUES, which word-split to `{` and sent
+          # the first real run looking for `claims/{.json`. keys[], not [].
+          families=$(jq -r '.families | keys[]' /tmp/slice-manifest.json)
           [ -n "$families" ] || { echo "::error::slice manifest lists no families"; exit 1; }
           echo "slice families: $(echo "$families" | tr '\n' ' ')"
           matched=0
@@ -195,7 +198,7 @@ jobs:
           set -euo pipefail
           export ENDPOINT="https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"
           S3() { aws "$@" --endpoint-url "$ENDPOINT" --region auto; }
-          for family in $(jq -r '.families[]' /tmp/slice-manifest.json); do
+          for family in $(jq -r '.families | keys[]' /tmp/slice-manifest.json); do
             key="$SLICE_VERSION/families/$family/reverse-catalog.rcat"
             S3 s3api head-object --bucket "$BUCKET" --key "$key" --output json >/dev/null 2>&1 || {
               echo "::error::$key is absent: reverse is not published for $family. The position packs this would delete are the reverse build's input."
@@ -299,7 +302,7 @@ jobs:
             echo "no slice manifest fetched: an earlier gate refused before any delete."
             exit 0
           fi
-          for family in $(jq -r '.families[]' /tmp/slice-manifest.json); do
+          for family in $(jq -r '.families | keys[]' /tmp/slice-manifest.json); do
             for key in "families/$family/family-manifest.json" \
                        "families/$family/routing.json" \
                        "families/$family/reverse-catalog.rcat"; do
