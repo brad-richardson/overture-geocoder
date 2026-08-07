@@ -229,3 +229,35 @@ def test_check_hosted_imports_extra_workflows_can_only_widen_the_set():
     assert "benchmark_v2_forward" in widened, (
         "the preview benchmark entrypoint -- the #245 failure -- is not derived"
     )
+
+
+def test_wrangler_build_commands_tolerate_an_already_installed_worker_build():
+    """A cached binary must not make `cargo install` abort the build.
+
+    `deploy-rust-worker.yml` caches `~/.cargo/bin/worker-build` alone. Cargo
+    tracks what it installed in `.crates.toml`, which the cache does not carry,
+    so on a cache hit cargo sees a binary it does not own and exits 101 --
+    "binary `worker-build` already exists in destination". Every cache-hit
+    production deploy failed that way between 2026-08-04 and 2026-08-07, and
+    the proximity wave had to be hand-deployed.
+
+    The fix belongs to the wrangler config, not the workflow: the build command
+    must skip the install when the tool is already on PATH (or force it).
+    """
+    configs = sorted((ROOT / "crates/geocoder-worker").glob("wrangler*.toml"))
+    assert configs, "no wrangler configs found"
+
+    offenders = []
+    for config in configs:
+        for line in config.read_text().splitlines():
+            stripped = line.strip()
+            if not stripped.startswith("command =") or "cargo install" not in stripped:
+                continue
+            guarded = "command -v worker-build" in stripped or "--force" in stripped
+            if not guarded:
+                offenders.append(f"{config.name}: {stripped}")
+
+    assert not offenders, (
+        "wrangler build command runs an unguarded `cargo install`, which exits "
+        "101 when the binary is already present:\n  " + "\n  ".join(offenders)
+    )

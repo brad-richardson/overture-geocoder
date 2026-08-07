@@ -4,7 +4,10 @@ compatibility_date = "2026-05-01"
 workers_dev = true
 
 [build]
-command = "cargo install -q worker-build@^0.7 && worker-build --release"
+# Same guard as wrangler.toml: a pre-installed-but-untracked binary makes
+# `cargo install` exit 101. This config is not cached today, but the failure
+# mode is the config's, not the workflow's, so it is fixed in both places.
+command = "command -v worker-build >/dev/null 2>&1 || cargo install -q worker-build@^0.7 && worker-build --release"
 
 [limits]
 cpu_ms = 500
