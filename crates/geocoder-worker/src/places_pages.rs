@@ -297,6 +297,91 @@ pub(crate) fn query_terms(value: &str) -> Vec<String> {
     normalized_words(value)
 }
 
+/// Apostrophes the index tokenizer treats as a word separator, and that a
+/// possessive or elision can therefore split a name across.
+///
+/// U+02BC MODIFIER LETTER APOSTROPHE is deliberately NOT here: Unicode
+/// classifies it as a letter, so `normalized_words` never splits on it and
+/// `Dominoʼs` is one token rather than two. There is no fragment to drop, and
+/// listing it would only risk dropping a real one-character word beside it.
+const APOSTROPHES: [char; 2] = ['\u{0027}', '\u{2019}'];
+
+/// AND-lane query clauses, with apostrophe fragments removed.
+///
+/// The apostrophe is a plain separator on BOTH sides of the pipeline, so
+/// `Len's Mill Store` indexes as `[len, s, mill, store]` and a query for it
+/// arrives as four clauses against a `HEAD_QUERY_TOKEN_CAP` of three. The
+/// possessive spends a slot and the head refuses the query before any read.
+/// Measured on Overture `2026-06-17.0`: **733,701 records are over the cap only
+/// because of that split**, and `Queen's Medical Center` returns empty in
+/// production today while `Queens Medical Center` does not.
+///
+/// A fragment carries no retrieval value to lose. It is a one-character token,
+/// so its posting is saturated by construction, and
+/// `merge_bounded_candidates` already admits a record that is absent from a
+/// saturated posting when its own display tokens carry the token. Dropping it
+/// from the AND therefore removes a cap cost, not evidence.
+///
+/// **Scoped to apostrophe-born fragments deliberately.** 5,071,193 records
+/// carry a one-character token with no apostrophe anywhere — `H&M`, `A&W`,
+/// initials, single CJK characters — and are retrievable today *only* because
+/// those postings survive. A blanket short-token rule would break a working
+/// class to fix a broken one.
+///
+/// The phrase lane must NOT use this: `e2:`/`e3:` keys are built from the
+/// record's full name, fragment included, so a filtered key would stop matching
+/// the index. Callers pass the unfiltered `query_terms` there.
+pub(crate) fn and_lane_terms(value: &str) -> Vec<String> {
+    let folded: String = value
+        .trim()
+        .nfkd()
+        .flat_map(char::to_lowercase)
+        .map(fold_final_sigma)
+        .filter(|character| !is_combining_mark(*character))
+        .collect();
+    let characters: Vec<char> = folded.chars().collect();
+
+    let mut words = Vec::new();
+    let mut start = None;
+    for index in 0..=characters.len() {
+        let is_word = index < characters.len()
+            && (characters[index].is_alphanumeric() || characters[index] == '_');
+        match (is_word, start) {
+            (true, None) => start = Some(index),
+            (false, Some(begin)) => {
+                words.push((begin, index));
+                start = None;
+            }
+            _ => {}
+        }
+    }
+
+    let kept: Vec<String> = words
+        .iter()
+        .filter(|(begin, end)| {
+            if end - begin > 1 {
+                return true;
+            }
+            let before = begin.checked_sub(1).map(|index| characters[index]);
+            let after = characters.get(*end).copied();
+            let touches_apostrophe = [before, after]
+                .into_iter()
+                .flatten()
+                .any(|character| APOSTROPHES.contains(&character));
+            !touches_apostrophe
+        })
+        .map(|(begin, end)| characters[*begin..*end].iter().collect())
+        .collect();
+
+    // A query that is nothing but fragments (`L'A`) keeps its original clauses:
+    // an empty AND retrieves nothing at all, which is strictly worse than the
+    // behaviour this replaces.
+    if kept.is_empty() {
+        return normalized_words(value);
+    }
+    kept
+}
+
 /// Bigram clauses for an unsegmented CJK query, or `None` when the query is not
 /// one.
 ///
@@ -2403,5 +2488,91 @@ mod tests {
                 "shard_first_id": shard_ids.first().expect("Places shard result"),
             })
         );
+    }
+
+    /// The measured defect: the apostrophe is a separator on both sides, so a
+    /// possessive spends a `HEAD_QUERY_TOKEN_CAP` slot and the head refuses the
+    /// query before any read. 733,701 planet records are over the cap only
+    /// because of that split.
+    #[test]
+    fn apostrophe_fragments_do_not_spend_an_and_lane_clause() {
+        // Four clauses today, three once the possessive fragment is dropped --
+        // which is the difference between "refused" and "asked".
+        assert_eq!(query_terms("Len's Mill Store").len(), 4);
+        assert_eq!(and_lane_terms("Len's Mill Store"), ["len", "mill", "store"]);
+
+        assert_eq!(query_terms("Queen's Medical Center").len(), 4);
+        assert_eq!(
+            and_lane_terms("Queen's Medical Center"),
+            ["queen", "medical", "center"]
+        );
+
+        // Elision leads rather than trails, and is the same fragment class.
+        assert_eq!(
+            and_lane_terms("L'Hopital Saint Pierre"),
+            ["hopital", "saint", "pierre"]
+        );
+
+        // A typographic apostrophe splits exactly like an ASCII one.
+        assert_eq!(and_lane_terms("Domino\u{2019}s Pizza"), ["domino", "pizza"]);
+
+        // U+02BC does NOT: Unicode calls it a letter, so the index tokenizer
+        // keeps the name whole and there is no fragment to drop. Asserted so a
+        // future "add the other apostrophes" change has to face this first.
+        assert_eq!(
+            query_terms("Domino\u{02bc}s Pizza"),
+            ["domino\u{02bc}s", "pizza"]
+        );
+        assert_eq!(
+            and_lane_terms("Domino\u{02bc}s Pizza"),
+            query_terms("Domino\u{02bc}s Pizza")
+        );
+    }
+
+    /// The fix is scoped to apostrophe-born fragments on purpose: 5,071,193
+    /// records carry a one-character token with no apostrophe anywhere and are
+    /// retrievable today only because those postings survive.
+    #[test]
+    fn single_character_clauses_without_an_apostrophe_are_load_bearing() {
+        assert_eq!(and_lane_terms("H&M"), ["h", "m"]);
+        assert_eq!(and_lane_terms("A&W Restaurant"), ["a", "w", "restaurant"]);
+        // Initials.
+        assert_eq!(
+            and_lane_terms("J R R Tolkien Museum"),
+            ["j", "r", "r", "tolkien", "museum"]
+        );
+        // A single CJK character is a whole word, not a fragment.
+        assert_eq!(and_lane_terms("\u{5c71}"), ["\u{5c71}"]);
+    }
+
+    /// Everything without an apostrophe must tokenize identically to today, or
+    /// this change is not the narrow one it claims to be.
+    #[test]
+    fn queries_without_an_apostrophe_are_bit_identical_to_query_terms() {
+        for query in [
+            "Eiffel Tower",
+            "Space Needle Seattle",
+            "GEYLANG BAHRU MRT STATION",
+            "\u{6771}\u{4eac}\u{30bf}\u{30ef}\u{30fc}",
+            "Casino de Monte-Carlo",
+            "Skoda Muzeum",
+            "starbucks",
+            "",
+            "   ",
+        ] {
+            assert_eq!(
+                and_lane_terms(query),
+                query_terms(query),
+                "query: {query:?}"
+            );
+        }
+    }
+
+    /// An empty AND retrieves nothing at all, which is strictly worse than the
+    /// behaviour being replaced, so a query that is only fragments keeps them.
+    #[test]
+    fn a_query_of_nothing_but_fragments_keeps_its_clauses() {
+        assert_eq!(and_lane_terms("L'A"), query_terms("L'A"));
+        assert_eq!(and_lane_terms("O'"), query_terms("O'"));
     }
 }
