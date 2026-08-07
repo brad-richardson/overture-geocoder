@@ -46,6 +46,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import math
 import sys
@@ -68,12 +69,22 @@ HEAD_CANDIDATES = (
     "head-candidates/sha256/*.parquet"
 )
 
-# From the completed local planet head of the same release:
-# store-head/head/places/complete.json (records) and the 4,096 serve objects.
-HEAD_TOTAL_RECORDS = 33_604_005
-HEAD_TOTAL_BYTES = 5_141_583_720
-HEAD_SHARDS = 4096
-BYTES_PER_HEAD_RECORD = HEAD_TOTAL_BYTES / HEAD_TOTAL_RECORDS
+# Head facts are DERIVED from one artifact, never hand-entered, and never mixed
+# across generations. Both numbers come from the same local planet build of
+# 2026-06-17.0: the record count from the head phase's own completion marker,
+# the byte total by summing that build's 4,096 serve objects.
+#
+# Do not price this against the 5,141,583,720 B figure in
+# 2026-08-04-measurement-apparatus-findings.md §3: that is the LIVE head of a
+# later generation (`2026-08-03.0`, carrying bounded phrase admission), and
+# dividing it by this build's record count would be a cross-generation ratio.
+HEAD_COMPLETION_MARKER = (
+    "/home/brad/dev/overture-local/planet-0617/store-head/head/places/complete.json"
+)
+HEAD_SERVE_OBJECTS = (
+    "/home/brad/dev/overture-local/planet-0617/store-head/serve/places-v1/"
+    "head/sha256/*.plhd"
+)
 
 # `acceptance_gates.head.result_cap_per_token`, frozen in the evidence spec.
 CAP_PER_TOKEN = 10
@@ -92,6 +103,33 @@ WORDS_SQL = (
     r"list_filter(regexp_split_to_array(lower(strip_accents(names.primary)), "
     r"'[^\p{L}\p{N}_]+'), x -> x <> '')"
 )
+
+
+def measure_head() -> dict:
+    """Read the head's size off the build itself, so nothing is hand-entered."""
+    marker = json.loads(Path(HEAD_COMPLETION_MARKER).read_text())
+    objects = sorted(glob.glob(HEAD_SERVE_OBJECTS))
+    total_bytes = sum(path.stat().st_size for path in map(Path, objects))
+    if len(objects) != marker["shard_count"]:
+        raise SystemExit(
+            f"head shard mismatch: {len(objects)} objects, "
+            f"{marker['shard_count']} in the marker"
+        )
+    return {
+        "build": "local planet build of overture places 2026-06-17.0",
+        "total_records": marker["total_records"],
+        "total_bytes": total_bytes,
+        "shards": marker["shard_count"],
+        "bytes_per_record": total_bytes / marker["total_records"],
+        "mean_shard_bytes": total_bytes / marker["shard_count"],
+        "cap_per_token": CAP_PER_TOKEN,
+        "provenance_note": (
+            "records from the head phase completion marker, bytes summed over "
+            "that same build's serve objects. The 5,141,583,720 B live-head "
+            "figure in 2026-08-04-measurement-apparatus-findings.md is a later "
+            "generation (2026-08-03.0) and is deliberately not mixed in here."
+        ),
+    }
 
 
 def sql_list(values) -> str:
@@ -190,7 +228,7 @@ def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2 * radius * math.asin(math.sqrt(inner))
 
 
-def measure_cost(con: duckdb.DuckDBPyConnection) -> dict:
+def measure_cost(con: duckdb.DuckDBPyConnection, head: dict) -> dict:
     con.execute(
         "create or replace table phrase as "
         + prominence_sql()
@@ -278,8 +316,8 @@ def measure_cost(con: duckdb.DuckDBPyConnection) -> dict:
                 "admit_only_keys_shared_by_at_most": limit,
                 "keys_gaining_records": row[2],
                 "new_head_records": delta,
-                "new_head_bytes": round(delta * BYTES_PER_HEAD_RECORD),
-                "head_growth_fraction": delta / HEAD_TOTAL_RECORDS,
+                "new_head_bytes": round(delta * head["bytes_per_record"]),
+                "head_growth_fraction": delta / head["total_records"],
             }
         )
 
@@ -303,8 +341,8 @@ def measure_cost(con: duckdb.DuckDBPyConnection) -> dict:
             "new_keys": option_31[0],
             "candidate_rows": option_31[1],
             "new_head_records": option_31[2],
-            "new_head_bytes": round(option_31[2] * BYTES_PER_HEAD_RECORD),
-            "head_growth_fraction": option_31[2] / HEAD_TOTAL_RECORDS,
+            "new_head_bytes": round(option_31[2] * head["bytes_per_record"]),
+            "head_growth_fraction": option_31[2] / head["total_records"],
         },
         "option_3_2_admission_softening": {
             "new_keys": con.execute(
@@ -450,6 +488,7 @@ def main() -> None:
     args = parser.parse_args()
 
     started = time.time()
+    head = measure_head()
     con = duckdb.connect(
         config={"memory_limit": args.memory_limit, "threads": args.threads}
     )
@@ -461,15 +500,8 @@ def main() -> None:
             "worker_commit_under_test": "00bc46c",
             "data_build": "2026-08-03.0",
         },
-        "head": {
-            "total_records": HEAD_TOTAL_RECORDS,
-            "total_bytes": HEAD_TOTAL_BYTES,
-            "shards": HEAD_SHARDS,
-            "bytes_per_record": BYTES_PER_HEAD_RECORD,
-            "mean_shard_bytes": HEAD_TOTAL_BYTES / HEAD_SHARDS,
-            "cap_per_token": CAP_PER_TOKEN,
-        },
-        "cost": measure_cost(con),
+        "head": head,
+        "cost": measure_cost(con, head),
         "yield": measure_yield(con),
     }
     result["elapsed_seconds"] = round(time.time() - started, 1)

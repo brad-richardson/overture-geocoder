@@ -7,12 +7,14 @@
     "data_build": "2026-08-03.0"
   },
   "head": {
+    "build": "local planet build of overture places 2026-06-17.0",
     "total_records": 33604005,
-    "total_bytes": 5141583720,
+    "total_bytes": 5717067235,
     "shards": 4096,
-    "bytes_per_record": 153.0050873400358,
-    "mean_shard_bytes": 1255269.462890625,
-    "cap_per_token": 10
+    "bytes_per_record": 170.13053161371687,
+    "mean_shard_bytes": 1395768.3679199219,
+    "cap_per_token": 10,
+    "provenance_note": "records from the head phase completion marker, bytes summed over that same build's serve objects. The 5,141,583,720 B live-head figure in 2026-08-04-measurement-apparatus-findings.md is a later generation (2026-08-03.0) and is deliberately not mixed in here."
   },
   "cost": {
     "corpus_shape": [
@@ -59,13 +61,13 @@
       "new_keys": 892625,
       "candidate_rows": 1059609,
       "new_head_records": 999815,
-      "new_head_bytes": 152976781,
+      "new_head_bytes": 170099057,
       "head_growth_fraction": 0.029752852375780802
     },
     "option_3_2_admission_softening": {
       "new_keys": 28325914,
       "new_head_records": 34457893,
-      "new_head_bytes": 5272232928,
+      "new_head_bytes": 5862339654,
       "head_growth_fraction": 1.025410304515786
     },
     "option_3_2_bounded_cost_curve": [
@@ -73,42 +75,42 @@
         "admit_only_keys_shared_by_at_most": 1,
         "keys_gaining_records": 25527353,
         "new_head_records": 25527353,
-        "new_head_bytes": 3905814875,
+        "new_head_bytes": 4342982137,
         "head_growth_fraction": 0.7596521009921288
       },
       {
         "admit_only_keys_shared_by_at_most": 2,
         "keys_gaining_records": 27453455,
         "new_head_records": 29267230,
-        "new_head_bytes": 4478035082,
+        "new_head_bytes": 4979249399,
         "head_growth_fraction": 0.8709446984072285
       },
       {
         "admit_only_keys_shared_by_at_most": 3,
         "keys_gaining_records": 27933707,
         "new_head_records": 30652474,
-        "new_head_bytes": 4689984462,
+        "new_head_bytes": 5214921697,
         "head_growth_fraction": 0.9121672848221514
       },
       {
         "admit_only_keys_shared_by_at_most": 5,
         "keys_gaining_records": 28248952,
         "new_head_records": 31964097,
-        "new_head_bytes": 4890669453,
+        "new_head_bytes": 5438068815,
         "head_growth_fraction": 0.9511990311869076
       },
       {
         "admit_only_keys_shared_by_at_most": 10,
         "keys_gaining_records": 28441599,
         "new_head_records": 33311860,
-        "new_head_bytes": 5096884049,
+        "new_head_bytes": 5667364451,
         "head_growth_fraction": 0.9913062445979282
       },
       {
         "admit_only_keys_shared_by_at_most": null,
         "keys_gaining_records": 28567837,
         "new_head_records": 34457893,
-        "new_head_bytes": 5272232928,
+        "new_head_bytes": 5862339654,
         "head_growth_fraction": 1.025410304515786
       }
     ]
@@ -1744,5 +1746,5 @@
       }
     ]
   },
-  "elapsed_seconds": 33.3
+  "elapsed_seconds": 59.9
 }

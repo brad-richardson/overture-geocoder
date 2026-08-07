@@ -140,17 +140,17 @@ shipped ahead of its measurement.
 Lets a 4-token query run **only** the phrase probe past the token cap; ordinary
 head reads stay at ≤3 tokens. Directly addresses the "X Y MRT Station" class.
 
-- **Measured cost: +999,815 head records, +152,976,781 B, +3.0% of the planet
+- **Measured cost: +999,815 head records, +170,099,057 B, +3.0% of the planet
   head** (892,625 new keys, prominent four-word names only, cap 10 applied).
 - **Measured yield: 3 of the 145 cases still missed at rank 10** —
   `TECK LEE LRT STATION`, `BUKIT PANJANG MRT STATION`, and the gold
-  `Casino de Monte-Carlo`. Roughly 51 MB per claimed case.
+  `Casino de Monte-Carlo`. Roughly 57 MB per claimed case.
 - Its former blocker — "if the prefix-head fallback recovers this class at query
   time, the bytes are better spent on 3.2" — is void: 3.2 is closed, and the
   fallback did not recover these three.
 - The "31.7 MB reserve" this section was to be sized against gates a rehearsal
   fixture, not production (`2026-08-04-measurement-apparatus-findings.md` §3).
-  The production quantity is **mean shard object bytes, 1,255,269 B** across
+  The production quantity is **mean shard object bytes, 1,395,768 B** across
   4,096 shards; size any future head growth against that.
 
 Evidence: `2026-08-07-phrase-admission-sizing.md`.
@@ -159,13 +159,13 @@ Evidence: `2026-08-07-phrase-admission-sizing.md`.
 **Do not reopen without a measurement that contradicts the cost below.**
 
 Admitting `prominence_rank == 0` records at 2–3 words costs **+34,457,893 head
-records, +5,272,232,928 B, +102.5%** — it doubles the planet head (5.14 GB ->
-10.41 GB, mean shard 1.26 MB -> 2.54 MB), and every head read already transfers
+records, +5,862,339,654 B, +102.5%** — it doubles the planet head (5.72 GB ->
+11.58 GB, mean shard 1.40 MB -> 2.83 MB), and every head read already transfers
 the whole object. Bounding it by key rarity does not rescue it: admitting only
 *globally unique* phrase keys still costs +76.0%, because most 2–3-word POI
 names are unique.
 
-It claims **19 of 145 current misses**, ~278 MB per claimed case, and 11 of the
+It claims **19 of 145 current misses**, ~309 MB per claimed case, and 11 of the
 19 are Mexican registry hotels — non-prominent by design (`hotel` is a commodity
 category) and inside a stratum the denominator rebaseline already flags for
 population shift.
@@ -314,7 +314,7 @@ measured; the 3.1-vs-3.2 product decision is now made (3.1 in, 3.2 closed).
 - [x] 3.1 and 3.2 byte costs measured and the decision recorded: +3.0% vs
       +102.5% of the planet head; 3.1 adopted, 3.2 closed. The 31.7 MB reserve
       was a rehearsal-fixture artifact and is not the gate; size future head
-      growth against mean shard object bytes (1,255,269 B)
+      growth against mean shard object bytes (1,395,768 B)
 - [x] 3.3 out of v5 — the sidecar is dead (2026-08-05), not deferred
 - [ ] Evidence spec v5 drafted as ONE re-attestation pass
 - [ ] §6 operational items landed or explicitly accepted as risk

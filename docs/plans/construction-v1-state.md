@@ -696,20 +696,28 @@ The replication is checked against what the real planet build emitted:
 2,381,840 predicted `e2:`/`e3:` keys against 2,381,564 emitted, **99.988%
 agreement** on the admission unit.
 
+Head facts are derived from ONE build and not mixed: the complete local planet
+build of `2026-06-17.0` — 33,604,005 records, 5,717,067,235 B, 4,096 shards,
+170.131 B per record, mean shard object 1,395,768 B. That is deliberately not
+the 5,141,583,720 B published by hosted run `30288619536` (30,841,082 records)
+recorded further down, nor the live-head figure in the apparatus doc: those are
+different generations, and a cross-generation bytes-per-record ratio would be
+meaningless. The growth *fractions* below are record ratios and hold either way.
+
 | option | new head records | new head bytes | head growth | claims |
 |---|---|---|---|---|
-| §3.1 `e4:`, prominent only | 999,815 | 152,976,781 | +3.0% | 3 of 145 |
-| §3.2 admit `prominence_rank == 0` | 34,457,893 | 5,272,232,928 | +102.5% | 19 of 145 |
+| §3.1 `e4:`, prominent only | 999,815 | 170,099,057 | +3.0% | 3 of 145 |
+| §3.2 admit `prominence_rank == 0` | 34,457,893 | 5,862,339,654 | +102.5% | 19 of 145 |
 
 **Operator decision on this evidence: §3.1 is adopted for v5, §3.2 is CLOSED.**
-§3.2 doubles the planet head (5.14 -> 10.41 GB, mean shard object 1.26 ->
-2.54 MB, and every head read transfers the whole object) for 19 claims, 11 of
+§3.2 doubles the planet head (5.72 -> 11.58 GB, mean shard object 1.40 ->
+2.83 MB, and every head read transfers the whole object) for 19 claims, 11 of
 which are Mexican registry hotels — non-prominent by design, inside a stratum
 the denominator rebaseline already flags for population shift. Bounding it by
 key rarity does not rescue it: *globally unique* keys alone still cost +76.0%.
 The two options never competed for a budget; they differ by 34×, and the
 budget — the 31.7 MB reserve — was a rehearsal-fixture artifact. **Size any
-future head growth against mean shard object bytes, 1,255,269 B over 4,096
+future head growth against mean shard object bytes, 1,395,768 B over 4,096
 shards.**
 
 Yield is an upper bound: a claim means the phrase key would exist and the record

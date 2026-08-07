@@ -19,19 +19,28 @@ No network, no credentials, 33 seconds on the staging workstation.
 Both sections say the options "compete for the same 31.7 MB reserve".
 `2026-08-04-measurement-apparatus-findings.md` §3 already showed that reserve
 gates a **rehearsal fixture** (773,590,640 B against a self-imposed 1 GiB cap ×
-0.75), not production. This probe measures the production quantity instead:
+0.75), not production. This probe measures a real head instead — the complete
+local planet build of the same Overture release, with records and bytes read off
+that one build so nothing is mixed across generations:
 
 | | |
 |---|---|
 | planet head records | 33,604,005 |
-| planet head bytes | 5,141,583,720 |
+| planet head bytes | 5,717,067,235 |
 | shards | 4,096 |
-| mean shard object | 1,255,269 B |
-| bytes per head record | 153.005 |
+| mean shard object | 1,395,768 B |
+| bytes per head record | 170.131 |
 
 The head is fetched per token per query as whole R2 objects, so the quantity
 that actually costs something is **mean shard bytes**, not a fictional 31.7 MB
 of slack.
+
+Note which head this is. `2026-08-04-measurement-apparatus-findings.md` quotes
+the *live* head at 5,141,583,720 B, but that is a later generation
+(`2026-08-03.0`, carrying bounded phrase admission). Dividing one generation's
+bytes by another's record count is a meaningless ratio, so the probe derives
+both numbers from the same build and the growth *fractions* below — which are
+record ratios — are unaffected by the choice either way.
 
 ## 1. Method, and why the replication is trustworthy
 
@@ -56,11 +65,11 @@ that matters; the 1.7% row gap is records the transform drops for other reasons
 
 | option | new keys | new head records | new head bytes | head growth |
 |---|---|---|---|---|
-| **§3.1** `e4:` keys, prominent only | 892,625 | 999,815 | 152,976,781 | **+3.0%** |
-| **§3.2** admit `prominence_rank == 0` at 2–3 words | 28,325,914 | 34,457,893 | 5,272,232,928 | **+102.5%** |
+| **§3.1** `e4:` keys, prominent only | 892,625 | 999,815 | 170,099,057 | **+3.0%** |
+| **§3.2** admit `prominence_rank == 0` at 2–3 words | 28,325,914 | 34,457,893 | 5,862,339,654 | **+102.5%** |
 
-§3.2 **doubles the head**: 33.6M → 68.1M records, 5.14 GB → 10.41 GB, mean
-shard object 1.26 MB → 2.54 MB. Every head read already transfers the whole
+§3.2 **doubles the head**: 33.6M → 68.1M records, 5.72 GB → 11.58 GB, mean
+shard object 1.40 MB → 2.83 MB. Every head read already transfers the whole
 object to use ≤10 records, so this doubles head read transfer for every query
 on the planet, not only for the queries it helps.
 
@@ -70,7 +79,7 @@ construction.
 
 **Bounding it by key rarity does not rescue it.** Admitting non-prominent
 records only where the phrase key is *globally unique* still costs 25,527,353
-new head records (+76.0%, 3.91 GB) — most 2–3-word POI names are unique, so
+new head records (+76.0%, 4.34 GB) — most 2–3-word POI names are unique, so
 rarity is not the discriminator anyone hoped it was:
 
 | admit only keys shared by ≤ | new head records | head growth |
@@ -102,7 +111,7 @@ gold `Casino de Monte-Carlo`. The two already-admitted gold failures are
 `Brandenburg Gate Berlin` and `Louvre Museum`, both of which have open
 follow-ups elsewhere and neither of which admission touches.
 
-**Cost per claimed case: §3.1 ≈ 51 MB, §3.2 ≈ 278 MB.**
+**Cost per claimed case: §3.1 ≈ 57 MB, §3.2 ≈ 309 MB.**
 
 Read against the honest denominator, §3.2's everyday claim is 15 of the 38
 *scorable* misses (18 claims less 3 that sit inside the ABSENT quarantine) —
@@ -139,7 +148,7 @@ denominator should be read as n=111 rather than n=108.
    against a budget that was never real. Delete the framing from the readiness
    sheet rather than re-sizing it.
 4. The v5 byte gate should be restated against **mean shard object bytes**
-   (1,255,269 B today), which is what a head query actually pays.
+   (1,395,768 B on this build), which is what a head query actually pays.
 
 ## 6. Limits
 
@@ -148,7 +157,7 @@ denominator should be read as n=111 rather than n=108.
   separate step this probe does not measure, and the head cap of 10 still
   arbitrates within a key.
 - **Cost is a lower bound on disruption**, not on bytes: it counts head records
-  and prices them at the measured planet average of 153.005 B. It does not
+  and prices them at the measured planet average of 170.131 B. It does not
   model the head-build DuckDB spill, which is the constraint that actually
   killed a v4 merge at 79%. Doubling the head makes that worse by an unmeasured
   amount.
