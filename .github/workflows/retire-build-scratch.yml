@@ -291,6 +291,14 @@ jobs:
           set -euo pipefail
           export ENDPOINT="https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"
           S3() { aws "$@" --endpoint-url "$ENDPOINT" --region auto; }
+          # always() means this also runs when an earlier GATE failed, in which
+          # case nothing was deleted and the manifest was never fetched. Exiting
+          # cleanly here keeps the gate's own error as the run's failure rather
+          # than burying it under a confusing `jq: no such file`.
+          if [ ! -s /tmp/slice-manifest.json ]; then
+            echo "no slice manifest fetched: an earlier gate refused before any delete."
+            exit 0
+          fi
           for family in $(jq -r '.families[]' /tmp/slice-manifest.json); do
             for key in "families/$family/family-manifest.json" \
                        "families/$family/routing.json" \
