@@ -1,7 +1,8 @@
 # construction-v1: current state
 
-Last updated 2026-08-07 after the PENDING phrase-admission sizing join was
-computed and §3.2 was closed on it, the apostrophe-folding locus was settled
+Last updated 2026-08-07 after the Worker apostrophe fix went live with a
+zero-flip paired gate and a measured zero yield (see below), the PENDING
+phrase-admission sizing join was computed and §3.2 was closed on it, the apostrophe-folding locus was settled
 (`2026-08-07-apostrophe-folding-locus.md`), and the theme=base import was
 scoped and reframed as a coverage lever (see "Phrase admission is sized, and §3.2 is
 closed, 2026-08-07"), on top of the 2026-08-06 state: the Worker-only proximity
@@ -684,6 +685,39 @@ What is known is that Foursquare stores local-script names as the primary (the
 Thai venues are natively `วัดลาดบัวหลวง`). Whether Overture drops localization in
 the Places path or no source supplies it is unresolved, but "no source supplies a
 single alternate for any of 75.6M records" is not a plausible data outcome.
+
+### The Worker apostrophe fix is live, and its yield is UNMEASURED, 2026-08-07
+
+Merged `#265`, deployed on `fc90f1f`. An apostrophe-born one-character token no
+longer consumes a `HEAD_QUERY_TOKEN_CAP` slot, so `Queen's Medical Center`
+reaches the head lane as three clauses instead of being refused as four. The
+phrase lane keeps the unfiltered clauses, because `eN:` keys are built from the
+record's full name and a filtered key names something the head does not hold.
+
+**Paired gates: zero flips, zero errors, on all three frozen sets.**
+
+| set | rank@1 | rank@10 | paired to-hit / to-miss |
+|---|---|---|---|
+| gold 55 | 31 -> 31 | 40 -> 40 | 0 / 0 |
+| everyday 200 | 69 -> 69 | 70 -> 70 | 0 / 0 |
+| proximity 40 | 28 -> 28 | 40 -> 40 | 0 / 0 |
+
+**And zero recovered on the only stratum that tests the class.** The five frozen
+apostrophe cases are unchanged, both spellings, against their 2026-08-06 rows:
+0/5. The reason is that four of the five are not the class the fix addresses --
+`Paula's Cafe` is three clauses and was already under the cap -- and the one
+that is (`Len's Mill Store`) now gets *asked* and still returns empty, because
+its remaining tokens are commodity words whose postings evict it at the cap
+of 10.
+
+So the 733,701 figure in `2026-08-07-apostrophe-folding-locus.md` counts records
+whose own full name becomes **askable**, exactly as that document's Limits
+section said, and not queries that improve. The change is kept because it is
+provably identical for every query without an apostrophe (pinned by test), costs
+nothing, and removes a real cap cost -- but **it has no demonstrated
+user-visible gain, and none should be claimed for it** until a purpose-built
+four-clause possessive stratum with presence controls measures one. That stratum
+does not exist; the natural-feature stratum is the design to copy.
 
 ### Phrase admission is sized, and §3.2 is closed, 2026-08-07
 
