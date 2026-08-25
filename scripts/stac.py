@@ -9,14 +9,25 @@ Usage:
 
 import argparse
 import json
+import re
 import sys
 import time
+from urllib.parse import urlsplit
 from urllib.request import urlopen
 
 STAC_ROOT = "https://stac.overturemaps.org/catalog.json"
 
 FETCH_TIMEOUT_SECONDS = 30
 FETCH_RETRIES = 3
+RELEASE_VERSION = re.compile(r"^\d{4}-\d{2}-\d{2}\.\d+$")
+
+
+def release_from_href(href: str) -> str | None:
+    """Extract a release version from an absolute or relative STAC link."""
+    for part in reversed(urlsplit(href).path.split("/")):
+        if RELEASE_VERSION.fullmatch(part):
+            return part
+    return None
 
 
 def get_catalog(url: str) -> dict:
@@ -45,9 +56,7 @@ def get_latest_release() -> str:
 
     for link in catalog.get("links", []):
         if link.get("latest") is True:
-            # Extract version from href like "./2025-12-17.0/catalog.json"
-            href = link.get("href", "")
-            version = href.split("/")[1] if "/" in href else None
+            version = release_from_href(link.get("href", ""))
             if version:
                 return version
 
@@ -61,12 +70,9 @@ def list_releases() -> list[str]:
 
     for link in catalog.get("links", []):
         if link.get("rel") == "child":
-            href = link.get("href", "")
-            # Extract version from href like "./2025-12-17.0/catalog.json"
-            if "/" in href:
-                version = href.split("/")[1]
-                if version and version[0].isdigit():
-                    releases.append(version)
+            version = release_from_href(link.get("href", ""))
+            if version:
+                releases.append(version)
 
     return sorted(releases, reverse=True)
 
