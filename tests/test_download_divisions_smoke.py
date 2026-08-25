@@ -10,6 +10,7 @@ SCRIPTS = Path(__file__).parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 import download_divisions_smoke as smoke  # noqa: E402
+import derive_monaco_smoke_contract as derive_contract  # noqa: E402
 import verify_monaco_export as verify  # noqa: E402
 import verify_monaco_evidence as evidence  # noqa: E402
 
@@ -79,7 +80,76 @@ def test_contract_and_required_closure_validate():
     boxes, signatures = smoke.validate_areas(area_rows(contract), contract, ids)
     assert boxes
     assert sum(signatures.values()) == len(contract["required_areas"])
-    assert boxes
+
+
+def test_release_contract_uses_current_forward_and_area_identities():
+    contract = derive_contract.build_contract(
+        [
+            {"id": "current-country", "subtype": "country"},
+            {"id": "current-locality", "subtype": "locality"},
+        ],
+        [
+            {
+                "id": "current-area",
+                "division_id": "current-country",
+                "subtype": "country",
+            },
+            {
+                "id": "reissued-area",
+                "division_id": "reissued-division",
+                "subtype": "microhood",
+            },
+        ],
+    )
+
+    assert contract == {
+        "contract_version": 1,
+        "country_code": "MC",
+        "required_divisions": [
+            {"id": "current-country", "subtype": "country"},
+            {"id": "current-locality", "subtype": "locality"},
+        ],
+        "required_areas": [
+            {
+                "id": "current-area",
+                "division_id": "current-country",
+                "subtype": "country",
+            },
+            {
+                "id": "reissued-area",
+                "division_id": "reissued-division",
+                "subtype": "microhood",
+            },
+        ],
+    }
+
+
+@pytest.mark.parametrize(
+    "division_rows, area_rows",
+    [
+        (
+            [],
+            [
+                {
+                    "id": "area",
+                    "division_id": "division",
+                    "subtype": "country",
+                }
+            ],
+        ),
+        ([{"id": "division", "subtype": "country"}], []),
+    ],
+)
+def test_release_contract_rejects_an_empty_identity_family(
+    division_rows, area_rows
+):
+    with pytest.raises(RuntimeError, match="has no Monaco"):
+        derive_contract.build_contract(division_rows, area_rows)
+
+
+def test_release_contract_rejects_an_invalid_release_before_querying():
+    with pytest.raises(RuntimeError, match="invalid Overture release"):
+        derive_contract.derive_contract("latest'; DROP TABLE source; --")
 
 
 def test_missing_required_division_fails_closed():
