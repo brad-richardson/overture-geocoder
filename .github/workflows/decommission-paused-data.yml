@@ -1,0 +1,518 @@
+name: Decommission Paused v2 Data
+
+# One-time, manually dispatched retirement of the production-paused v2 object
+# graph followed by reduction of the supported v1 catalog to its current
+# generation. Detailed object keys and byte totals deliberately stay out of
+# this public repository's logs; the runner keeps its exact plan in RUNNER_TEMP.
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_current:
+        description: 'Exact live v1 generation (YYYY-MM-DD.N)'
+        type: string
+        required: true
+      dry_run:
+        description: 'Validate and smoke only; do not write or delete'
+        type: boolean
+        required: true
+        default: true
+      confirmation:
+        description: 'For a live run, enter DELETE_V2_AND_OLD_V1'
+        type: string
+        required: true
+        default: 'PLAN_ONLY'
+      expected_plan_sha256:
+        description: 'For a live run, enter the SHA-256 emitted by a fresh dry run'
+        type: string
+        required: true
+        default: 'PLAN_ONLY'
+
+permissions:
+  actions: read
+  contents: read
+
+# Never overlap the v1 catalog compare/publish with a rebuild finalizer or the
+# older maintenance workflow. Disabled v2 producers are also asserted below.
+concurrency:
+  group: r2-production-catalog
+  cancel-in-progress: false
+
+env:
+  AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+  AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+  R2_BUCKET: geocoder-shards
+  GEOCODER_BASE_URL: https://geocoder.bradr.dev
+
+jobs:
+  decommission:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Assert producers and older deletion workflows remain disabled
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for workflow in \
+            construction-v1.yml \
+            reverse-v2.yml \
+            promote-v2-release.yml \
+            preview-v2-candidate.yml \
+            build-places-region.yml \
+            rehearse-address-r2-map-reduce.yml \
+            release-slice-families.yml \
+            usa-scale-signal.yml \
+            hosted-rowgroup-data-spike.yml \
+            reverse-address-probe.yml \
+            retire-build-scratch.yml \
+            r2-cleanup.yml
+          do
+            state=$(gh api \
+              "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow" \
+              --jq .state)
+            if [ "$state" != disabled_manually ]; then
+              echo "::error::A producer or older deletion workflow is enabled."
+              exit 1
+            fi
+            for run_state in queued in_progress waiting requested pending; do
+              active=$(gh api --method GET \
+                "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs" \
+                -f status="$run_state" -f per_page=1 --jq .total_count)
+              if [ "$active" != 0 ]; then
+                echo "::error::A paused producer still has an active run."
+                exit 1
+              fi
+            done
+          done
+          echo "All paused producers are disabled with no active runs."
+
+      - name: Assert production logging remains disabled
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          settings=$(curl -fsS --max-time 30 \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/workers?per_page=100")
+          jq -e '
+            .success == true
+            and ([.result[] | select(.name == "geocoder")] | length) == 1
+            and ([.result[] | select(.name == "geocoder")][0] |
+              .observability.enabled == false
+              and .observability.logs.enabled == false
+              and .observability.traces.enabled == false
+              and .logpush == false
+              and ((.tail_consumers // []) | length) == 0)
+          ' >/dev/null <<<"$settings"
+          echo "Production Workers Logs, traces, Logpush, and tail consumers are disabled."
+
+      - name: Build the private fail-closed deletion plan
+        id: plan
+        env:
+          EXPECTED_CURRENT: ${{ inputs.expected_current }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          EXPECTED_PLAN_SHA256: ${{ inputs.expected_plan_sha256 }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          set -euo pipefail
+          if [ "$DRY_RUN" != true ] && [ "$CONFIRMATION" != DELETE_V2_AND_OLD_V1 ]; then
+            echo "::error::Live deletion requires the exact confirmation phrase."
+            exit 1
+          fi
+
+          WORK="$RUNNER_TEMP/paused-data-decommission"
+          mkdir -p "$WORK/v2-releases"
+          ENDPOINT="https://$CLOUDFLARE_ACCOUNT_ID.r2.cloudflarestorage.com"
+
+          ./scripts/r2_catalog_fetch.sh "$WORK/catalog-live.json"
+          test -s "$WORK/catalog-live.json"
+
+          aws s3api list-objects-v2 --bucket "$R2_BUCKET" --delimiter / \
+            --endpoint-url "$ENDPOINT" --region auto --output json \
+            > "$WORK/top.json"
+          aws s3api list-objects-v2 --bucket "$R2_BUCKET" \
+            --query '{Contents: Contents[].{Key: Key, Size: Size, ETag: ETag}}' \
+            --endpoint-url "$ENDPOINT" --region auto --output json \
+            > "$WORK/full.json"
+          aws s3api list-objects-v2 --bucket "$R2_BUCKET" \
+            --prefix construction-v1/ --delimiter / \
+            --endpoint-url "$ENDPOINT" --region auto --output json \
+            > "$WORK/construction.json"
+          aws s3api list-objects-v2 --bucket "$R2_BUCKET" \
+            --prefix staging/global-v2/ --delimiter / \
+            --endpoint-url "$ENDPOINT" --region auto --output json \
+            > "$WORK/staging.json"
+
+          if [ "$DRY_RUN" != true ]; then
+            printf '%s' "$EXPECTED_PLAN_SHA256" | grep -Eq '^[0-9a-f]{64}$' || {
+              echo "::error::Live deletion requires a valid dry-run plan SHA-256."
+              exit 1
+            }
+          fi
+
+          resume=false
+          evidence_root="backups/paused-data-decommission/$EXPECTED_PLAN_SHA256"
+          if printf '%s' "$EXPECTED_PLAN_SHA256" \
+              | grep -Eq '^[0-9a-f]{64}$' && \
+            aws s3 cp "s3://$R2_BUCKET/$evidence_root/manifest.json" \
+              "$WORK/manifest.json" --endpoint-url "$ENDPOINT" --region auto \
+              --only-show-errors > "$WORK/resume-probe.log" 2>&1; then
+            resume=true
+            for pair in \
+              "plan.json:plan.json" \
+              "inventory.json:inventory.json" \
+              "v1/catalog-before.json:catalog-before.json" \
+              "v1/catalog-single-current.json:catalog-pruned.json" \
+              "v2/catalog.json:v2-catalog.json"
+            do
+              remote=${pair%%:*}
+              local_name=${pair#*:}
+              aws s3 cp "s3://$R2_BUCKET/$evidence_root/$remote" \
+                "$WORK/$local_name" --endpoint-url "$ENDPOINT" --region auto \
+                --only-show-errors
+            done
+            while read -r build; do
+              printf '%s' "$build" \
+                | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$'
+              mkdir -p "$WORK/v2-releases/$build"
+              aws s3 cp \
+                "s3://$R2_BUCKET/$evidence_root/v2/releases/$build/release.json" \
+                "$WORK/v2-releases/$build/release.json" \
+                --endpoint-url "$ENDPOINT" --region auto --only-show-errors
+            done < <(jq -r '.v2_release_builds[]' "$WORK/plan.json")
+            jq -e --arg current "$EXPECTED_CURRENT" \
+              '.expected_current == $current' >/dev/null "$WORK/plan.json"
+            python3 scripts/decommission_paused_data.py validate-paused-resume \
+              --plan "$WORK/plan.json" \
+              --inventory "$WORK/inventory.json" \
+              --catalog-before "$WORK/catalog-before.json" \
+              --pruned-catalog "$WORK/catalog-pruned.json" \
+              --live-catalog "$WORK/catalog-live.json" \
+              --full-listing "$WORK/full.json" \
+              --manifest "$WORK/manifest.json" \
+              --v2-catalog "$WORK/v2-catalog.json" \
+              --v2-releases-dir "$WORK/v2-releases" \
+              --expected-plan-sha256 "$EXPECTED_PLAN_SHA256" \
+              --now "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          else
+            cp "$WORK/catalog-live.json" "$WORK/catalog-before.json"
+            aws s3 cp "s3://$R2_BUCKET/v2/catalog.json" "$WORK/v2-catalog.json" \
+              --endpoint-url "$ENDPOINT" --region auto --only-show-errors
+            while IFS=$'\t' read -r build key; do
+              printf '%s' "$build" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$'
+              [ "$key" = "v2/releases/$build/release.json" ] || {
+                echo "::error::Unexpected v2 release-manifest key."
+                exit 1
+              }
+              mkdir -p "$WORK/v2-releases/$build"
+              aws s3 cp "s3://$R2_BUCKET/$key" \
+                "$WORK/v2-releases/$build/release.json" \
+                --endpoint-url "$ENDPOINT" --region auto --only-show-errors
+            done < <(jq -r '.releases[] | [.geocoder_build, .manifest_key] | @tsv' \
+              "$WORK/v2-catalog.json")
+
+            args=(
+              plan
+              --catalog "$WORK/catalog-before.json"
+              --top-listing "$WORK/top.json"
+              --construction-listing "$WORK/construction.json"
+              --staging-listing "$WORK/staging.json"
+              --full-listing "$WORK/full.json"
+              --v2-catalog "$WORK/v2-catalog.json"
+              --v2-releases-dir "$WORK/v2-releases"
+              --expected-current "$EXPECTED_CURRENT"
+              --now "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              --output "$WORK/plan.json"
+              --inventory-output "$WORK/inventory.json"
+              --catalog-output "$WORK/catalog-pruned.json"
+            )
+            [ "$DRY_RUN" = true ] && args+=(--dry-run)
+            python3 scripts/decommission_paused_data.py "${args[@]}"
+          fi
+
+          plan_sha256=$(sha256sum "$WORK/plan.json" | cut -d ' ' -f1)
+          if [ "$DRY_RUN" != true ] && [ "$plan_sha256" != "$EXPECTED_PLAN_SHA256" ]; then
+            echo "::error::The live inventory differs from the reviewed dry-run plan."
+            exit 1
+          fi
+          echo "resume=$resume" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Paused-data decommission plan"
+            echo
+            echo "- Mode: $([ "$DRY_RUN" = true ] && echo 'dry run' || echo 'LIVE')"
+            echo "- Pending transaction resume: $resume"
+            echo "- Current v1 generation: $EXPECTED_CURRENT"
+            echo "- Construction data subtrees: $(jq '.construction_data_prefixes | length' "$WORK/plan.json")"
+            echo "- Global staging data subtrees: $(jq '.staging_data_prefixes | length' "$WORK/plan.json")"
+            echo "- Retained construction/staging evidence runs: $(jq '(.construction_evidence_prefixes + .staging_evidence_prefixes) | length' "$WORK/plan.json")"
+            echo "- Slice copies: $(jq '.slice_prefixes | length' "$WORK/plan.json")"
+            echo "- Retired root generations: $(jq '.old_root_prefixes | length' "$WORK/plan.json")"
+            echo "- Verified v2 release documents: $(jq '.v2_release_count' "$WORK/plan.json")"
+            echo "- Private plan SHA-256: \`$plan_sha256\`"
+            echo
+            echo "Exact prefixes remain private in the ephemeral runner plan."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Pre-deletion production smoke
+        env:
+          EXPECTED_CURRENT: ${{ inputs.expected_current }}
+        run: ./scripts/smoke_production_pause.sh "$EXPECTED_CURRENT"
+
+      - name: Delete one logical copy at a time with production smoke
+        if: ${{ !inputs.dry_run }}
+        env:
+          EXPECTED_CURRENT: ${{ inputs.expected_current }}
+          EXPECTED_PLAN_SHA256: ${{ inputs.expected_plan_sha256 }}
+          RESUME: ${{ steps.plan.outputs.resume }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/paused-data-decommission"
+          ENDPOINT="https://$CLOUDFLARE_ACCOUNT_ID.r2.cloudflarestorage.com"
+
+          assert_no_active_runs() {
+            local workflow workflow_state run_state active
+            for workflow in \
+              construction-v1.yml \
+              reverse-v2.yml \
+              promote-v2-release.yml \
+              preview-v2-candidate.yml \
+              build-places-region.yml \
+              rehearse-address-r2-map-reduce.yml \
+              release-slice-families.yml \
+              usa-scale-signal.yml \
+              hosted-rowgroup-data-spike.yml \
+              reverse-address-probe.yml \
+              retire-build-scratch.yml \
+              r2-cleanup.yml
+            do
+              workflow_state=$(gh api \
+                "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow" \
+                --jq .state)
+              if [ "$workflow_state" != disabled_manually ]; then
+                echo "::error::A paused producer was enabled after planning."
+                exit 1
+              fi
+              for run_state in queued in_progress waiting requested pending; do
+                active=$(gh api --method GET \
+                  "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs" \
+                  -f status="$run_state" -f per_page=1 --jq .total_count)
+                if [ "$active" != 0 ]; then
+                  echo "::error::A paused producer became active after planning."
+                  exit 1
+                fi
+              done
+            done
+          }
+          assert_no_active_runs
+
+          python3 scripts/decommission_paused_data.py backup-evidence \
+            --plan "$WORK/plan.json" \
+            --inventory "$WORK/inventory.json" \
+            --catalog "$WORK/catalog-before.json" \
+            --pruned-catalog "$WORK/catalog-pruned.json" \
+            --v2-catalog "$WORK/v2-catalog.json" \
+            --v2-releases-dir "$WORK/v2-releases" \
+            --expected-plan-sha256 "$EXPECTED_PLAN_SHA256"
+
+          prefix_exists() {
+            local target="$1" count
+            count=$(aws s3api list-objects-v2 --bucket "$R2_BUCKET" \
+              --prefix "$target" --max-keys 1 --query KeyCount --output text \
+              --endpoint-url "$ENDPOINT" --region auto)
+            [ "$count" != 0 ]
+          }
+
+          validate_target() {
+            local target="$1" category="$2"
+            case "$category" in
+              construction-data)
+                [[ "$target" =~ ^construction-v1/[0-9a-f]{64}/slice/[^/]+/families/(addresses|places)/(objects|positions|records)/$ ]];;
+              staging-data)
+                [[ "$target" =~ ^staging/global-v2/[0-9a-f]{64}/immutable/map/addresses/objects/$ ]];;
+              slice)
+                [[ "$target" =~ ^slice-[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+/$ ]];;
+              old-root)
+                [[ "$target" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+/$ ]] &&
+                  [ "$target" != "$EXPECTED_CURRENT/" ];;
+              v2-metadata)
+                [ "$target" = v2/ ];;
+              *) return 1;;
+            esac
+          }
+
+          delete_and_smoke() {
+            local target="$1" category="$2" ordinal="$3"
+            validate_target "$target" "$category" || {
+              echo "::error::The private plan produced an invalid deletion target."
+              exit 1
+            }
+            if ! prefix_exists "$target"; then
+              if [ "$RESUME" = true ]; then
+                echo "A previously reviewed copy is already absent; continuing resume."
+                return
+              fi
+              echo "::error::A planned deletion target disappeared before deletion."
+              exit 1
+            fi
+            if ! aws s3api list-objects-v2 --bucket "$R2_BUCKET" \
+              --prefix "$target" --endpoint-url "$ENDPOINT" --region auto \
+              --query '{Contents: Contents[].{Key: Key, Size: Size, ETag: ETag}}' \
+              --output json > "$WORK/target-current.json" \
+              2> "$WORK/target-list-error.log"; then
+              echo "::error::Could not refresh a target's private inventory."
+              exit 1
+            fi
+            verify_command=verify-prefix-inventory
+            [ "$RESUME" = true ] && verify_command=verify-prefix-remainder
+            python3 scripts/decommission_paused_data.py "$verify_command" \
+              --inventory "$WORK/inventory.json" \
+              --prefix "$target" \
+              --listing "$WORK/target-current.json"
+            echo "Deleting $category copy $ordinal..."
+            if ! aws s3 rm "s3://$R2_BUCKET/$target" --recursive \
+              --endpoint-url "$ENDPOINT" --region auto --only-show-errors \
+              > "$WORK/delete-output.log" 2>&1; then
+              echo "::error::R2 rejected the deletion. Target details remain private."
+              exit 1
+            fi
+            if prefix_exists "$target"; then
+              echo "::error::Deletion returned success but the target is not empty."
+              exit 1
+            fi
+            ./scripts/smoke_production_pause.sh "$EXPECTED_CURRENT"
+            echo "Pausing 65 seconds before the next mutation."
+            sleep 65
+          }
+
+          # Remove catalog links first, prove the supported API, and wait for
+          # every edge/isolate catalog cache before deleting any referenced v1
+          # generation. The durable reviewed plan above makes this resumable.
+          ./scripts/r2_catalog_fetch.sh "$WORK/catalog-pre-publish.json"
+          catalog_changed=false
+          if cmp -s "$WORK/catalog-pre-publish.json" "$WORK/catalog-before.json"; then
+            catalog_changed=true
+          elif ! cmp -s "$WORK/catalog-pre-publish.json" "$WORK/catalog-pruned.json"; then
+            echo "::error::The v1 catalog changed outside the pending transaction."
+            exit 1
+          fi
+          python3 scripts/decommission_paused_data.py publish-catalog \
+            --before "$WORK/catalog-before.json" \
+            --pruned "$WORK/catalog-pruned.json" \
+            --expected-current "$EXPECTED_CURRENT"
+          if ! ./scripts/smoke_production_pause.sh "$EXPECTED_CURRENT"; then
+            if [ "$catalog_changed" = true ]; then
+              python3 scripts/decommission_paused_data.py restore-catalog \
+                --before "$WORK/catalog-before.json" \
+                --pruned "$WORK/catalog-pruned.json" \
+                --expected-current "$EXPECTED_CURRENT"
+            fi
+            exit 1
+          fi
+
+          echo "Catalog prune is healthy; waiting 390 seconds for stale catalogs."
+          sleep 390
+          ./scripts/r2_catalog_fetch.sh "$WORK/catalog-after-cache-wait.json"
+          cmp -s "$WORK/catalog-after-cache-wait.json" "$WORK/catalog-pruned.json" || {
+            echo "::error::The single-current catalog is not live after cache expiry."
+            exit 1
+          }
+
+          mapfile -t staging < <(jq -r '.staging_data_prefixes[]' "$WORK/plan.json")
+          for index in "${!staging[@]}"; do
+            delete_and_smoke "${staging[$index]}" staging-data "$((index + 1))/${#staging[@]}"
+          done
+
+          mapfile -t construction < <(jq -r '.construction_data_prefixes[]' "$WORK/plan.json")
+          for index in "${!construction[@]}"; do
+            delete_and_smoke "${construction[$index]}" construction-data "$((index + 1))/${#construction[@]}"
+          done
+
+          # The bulky data was deliberately selected below immutable run
+          # roots. Prove their markers, manifests, inventories, reports, and
+          # completion records are byte-identical before moving on.
+          while read -r evidence_root; do
+            if ! aws s3api list-objects-v2 --bucket "$R2_BUCKET" \
+              --prefix "$evidence_root" --endpoint-url "$ENDPOINT" --region auto \
+              --query '{Contents: Contents[].{Key: Key, Size: Size, ETag: ETag}}' \
+              --output json > "$WORK/evidence-current.json" \
+              2> "$WORK/evidence-list-error.log"; then
+              echo "::error::Could not verify retained run evidence."
+              exit 1
+            fi
+            python3 scripts/decommission_paused_data.py verify-preserved-evidence \
+              --inventory "$WORK/inventory.json" \
+              --prefix "$evidence_root" \
+              --listing "$WORK/evidence-current.json"
+          done < <(jq -r '
+            .construction_evidence_prefixes[],
+            .staging_evidence_prefixes[]
+          ' "$WORK/plan.json")
+
+          mapfile -t slices < <(jq -r '.slice_prefixes[]' "$WORK/plan.json")
+          for index in "${!slices[@]}"; do
+            delete_and_smoke "${slices[$index]}" slice "$((index + 1))/${#slices[@]}"
+          done
+
+          mapfile -t roots < <(jq -r '.old_root_prefixes[]' "$WORK/plan.json")
+          for index in "${!roots[@]}"; do
+            delete_and_smoke "${roots[$index]}" old-root "$((index + 1))/${#roots[@]}"
+          done
+
+          # Keep the v2 catalog chain until every dependency has been retired,
+          # so an interrupted run retains enough metadata for diagnosis.
+          delete_and_smoke "$(jq -r '.v2_metadata_prefix' "$WORK/plan.json")" \
+            v2-metadata "1/1"
+
+          # Exact postconditions. Unknown top-level namespaces and compact run
+          # evidence are preserved; no planned data subtree, v2 namespace,
+          # slice, or retired root generation may remain.
+          while read -r target; do
+            if prefix_exists "$target"; then
+              echo "::error::A retired prefix remains after cleanup."
+              exit 1
+            fi
+          done < <(jq -r '
+            .staging_data_prefixes[],
+            .construction_data_prefixes[],
+            .slice_prefixes[],
+            .old_root_prefixes[],
+            .v2_metadata_prefix
+          ' "$WORK/plan.json")
+          prefix_exists "$EXPECTED_CURRENT/" || {
+            echo "::error::Current v1 generation is missing."
+            exit 1
+          }
+
+          ./scripts/r2_catalog_fetch.sh "$WORK/catalog-final.json"
+          jq -e --arg current "$EXPECTED_CURRENT" '
+            ([.links[] | select(.rel == "child")] | length) == 1
+            and any(.links[];
+              .rel == "child"
+              and .latest == true
+              and .href == ("./" + $current + "/collection.json"))
+          ' >/dev/null "$WORK/catalog-final.json"
+          ./scripts/smoke_production_pause.sh "$EXPECTED_CURRENT"
+
+          {
+            echo
+            echo "## Live deletion complete"
+            echo
+            echo "Every logical copy was deleted separately, verified absent,"
+            echo "and followed by a production smoke plus a 65-second pause."
+            echo "The v1 catalog contains only $EXPECTED_CURRENT."
+          } >> "$GITHUB_STEP_SUMMARY"
