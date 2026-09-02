@@ -238,6 +238,7 @@ jobs:
           fi
 
           plan_sha256=$(sha256sum "$WORK/plan.json" | cut -d ' ' -f1)
+          echo "Reviewed cleanup plan SHA-256: $plan_sha256"
           if [ "$DRY_RUN" != true ] && [ "$plan_sha256" != "$EXPECTED_PLAN_SHA256" ]; then
             echo "::error::The live inventory differs from the reviewed dry-run plan."
             exit 1
