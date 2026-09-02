@@ -202,8 +202,7 @@ jobs:
               --manifest "$WORK/manifest.json" \
               --v2-catalog "$WORK/v2-catalog.json" \
               --v2-releases-dir "$WORK/v2-releases" \
-              --expected-plan-sha256 "$EXPECTED_PLAN_SHA256" \
-              --now "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              --expected-plan-sha256 "$EXPECTED_PLAN_SHA256"
           else
             cp "$WORK/catalog-live.json" "$WORK/catalog-before.json"
             aws s3 cp "s3://$R2_BUCKET/v2/catalog.json" "$WORK/v2-catalog.json" \
@@ -231,12 +230,10 @@ jobs:
               --v2-catalog "$WORK/v2-catalog.json"
               --v2-releases-dir "$WORK/v2-releases"
               --expected-current "$EXPECTED_CURRENT"
-              --now "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
               --output "$WORK/plan.json"
               --inventory-output "$WORK/inventory.json"
               --catalog-output "$WORK/catalog-pruned.json"
             )
-            [ "$DRY_RUN" = true ] && args+=(--dry-run)
             python3 scripts/decommission_paused_data.py "${args[@]}"
           fi
 

@@ -525,21 +525,6 @@ def test_plan_refuses_unclassified_accumulator_content(which, listing):
         )
 
 
-def test_live_hold_refuses_early_run_without_explicit_waiver():
-    early = decommission.ROLLBACK_HOLD_NOT_BEFORE - timedelta(seconds=1)
-    with pytest.raises(decommission.DecommissionError, match="rollback hold"):
-        decommission.enforce_rollback_hold(
-            now=early, dry_run=False
-        )
-
-    # A no-write plan is allowed; a live run is not.
-    decommission.enforce_rollback_hold(now=early, dry_run=True)
-    decommission.enforce_rollback_hold(
-        now=decommission.ROLLBACK_HOLD_NOT_BEFORE,
-        dry_run=False,
-    )
-
-
 class _FakeCatalogClient:
     def __init__(self, live):
         self.live = live
@@ -795,7 +780,6 @@ def test_paused_resume_requires_a_complete_manifest_and_exact_remainders(tmp_pat
         v2_catalog_path=v2_catalog_path,
         releases_dir=releases_dir,
         expected_plan_sha256=plan_sha,
-        now=decommission.ROLLBACK_HOLD_NOT_BEFORE,
     )
 
     manifest["objects"].pop()
@@ -812,7 +796,6 @@ def test_paused_resume_requires_a_complete_manifest_and_exact_remainders(tmp_pat
             v2_catalog_path=v2_catalog_path,
             releases_dir=releases_dir,
             expected_plan_sha256=plan_sha,
-            now=decommission.ROLLBACK_HOLD_NOT_BEFORE,
         )
 
 
@@ -936,7 +919,6 @@ def test_workflow_is_manual_dry_by_default_and_serializes_catalog_writes():
     assert set(workflow[True]) == {"workflow_dispatch"}
     inputs = workflow[True]["workflow_dispatch"]["inputs"]
     assert inputs["dry_run"]["default"] is True
-    assert "waive_rollback_hold" not in inputs
     assert inputs["confirmation"]["default"] == "PLAN_ONLY"
     assert inputs["expected_plan_sha256"]["default"] == "PLAN_ONLY"
     assert workflow["concurrency"]["group"] == "r2-production-catalog"
@@ -947,6 +929,13 @@ def test_workflow_is_manual_dry_by_default_and_serializes_catalog_writes():
         "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
     )
     assert checkout["with"]["persist-credentials"] is False
+
+
+def test_one_time_cleanup_has_no_calendar_hold_but_recurring_retention_does():
+    one_time = (ROOT / ".github/workflows/decommission-paused-data.yml").read_text()
+    assert "rollback_hold" not in one_time
+    assert "--now" not in one_time
+    assert decommission.V1_PREDECESSOR_OVERLAP == timedelta(days=7)
 
 
 def test_workflow_deletes_sequentially_smokes_and_pauses_without_logging_targets():

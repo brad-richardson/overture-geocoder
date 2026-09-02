@@ -27,16 +27,16 @@ existed. Small credential-free code-preservation checks remain available.
 The monthly v1 production rebuild and code-only cold-start smoke remain enabled.
 
 The deletion-capable `retire-build-scratch.yml` and `r2-cleanup.yml` workflows
-are also disabled for the rollback hold. Do not delete v2 data earlier than
-seven full days after the production 404 deployment is verified. That deploy's
-final live verification run completed at `2026-09-02T14:04:19Z`, so the
-rollback hold ends at `2026-09-09T14:04:19Z`. The cleanup automation has no
-dispatch-time waiver; a decision, merge, or failed deployment does not start or
-shorten the clock. After the hold, inventory and delete only the reviewed
-v2-specific release, slice, and duplicate construction data objects. Preserve
-the implementation and historical evidence required to audit or resume the
-work, including construction finalize markers and family/slice manifests plus
-the global staging inventories, manifests, reports, and completion records.
+are also disabled so they cannot race the reviewed one-time cleanup. Operator
+clarification on 2026-09-02 corrected an earlier policy transcription: the
+seven-day delay applies to future post-schedule v1 generation cleanup, not to
+the already-approved initial paused-v2 and old-v1 retirement. The one-time
+workflow may therefore run immediately after a fresh dry run binds the exact
+inventory. Delete only the reviewed v2-specific release, slice, and duplicate
+construction data objects. Preserve the implementation and historical evidence
+required to audit or resume the work, including construction finalize markers
+and family/slice manifests plus the global staging inventories, manifests,
+reports, and completion records.
 
 The separate move to one v1 working copy was approved on 2026-09-02. The
 retained production generation is `2026-08-25.0`; it has already had the
