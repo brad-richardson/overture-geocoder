@@ -8,9 +8,10 @@ public API reference and `SPEC.md` for architecture details.
 
 ## Features
 
-- Worker routing (`/search`, `/reverse`, `/id/:gers_id`, `/v2/forward`,
-  `/v2/reverse`, `/v2/ids/:id`, `/health`, `/`), with HEAD request
-  support on all endpoints
+- Production routing (`/search`, `/reverse`, `/id/:gers_id`, `/health`, `/`),
+  with HEAD request support on all endpoints
+- Dormant v2 routing retained for isolated preview/smoke use; production `/v2`
+  paths fail closed with 404 before reading v2 data from R2
 - STAC catalog loading from R2 with version fallback
 - Forward shard selection: HEAD + location shards (coordinates or
   CF-IPCountry/CF-Region-Code headers)
@@ -21,7 +22,8 @@ public API reference and `SPEC.md` for architecture details.
   parquet footers and row groups (id-index TTL bounded for patch runs)
 - In-isolate memo caches for opened shards and small JSON
 - Rate limiting (60 req/min per IP) and privacy-safe request timing
-  (`Server-Timing` header; logs carry endpoint class only)
+  (`Server-Timing`; fixed endpoint-class messages are live-tail only because
+  persistent Workers Logs are disabled in production)
 
 ## Development
 
@@ -46,8 +48,7 @@ npx wrangler deploy
 1. R2 bucket named `geocoder-shards`
 2. Shards built and uploaded by the `Rebuild R2 Shards` workflow
    (`scripts/build_shards.py` + `scripts/build_id_index.py`)
-3. STAC catalog at `catalog.json` in bucket root; unified v2 additionally
-   requires an atomic `v2/catalog.json` and its referenced immutable release
+3. STAC catalog at `catalog.json` in the bucket root
 
 ## API
 
@@ -61,13 +62,10 @@ Summary:
   (bbox-based containment over countries, regions, counties, and populated
   localities)
 - `GET /id/:gers_id` — resolve a GERS ID to its bounding box
-- `GET /v2/forward` — unified division/POI text search or structured exact
-  address lookup, with comma-separated `types`
-- `GET /v2/reverse?lat=<f>&lon=<f>` — division reverse geocoding
-- `GET /v2/ids/:id` — release-pinned GERS ID lookup
 - `GET /health` — verifies the catalog loads and a version exists
 
-See `docs/api-v2.md` for the full staged v2 contract and current limitations.
+See `docs/api-v2.md` for the retained v2 contract. Those routes are paused and
+return 404 in production.
 
 ## Architecture
 

@@ -1,6 +1,6 @@
 # Overture Geocoder
 
-An administrative gazetteer and experimental forward/reverse geocoder built on [Overture Maps](https://overturemaps.org/) data, powered by **Rust**, **Cloudflare Workers**, and **R2**. Production coverage is divisions-first. A unified v2 Worker contract for bounded Places/POI search and structured exact-address lookup is implemented but remains unavailable until a verified v2 data release is published; free-text addresses, streets, fuzzy matching, and broad Nominatim compatibility are not yet provided.
+An administrative gazetteer and experimental forward/reverse geocoder built on [Overture Maps](https://overturemaps.org/) data, powered by **Rust**, **Cloudflare Workers**, and **R2**. Production coverage is divisions-first. The supported production API is `/search`, `/reverse`, and `/id/:gers_id`. Development and publication of the unified Places/address v2 API is paused; its code and contract are retained, but production `/v2` paths return 404.
 
 ## Features
 
@@ -16,12 +16,10 @@ An administrative gazetteer and experimental forward/reverse geocoder built on [
 
 Base URL: `https://geocoder.bradr.dev`
 
-The current production endpoints are documented below. The staged unified
-`/v2/forward`, `/v2/reverse`, and `/v2/ids/:id` contract is documented
-in [docs/api-v2.md](docs/api-v2.md). There is no batch endpoint.
-The fixed contracts and remaining executor work for the first undispatched
-global Places/address build are tracked in
-[docs/global-v2-build-readiness.md](docs/global-v2-build-readiness.md).
+The supported production endpoints are documented below. The paused unified
+`/v2/forward`, `/v2/reverse`, and `/v2/ids/:id` contract remains preserved in
+[docs/api-v2.md](docs/api-v2.md), but those routes are not currently served.
+There is no batch endpoint.
 
 ### Forward Geocoding (Search)
 
@@ -117,7 +115,7 @@ curl "https://geocoder.bradr.dev/id/08b2a100-d664-7fff-0200-a44bcea04b76"
 }
 ```
 
-The locator fields are additive. Legacy format-v1 shards continue returning
+The locator fields are additive. Earlier format-v1 shards continue returning
 only `id` and `bbox`. Format v3 stores compact source-file and historical-
 release IDs in each shard and expands them through one content-addressed
 dictionary per shard set. A registry record with no current `path` returns
@@ -143,12 +141,12 @@ graph LR
     R2 --> Parquet[Parquet ID Index]
 ```
 
-## Experimental Places search
+## Paused Places search experiment
 
-The completed architecture spike selects a compact, range-readable spatial
-binary plus a small packed global head as the next Places/POI direction. It
-establishes a workable storage and release-build shape, but not production
-relevance or a finished Worker reader. See the
+The completed architecture spike selected a compact, range-readable spatial
+binary plus a small packed global head for Places/POI search. The implementation
+and evidence remain in the repository, but further processing and production
+serving are paused pending a concrete downstream owner and migration plan. See the
 [Places search spike decision](docs/places-search-spike.md) for the experiments,
 measured tradeoffs, rejected designs, and next implementation gate.
 

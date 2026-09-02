@@ -1,5 +1,52 @@
 # construction-v1: current state
 
+## Production direction: v2 paused — 2026-09-02
+
+This decision supersedes every later "current milestone" or "next action"
+statement in this document. The `/search`, `/reverse`, and `/id/:gers_id`
+endpoints are the supported production API; do not describe them collectively
+as legacy. Construction-v1 is an implementation-generation name, not the name
+of that production API.
+
+Further Places/POI and address v2 processing, preview, publication, and serving
+are paused. Retain the implementation, tests, frozen contracts, and historical
+evidence so the work can be resumed if a concrete downstream owner and
+migration plan emerge. Production is configured fail-closed: `/v2` and all
+descendant paths return 404 before the Worker reads any v2 catalog or family
+object, and the root discovery document advertises only the supported
+production endpoints.
+
+The v2 production, build, scale, and evidence workflows were disabled in GitHub
+on 2026-09-02. This includes `construction-v1.yml`, `reverse-v2.yml`,
+`promote-v2-release.yml`, `preview-v2-candidate.yml`,
+`build-places-region.yml`, `rehearse-address-r2-map-reduce.yml`,
+`release-slice-families.yml`, `usa-scale-signal.yml`,
+`hosted-rowgroup-data-spike.yml`, and `reverse-address-probe.yml`. They were
+manual-only at the time of the decision; no recurring v2 build schedule
+existed. Small credential-free code-preservation checks remain available.
+The monthly v1 production rebuild and code-only cold-start smoke remain enabled.
+
+The deletion-capable `retire-build-scratch.yml` and `r2-cleanup.yml` workflows
+are also disabled for the rollback hold. Do not delete v2 data earlier than
+seven full days after the production 404 deployment is verified. Record that
+deployment time and exact not-before timestamp only after verification; a
+decision, merge, or failed deployment does not start the clock. After the hold,
+inventory and delete only the reviewed v2-specific release, slice,
+construction, and staging objects; preserve all v1 production data and evidence
+required to audit the old work. Moving v1 to one current working copy is a
+separate retention change: keep the newly published generation and its
+predecessor through a verified roughly seven-day overlap, then prune the
+predecessor. That policy needs its own reviewed automation before any deletion.
+
+No additional construction-v1 execution is an active milestone unless this
+section is explicitly revised.
+
+## Historical construction snapshot (frozen 2026-08-07)
+
+Everything below preserves the prior execution record. Present-tense words such
+as "current", "next", "live", and "pending" are historical as of that date and
+do not override the 2026-09-02 production direction above.
+
 Last updated 2026-08-07 after the Worker apostrophe fix went live with a
 zero-flip paired gate and a measured zero yield (see below), the PENDING
 phrase-admission sizing join was computed and §3.2 was closed on it, the apostrophe-folding locus was settled
