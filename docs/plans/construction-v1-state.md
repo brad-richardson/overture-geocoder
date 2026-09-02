@@ -28,15 +28,59 @@ The monthly v1 production rebuild and code-only cold-start smoke remain enabled.
 
 The deletion-capable `retire-build-scratch.yml` and `r2-cleanup.yml` workflows
 are also disabled for the rollback hold. Do not delete v2 data earlier than
-seven full days after the production 404 deployment is verified. Record that
-deployment time and exact not-before timestamp only after verification; a
-decision, merge, or failed deployment does not start the clock. After the hold,
-inventory and delete only the reviewed v2-specific release, slice,
-construction, and staging objects; preserve all v1 production data and evidence
-required to audit the old work. Moving v1 to one current working copy is a
-separate retention change: keep the newly published generation and its
-predecessor through a verified roughly seven-day overlap, then prune the
-predecessor. That policy needs its own reviewed automation before any deletion.
+seven full days after the production 404 deployment is verified. That deploy's
+final live verification run completed at `2026-09-02T14:04:19Z`, so the
+rollback hold ends at `2026-09-09T14:04:19Z`. The cleanup automation has no
+dispatch-time waiver; a decision, merge, or failed deployment does not start or
+shorten the clock. After the hold, inventory and delete only the reviewed
+v2-specific release, slice, and duplicate construction data objects. Preserve
+the implementation and historical evidence required to audit or resume the
+work, including construction finalize markers and family/slice manifests plus
+the global staging inventories, manifests, reports, and completion records.
+
+The separate move to one v1 working copy was approved on 2026-09-02. The
+retained production generation is `2026-08-25.0`; it has already had the
+roughly seven-day predecessor overlap required by the prior retention policy.
+The one-time `decommission-paused-data.yml` workflow performs the initial
+paused-v2 and old-v1 cleanup. It fails closed on a changed catalog, a newer or
+unclassified root generation, an unverified v2 release chain, an enabled or
+active producer, enabled Worker logging, or an exact recursive object inventory
+that differs from a fresh dry-run fingerprint. Before its first delete it
+durably preserves the private deletion inventory plus the v1 catalog and all
+SHA-verified v2 catalog/release documents under `backups/`. Construction and
+global staging namespaces are classified object-by-object: only recognized
+large `objects/`, `positions/`, or `records/` data subtrees are deletable, while
+the compact run evidence remains in place and is checked by exact key, size,
+and ETag after the data deletion. Before any destructive step, the workflow
+writes an
+immutable pending transaction containing the reviewed plan, full private
+inventory, and source metadata; its final content-identity manifest is the
+resume commit marker. It then compare-and-swap publishes the
+single-current v1 catalog, passes the production smoke, waits out both catalog
+caches, and only then removes one logical data copy at a time. Each prefix is
+verified absent and followed by the complete supported-v1/v2-404 production
+smoke plus a pause. If recursive deletion is interrupted, a retry named by the
+same reviewed plan SHA loads the durable transaction and accepts only an exact
+key/size/ETag subset of the original target inventory; no newly appeared or
+changed object can enter the resumed delete.
+
+After the one-time cleanup removes `v2/`, `retain-one-v1-copy.yml` enforces the
+same policy for future monthly v1 rebuilds. Its daily pass is serialized with
+the rebuild catalog writer, refuses to act whenever a v2 catalog exists, and
+does not prune until `catalog.json` has been unchanged for seven full days. It
+also binds and backs up an exact private recursive inventory and publishes an
+immutable per-current pending pointer. It compare-and-swap prunes the catalog,
+smokes, and waits out both caches before deleting predecessor copies serially
+with a production smoke and pause after each. The daily pass automatically
+resumes an unfinished pointer, permitting only exact remaining subsets of its
+reviewed inventory, and writes an immutable completion marker at the end. The
+current v1 prefix, unrelated top-level namespaces, retained
+construction/staging evidence, source code, tests, contracts, and durable
+evidence are not deletion targets.
+
+Workers Logs, traces, Logpush, and tail consumers were confirmed disabled on
+2026-09-02. No additional logging switch is required; the decommission workflow
+rechecks that state before planning or deleting.
 
 No additional construction-v1 execution is an active milestone unless this
 section is explicitly revised.
