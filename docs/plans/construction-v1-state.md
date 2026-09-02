@@ -31,25 +31,26 @@ are also disabled so they cannot race the reviewed one-time cleanup. Operator
 clarification on 2026-09-02 corrected an earlier policy transcription: the
 seven-day delay applies to future post-schedule v1 generation cleanup, not to
 the already-approved initial paused-v2 and old-v1 retirement. The one-time
-workflow may therefore run immediately after a fresh dry run binds the exact
-inventory. Delete only the reviewed v2-specific release, slice, and duplicate
-construction data objects. Preserve the implementation and historical evidence
-required to audit or resume the work, including construction finalize markers
-and family/slice manifests plus the global staging inventories, manifests,
-reports, and completion records.
+workflow was therefore allowed to run immediately after a fresh dry run bound
+the exact inventory. Delete only the reviewed v2-specific release, slice, and
+duplicate construction data objects. Preserve the implementation and
+historical evidence required to audit or resume the work, including construction
+finalize markers and family/slice manifests plus the global staging inventories,
+manifests, reports, and completion records.
 
 The separate move to one v1 working copy was approved on 2026-09-02. The
 retained production generation is `2026-08-25.0`; it has already had the
 roughly seven-day predecessor overlap required by the prior retention policy.
-The one-time `decommission-paused-data.yml` workflow performs the initial
-paused-v2 and old-v1 cleanup. It fails closed on a changed catalog, a newer or
-unclassified root generation, an unverified v2 release chain, an enabled or
-active producer, enabled Worker logging, or an exact recursive object inventory
-that differs from a fresh dry-run fingerprint. Before its first delete it
-durably preserves the private deletion inventory plus the v1 catalog and all
-SHA-verified v2 catalog/release documents under `backups/`. Construction and
-global staging namespaces are classified object-by-object: only recognized
-large `objects/`, `positions/`, or `records/` data subtrees are deletable, while
+The one-time `decommission-paused-data.yml` workflow performed the initial
+paused-v2 and old-v1 cleanup. It was designed to fail closed on a changed
+catalog, a newer or unclassified root generation, an unverified v2 release
+chain, an enabled or active producer, enabled Worker logging, or an exact
+recursive object inventory that differed from a fresh dry-run fingerprint.
+Before its first delete it durably preserved the private deletion inventory,
+the v1 catalog, and all SHA-verified v2 catalog/release documents under
+`backups/`. Construction and global staging namespaces are classified
+object-by-object: only recognized large `objects/`, `positions/`, or `records/`
+data subtrees are deletable, while
 the compact run evidence remains in place and is checked by exact key, size,
 and ETag after the data deletion. Before any destructive step, the workflow
 writes an
@@ -64,10 +65,29 @@ same reviewed plan SHA loads the durable transaction and accepts only an exact
 key/size/ETag subset of the original target inventory; no newly appeared or
 changed object can enter the resumed delete.
 
-After the one-time cleanup removes `v2/`, `retain-one-v1-copy.yml` enforces the
-same policy for future monthly v1 rebuilds. Its daily pass is serialized with
-the rebuild catalog writer, refuses to act whenever a v2 catalog exists, and
-does not prune until `catalog.json` has been unchanged for seven full days. It
+That one-time cleanup completed successfully on 2026-09-02 in
+[`33669497022`](https://github.com/brad-richardson/overture-geocoder/actions/runs/33669497022)
+after the exact-inventory dry run
+[`33669039316`](https://github.com/brad-richardson/overture-geocoder/actions/runs/33669039316).
+It retired eight construction data subtrees, six v2 slice copies, six old v1
+root generations, and the v2 metadata namespace; no global staging data subtree
+was classified for deletion. Eleven evidence objects were durably backed up,
+and the retained construction/staging evidence was reverified before dependent
+copies were removed. Every one of the 21 logical deletion targets was verified
+against the reviewed inventory, deleted and verified absent, followed by a
+passing production smoke and 65-second pause. The final catalog contains only
+`2026-08-25.0`; the workflow's final smoke and an independent post-run smoke
+both passed. Cloudflare recorded 334,147 successful `DeleteObject` operations
+and no non-successful delete operations during the run. Workers Logs, traces,
+Logpush, and tail consumers remained disabled. Cloudflare's immediate storage
+time series lagged the operation, so use the exact-prefix postconditions and
+the durable transaction evidence—not a same-minute aggregate storage sample—as
+the completion record.
+
+Now that the one-time cleanup removed `v2/`, `retain-one-v1-copy.yml` enforces
+the same policy for future monthly v1 rebuilds. Its daily pass is serialized
+with the rebuild catalog writer, refuses to act whenever a v2 catalog exists,
+and does not prune until `catalog.json` has been unchanged for seven full days. It
 also binds and backs up an exact private recursive inventory and publishes an
 immutable per-current pending pointer. It compare-and-swap prunes the catalog,
 smokes, and waits out both caches before deleting predecessor copies serially
