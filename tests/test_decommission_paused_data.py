@@ -1005,6 +1005,7 @@ def test_workflow_preflight_checks_paused_producers_and_private_v2_chain():
     assert "--inventory-output" in plan
     assert "RUNNER_TEMP" in plan
     assert "sha256sum" in plan
+    assert "Reviewed cleanup plan SHA-256" in plan
     assert "EXPECTED_PLAN_SHA256" in plan
     assert "differs from the reviewed dry-run plan" in plan
     assert "upload-artifact" not in json.dumps(workflow)
