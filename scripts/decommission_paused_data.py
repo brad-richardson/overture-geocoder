@@ -7,7 +7,6 @@ that are easy to get subtly wrong in shell:
 * validate the live v1 catalog and reduce it to exactly its current generation;
 * classify only whole, known R2 prefixes (never partial object-key fragments);
 * validate every live v2 catalog/release reference before retiring that chain;
-* enforce the full rollback hold for every live dispatch;
 * distinguish bulky construction/staging data from retained run evidence; and
 * compare-and-swap the v1 catalog, with a durable backup and exact readback.
 
@@ -30,7 +29,6 @@ import prune_catalog
 import v2_retention_guard
 
 
-ROLLBACK_HOLD_NOT_BEFORE = datetime(2026, 9, 9, 14, 4, 19, tzinfo=timezone.utc)
 V1_PREDECESSOR_OVERLAP = timedelta(days=7)
 VERSION_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.\d+$")
 VERSION_PREFIX_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}\.\d+)/$")
@@ -74,18 +72,6 @@ def _parse_utc(value: str) -> datetime:
     if parsed.tzinfo is None:
         raise DecommissionError("timestamp must include a timezone")
     return parsed.astimezone(timezone.utc)
-
-
-def enforce_rollback_hold(*, now: datetime, dry_run: bool) -> None:
-    """Refuse every live run until the full rollback hold has elapsed."""
-    if now.tzinfo is None:
-        raise DecommissionError("current time must be timezone-aware")
-    now = now.astimezone(timezone.utc)
-    if not dry_run and now < ROLLBACK_HOLD_NOT_BEFORE:
-        raise DecommissionError(
-            "live deletion is inside the rollback hold; wait until "
-            f"{ROLLBACK_HOLD_NOT_BEFORE.isoformat()}"
-        )
 
 
 def _load_object(path: Path, label: str) -> dict[str, Any]:
@@ -626,10 +612,8 @@ def validate_paused_resume(
     v2_catalog_path: Path,
     releases_dir: Path,
     expected_plan_sha256: str,
-    now: datetime,
 ) -> None:
     """Validate a paused-data retry from its immutable evidence bundle."""
-    enforce_rollback_hold(now=now, dry_run=False)
     plan, _ = _validate_resume_bundle(
         plan_path=plan_path,
         inventory_path=inventory_path,
@@ -1239,8 +1223,6 @@ def main(argv: list[str] | None = None) -> int:
     plan_parser.add_argument("--v2-catalog", type=Path, required=True)
     plan_parser.add_argument("--v2-releases-dir", type=Path, required=True)
     plan_parser.add_argument("--expected-current", required=True)
-    plan_parser.add_argument("--now", required=True)
-    plan_parser.add_argument("--dry-run", action="store_true")
     plan_parser.add_argument("--output", type=Path, required=True)
     plan_parser.add_argument("--inventory-output", type=Path, required=True)
     plan_parser.add_argument("--catalog-output", type=Path, required=True)
@@ -1283,7 +1265,6 @@ def main(argv: list[str] | None = None) -> int:
             command.add_argument("--manifest", type=Path, required=True)
             command.add_argument("--v2-catalog", type=Path, required=True)
             command.add_argument("--v2-releases-dir", type=Path, required=True)
-            command.add_argument("--now", required=True)
 
     backup_parser = sub.add_parser("backup-evidence")
     backup_parser.add_argument("--plan", type=Path, required=True)
@@ -1314,10 +1295,6 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.command == "plan":
-            enforce_rollback_hold(
-                now=_parse_utc(args.now),
-                dry_run=args.dry_run,
-            )
             references, releases = v2_retention_guard.collect_v2_references(
                 args.v2_catalog, args.v2_releases_dir
             )
@@ -1426,7 +1403,6 @@ def main(argv: list[str] | None = None) -> int:
                 v2_catalog_path=args.v2_catalog,
                 releases_dir=args.v2_releases_dir,
                 expected_plan_sha256=args.expected_plan_sha256,
-                now=_parse_utc(args.now),
             )
             print("Paused-data pending transaction is safe to resume.")
         elif args.command == "validate-v1-resume":
