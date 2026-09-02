@@ -11,8 +11,9 @@ on:
 env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-  # Pinned so the deploy is reproducible and the build cache key is meaningful.
-  WORKER_BUILD_VERSION: "0.8.5"
+  # worker-build 0.8.5 requires worker >=0.8.5; this Worker is intentionally on
+  # worker 0.7.x. Pin the newest compatible 0.7 release exactly.
+  WORKER_BUILD_VERSION: "0.7.5"
 
 jobs:
   build-and-deploy:
@@ -75,15 +76,15 @@ jobs:
           key: worker-build-${{ runner.os }}-${{ env.WORKER_BUILD_VERSION }}
 
       - name: Install worker-build
-        # Pinned because an unpinned `cargo install` broke a preview build
-        # once already (#243). The pin is WORKER_BUILD_VERSION = 0.8.5, which
-        # is what the 2026-08-04 production deploy actually installed and
-        # built successfully against `worker = "0.7"` -- verified from that
-        # run's log. Do not "restore" a '^0.7' pin on the theory that
-        # worker-build 0.8 requires worker >=0.8: that would move the
-        # production deploy off the only combination proven to work here.
+        # Pinned because an unpinned `cargo install` broke a preview build once
+        # already (#243). A later 0.8.5 pin broke production for the same
+        # compatibility reason: worker-build now validates the worker crate's
+        # minimum version before compiling.
         if: steps.cache-worker-build.outputs.cache-hit != 'true'
         run: cargo install worker-build --locked --version "${WORKER_BUILD_VERSION}"
+
+      - name: Verify worker-build version
+        run: test "$(worker-build --version)" = "${WORKER_BUILD_VERSION}"
 
       - name: Build and Deploy Worker
         working-directory: crates/geocoder-worker
@@ -112,8 +113,8 @@ jobs:
             echo "  OK   / (15 consecutive startup probes)"
           }
 
-          # One pass of the four functional checks against the live worker.
-          # Returns 0 only when every check passes.
+          # One pass of the four supported-v1 functional checks against the live
+          # worker. Returns 0 only when every check passes.
           run_checks() {
             local health health_version search reverse data_version gers_id id_json
 
@@ -148,7 +149,7 @@ jobs:
             fi
 
             if [ "$data_version" = "2026-07-02.3" ]; then
-              # This legacy shard predates locality ingestion. Keep the
+              # This older shard predates locality ingestion. Keep the
               # exception exact and still require the expected US hierarchy;
               # unrelated country/county fallbacks must fail the deployment.
               echo "$reverse" | jq -e '
@@ -161,10 +162,10 @@ jobs:
                   and (.name // "" | test("United States|(^|, )US$|^USA$"; "i"))
                 )
               ' >/dev/null || {
-                echo "  FAIL /reverse: expected legacy Suffolk county with country hierarchy for $data_version -> $reverse"
+                echo "  FAIL /reverse: expected older Suffolk county with country hierarchy for $data_version -> $reverse"
                 return 1
               }
-              echo "  OK   /reverse (legacy Suffolk county; data $data_version)"
+              echo "  OK   /reverse (older Suffolk county; data $data_version)"
             else
               echo "$reverse" | jq -e '
                 (.subtype == "locality" or .hierarchy[0].subtype == "locality")
@@ -205,10 +206,89 @@ jobs:
             return 0
           }
 
+          # Validate both public discovery and the fail-closed pause. Keep this
+          # separate from the v1 propagation loop so retries stay below the
+          # Worker's 60 req/min rate limit.
+          run_v2_pause_checks() {
+            local root path status v2_body
+
+            root=$(curl -fsS --max-time 15 "$BASE_URL/") || {
+              echo "  FAIL / discovery: request error"; return 1; }
+            echo "$root" | jq -e '
+              .endpoints == ["/search", "/reverse", "/id/:id"]
+            ' >/dev/null || {
+              echo "  FAIL / discovery: expected only supported v1 endpoints -> $root"
+              return 1
+            }
+            echo "  OK   / discovery (v1 only)"
+
+            v2_body="$RUNNER_TEMP/v2-response-body"
+            for path in \
+              "/v2" \
+              "/v2/forward?q=berlin" \
+              "/v2/reverse?lat=42.3601&lon=-71.0589" \
+              "/v2/ids/00000000-0000-4000-8000-000000000000"
+            do
+              status=$(curl -sS --max-time 15 -o "$v2_body" -w '%{http_code}' "$BASE_URL$path") || {
+                echo "  FAIL $path: request error"; return 1; }
+              if [ "$status" != "404" ]; then
+                echo "  FAIL $path: expected 404, got $status -> $(<"$v2_body")"
+                return 1
+              fi
+              echo "  OK   $path (404)"
+            done
+
+            status=$(curl -sS --max-time 15 --head -o "$v2_body" \
+              -w '%{http_code}' "$BASE_URL/v2/forward") || {
+                echo "  FAIL HEAD /v2/forward: request error"; return 1; }
+            if [ "$status" != "404" ]; then
+              echo "  FAIL HEAD /v2/forward: expected 404, got $status"
+              return 1
+            fi
+            echo "  OK   HEAD /v2/forward (404)"
+
+            status=$(curl -sS --max-time 15 -X OPTIONS -o "$v2_body" \
+              -w '%{http_code}' "$BASE_URL/v2/forward") || {
+                echo "  FAIL OPTIONS /v2/forward: request error"; return 1; }
+            if [ "$status" != "404" ]; then
+              echo "  FAIL OPTIONS /v2/forward: expected 404, got $status"
+              return 1
+            fi
+            echo "  OK   OPTIONS /v2/forward (404)"
+          }
+
           # Retry a few times so brief deploy propagation doesn't fail the run.
+          v1_ready=false
+          v1_attempts=0
           for attempt in 1 2 3; do
-            echo "Post-deploy checks, attempt $attempt/3:"
+            v1_attempts=$attempt
+            echo "Post-deploy v1 checks, attempt $attempt/3:"
             if run_startup_checks && run_checks; then
+              v1_ready=true
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "Retrying in 10s..."
+              sleep 10
+            fi
+          done
+
+          if [ "$v1_ready" != "true" ]; then
+            echo "Post-deploy v1 checks failed after 3 attempts." >&2
+            exit 1
+          fi
+
+          # Three complete v1 attempts consume 57 of the 60 requests allowed
+          # in a rolling minute. Let that window clear before the seven v2-pause
+          # requests; attempts one and two leave enough budget without waiting.
+          if [ "$v1_attempts" -eq 3 ]; then
+            echo "Waiting for the verification rate-limit window to clear..."
+            sleep 61
+          fi
+
+          for attempt in 1 2 3; do
+            echo "Post-deploy v2-pause checks, attempt $attempt/3:"
+            if run_v2_pause_checks; then
               echo "All post-deploy checks passed."
               exit 0
             fi
@@ -218,5 +298,5 @@ jobs:
             fi
           done
 
-          echo "Post-deploy checks failed after 3 attempts." >&2
+          echo "Post-deploy v2-pause checks failed after 3 attempts." >&2
           exit 1

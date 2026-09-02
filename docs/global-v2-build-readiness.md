@@ -1,8 +1,15 @@
 # Global v2 Places + address build readiness
 
-Status: frozen request and strict map primitives implemented; fan-in executor
-not yet dispatch-ready.
-No global shard build or catalog publication has been started.
+> **Historical document — v2 paused 2026-09-02.** This was a pre-execution
+> readiness snapshot. Later global builds and publications did occur, so its
+> status and next-action statements are not current. V2 processing and serving
+> are now paused with the code and evidence retained. See
+> [the canonical construction state](plans/construction-v1-state.md) for the
+> operational decision.
+
+Status at the time of writing: frozen request and strict map primitives
+implemented; fan-in executor not yet dispatch-ready. At that time, no global
+shard build or catalog publication had been started.
 
 ## Decisions now fixed
 

@@ -3,7 +3,10 @@ main = "build/worker/shim.mjs"
 compatibility_date = "2026-05-01"
 
 [observability]
-enabled = true
+# Workers Logs enriches custom events with request metadata, including URLs.
+# Disable persistence so search text, coordinates, and ID path parameters are
+# not retained. Built-in Worker request/error analytics remain available.
+enabled = false
 
 [build]
 # Install ONLY when the tool is missing. `cargo install` hard-errors with
@@ -16,9 +19,10 @@ enabled = true
 #
 # `A || B && C` is `(A || B) && C`: the build runs when the tool was already
 # there or was just installed, and is skipped -- non-zero -- when the install
-# itself fails. The `^0.7` fallback is unchanged, so a bare environment behaves
-# exactly as before; the deploy workflow's pinned 0.8.5 now survives its cache.
-command = "command -v worker-build >/dev/null 2>&1 || cargo install -q worker-build@^0.7 && worker-build --release"
+# itself fails. Keep this exact fallback synchronized with the deploy workflow:
+# worker-build 0.8.5 rejects this crate's worker 0.7.x dependency, while 0.7.5
+# declares worker >=0.7.0 and builds it.
+command = "command -v worker-build >/dev/null 2>&1 || cargo install -q --locked worker-build@0.7.5 && worker-build --release"
 
 # CPU limit to prevent runaway requests
 [limits]
@@ -42,3 +46,4 @@ simple = { limit = 60, period = 60 }
 
 [vars]
 ENVIRONMENT = "production"
+ENABLE_V2_SERVING = "false"

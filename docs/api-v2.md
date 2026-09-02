@@ -1,8 +1,13 @@
 # Unified v2 API contract
 
-Status: implemented Worker contract; not discoverable until a verified
-`v2/catalog.json` is published. Preparing or deploying the Worker does not build
-shards or publish a v2 release.
+Status: **paused as of 2026-09-02**. Production returns 404 for `/v2` and every
+path below it before reading a v2 catalog or family object from R2. The Worker
+implementation, build tooling, and this contract are retained, but no v2
+availability or resumption date is promised. The supported production API is
+currently `/search`, `/reverse`, and `/id/:gers_id`.
+
+The remainder of this document records the dormant contract so work can resume
+without reconstructing it. It does not describe an available public service.
 
 V2 consolidates division and Places text search, structured exact-address
 lookup, reverse geocoding, and GERS ID lookup under a small
@@ -124,13 +129,16 @@ core release selected by v2. The successful response matches the existing
 the atomic v2 `data_version` object. A syntactically invalid ID returns 400
 without an R2 shard read; a valid absent ID returns 404.
 
-## Legacy and availability behavior
+## Production and availability behavior
 
 The existing `/search`, `/reverse`, and `/id/:gers_id` endpoints remain in
-place for current clients and continue using the v1 catalog/fallback behavior.
+place for current clients and continue using the production catalog/fallback
+behavior.
 The former `/address`, `/__address-page-spike`, and
 `/__places-page-spike` endpoints are removed.
 
-If no v2 catalog/release has been published, v2 endpoints return a structured
-503 `release_unavailable`. A missing explicitly requested family also returns
-503. Invalid parameter combinations return 400.
+While the production pause is configured, every `/v2` path returns 404
+regardless of whether an old v2 catalog remains in storage. If the dormant
+implementation is explicitly re-enabled, a missing v2 catalog/release returns
+a structured 503 `release_unavailable`; a missing explicitly requested family
+also returns 503, and invalid parameter combinations return 400.

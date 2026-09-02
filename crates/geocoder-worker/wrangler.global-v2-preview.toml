@@ -18,6 +18,7 @@ bucket_name = "geocoder-shards"
 
 [vars]
 ENVIRONMENT = "preview"
+ENABLE_V2_SERVING = "true"
 V2_CATALOG_KEY_OVERRIDE = "smoketest-v2/placeholder/catalog.json"
 EXPECTED_V2_CATALOG_KEY = "smoketest-v2/placeholder/catalog.json"
 EXPECTED_GEOCODER_BUILD = "1970-01-01.0"
